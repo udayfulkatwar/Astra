@@ -3,7 +3,8 @@
  * safety loop.
  *
  * Startup (ARCHITECTURE §18): config (already validated) → DB → migrations → config version →
- * trading mode → kill switches → heartbeats → paper state → reconciliation → monitors.
+ * trading mode → kill switches → heartbeats → paper state → reconciliation → market-data warm-up
+ * (bars from the database) → market-data adapters → monitors.
  * Until that completes, the effective mode is HALTED and the kill-switch registry is unloaded,
  * so every decision is rejected. If the database is unavailable, initialization is retried.
  */
@@ -18,11 +19,17 @@ import {
   ExecutionRepository,
   HeartbeatRepository,
   KillSwitchRepository,
+  MarketBarRepository,
   PaperBrokerStateRepository,
   SystemStateRepository,
   migrate,
   type Sql,
 } from '@astra/db';
+import {
+  MarketDataService,
+  type MarketDataAdapter,
+  type SimulationAdapter,
+} from '@astra/market-data';
 import type { Logger } from 'pino';
 import { AccountService } from './account-service';
 import { CalendarService } from './calendar';
@@ -31,9 +38,9 @@ import { EventBus } from './event-bus';
 import { ExecutionService } from './execution-service';
 import { HealthService } from './health-service';
 import { KillSwitchService } from './kill-switch-service';
-import { MarketDataService } from './market-data';
+import { BarPersister } from './market-data';
 import { ModeService } from './mode-service';
-import { SimulationFeed } from './simulation';
+import { createSimulation } from './simulation';
 
 export interface RuntimeOptions {
   readonly config: AstraConfig;
@@ -67,17 +74,24 @@ export class AstraRuntime {
     execution: ExecutionRepository;
     accounts: AccountRepository;
     paperState: PaperBrokerStateRepository;
+    marketBars: MarketBarRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
   readonly killSwitches: KillSwitchService;
   readonly health: HealthService;
   readonly market: MarketDataService;
+  /** Completed bars → database (batched by the safety loop). */
+  readonly barPersister: BarPersister;
+  /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
+  readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
-  readonly simulation: SimulationFeed | null;
+  readonly simulation: SimulationAdapter | null;
+  /** Quote sources started after initialization (simulation now; real providers later). */
+  readonly marketAdapters: readonly MarketDataAdapter[];
 
   private initialized = false;
   private initError: string | null = null;
@@ -104,20 +118,39 @@ export class AstraRuntime {
       execution: new ExecutionRepository(sql),
       accounts: new AccountRepository(sql),
       paperState: new PaperBrokerStateRepository(sql),
+      marketBars: new MarketBarRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
     this.killSwitches = new KillSwitchService(this.repos.killSwitches, clock, this.events);
-    // `execution` is assigned below; the health probe reads adapters lazily.
+    const traded = new Set<string>();
+    for (const a of config.accounts.values()) {
+      if (a.status === 'ACTIVE') for (const s of a.instruments) traded.add(s);
+    }
+    this.tradedSymbols = [...traded].sort();
+    // `execution` and `market` are assigned below; the health probe reads them lazily.
     this.health = new HealthService(clock, config.system.health.staleAfterMs, {
       sql,
       heartbeats: this.repos.heartbeats,
       adapters: () => [...this.execution.adapters.values()],
+      marketData: () => this.market.feedHealth(this.tradedSymbols),
     });
-    this.market = new MarketDataService(
-      (s) => config.instruments.has(s),
-      (source) => this.health.report('MARKET_DATA', 'ONLINE', `quotes flowing (${source})`),
-    );
+    this.barPersister = new BarPersister(this.repos.marketBars, log);
+    const freshness = config.system.decision.freshness;
+    const md = config.system.marketData;
+    this.market = new MarketDataService({
+      clock,
+      instruments: config.instruments,
+      sessions: config.system.sessions,
+      freshness: { maxAgeMs: freshness.quoteMaxAgeMs, maxFutureSkewMs: freshness.maxFutureSkewMs },
+      suspectCooldownMs: md?.suspectCooldownMs,
+      maxBarsPerSeries: md?.maxBarsPerSeries,
+      barCloseGraceMs: md?.barCloseGraceMs,
+      onBars: (bars) => this.barPersister.enqueue(bars),
+      onRejected: (source, reason) => log.warn({ source, reason }, 'market-data quote rejected'),
+      onListenerError: (err) =>
+        log.error({ err: errorMessage(err) }, 'market-data quote listener failed'),
+    });
     this.calendar = new CalendarService(() =>
       this.health.report('CALENDAR', 'ONLINE', 'calendar window received'),
     );
@@ -160,16 +193,9 @@ export class AstraRuntime {
       events: this.events,
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
     });
-    this.simulation =
-      opts.simulation && config.system.simulation
-        ? new SimulationFeed(
-            config.system.simulation,
-            (s) => config.instruments.get(s)?.tickSize,
-            this.market,
-            this.calendar,
-            clock,
-          )
-        : null;
+    this.simulation = opts.simulation ? createSimulation(config, this.calendar, clock) : null;
+    // Real provider adapters (owner's platform, Phase 2 remainder) are registered here.
+    this.marketAdapters = this.simulation ? [this.simulation] : [];
   }
 
   isInitialized(): boolean {
@@ -213,6 +239,8 @@ export class AstraRuntime {
     await this.health.seedFromHeartbeats();
     await this.execution.restorePaperAccounts();
     await this.execution.reconcileAll();
+    const warmed = await this.market.warmUp(this.repos.marketBars);
+    this.log.info({ bars: warmed }, 'market-data bars loaded from the database');
     this.initialized = true;
     this.initError = null;
     await this.events.emit({
@@ -223,7 +251,7 @@ export class AstraRuntime {
       data: { configHash: config.hash, warnings: config.warnings },
     });
     for (const w of config.warnings) this.log.warn({ config: true }, w);
-    this.simulation?.start();
+    await this.startMarketAdapters();
     if (this.opts.startLoops) {
       await this.cycle();
       this.loopTimer = setInterval(
@@ -234,11 +262,29 @@ export class AstraRuntime {
     }
   }
 
+  /** A failing adapter leaves its instruments without quotes → MARKET_DATA not ONLINE → no trades. */
+  private async startMarketAdapters(): Promise<void> {
+    for (const adapter of this.marketAdapters) {
+      try {
+        await adapter.start(this.market.sink(adapter));
+        this.log.info({ adapter: adapter.id, kind: adapter.kind }, 'market-data adapter started');
+      } catch (err) {
+        this.log.error(
+          { adapter: adapter.id, err: errorMessage(err) },
+          'market-data adapter failed to start',
+        );
+      }
+    }
+  }
+
   /** One pass of the in-core safety loop. Never overlaps with itself. */
   async cycle(): Promise<void> {
     if (this.cycleRunning || !this.initialized) return;
     this.cycleRunning = true;
     try {
+      this.market.advance();
+      // Bar persistence never delays the safety checks below (flush logs, never rejects).
+      void this.barPersister.flush();
       await this.health.probe();
       await this.accounts.syncAll();
       await this.killSwitches.autoClearDue();
@@ -259,7 +305,14 @@ export class AstraRuntime {
     this.stopped = true;
     clearTimeout(this.initTimer);
     clearInterval(this.loopTimer);
-    this.simulation?.stop();
+    for (const adapter of this.marketAdapters) {
+      try {
+        await adapter.stop();
+      } catch (err) {
+        this.log.error({ adapter: adapter.id, err: errorMessage(err) }, 'adapter stop failed');
+      }
+    }
+    await this.barPersister.flush();
     await this.execution.flush();
   }
 }

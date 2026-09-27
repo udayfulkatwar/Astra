@@ -55,7 +55,7 @@ service without rewriting it.
 
 | Kind         | Meaning                                               | Example                                        | Produced by               |
 | ------------ | ----------------------------------------------------- | ---------------------------------------------- | ------------------------- |
-| **DATA**     | An observed fact with a source and timestamp          | quote, headline, CPI actual                    | adapters                  |
+| **DATA**     | An observed fact with a source and timestamp          | quote, OHLC bar, headline, CPI actual          | adapters                  |
 | **CONTEXT**  | An interpretation of data                             | "headline is hawkish for USD", event risk HIGH | news/sentiment/AI engines |
 | **SIGNAL**   | A strategy's claim that a setup exists                | "US100 bullish BOS + retest, QUALIFIED"        | strategy engine           |
 | **DECISION** | A deterministic, audited verdict on a candidate trade | APPROVED qty=2 / REJECTED + reasons            | decision gate             |
@@ -81,6 +81,27 @@ candidate (SIGNAL + CONTEXT refs)
 
 AI output enters only as CONTEXT inside the snapshot. The gate is a logical AND: AI can make a
 decision _more_ restrictive, never less. There is no code path from an AI response to an order.
+
+### 1.3 The market-data path (ADR-0009)
+
+```text
+provider adapter (provider symbol + provider timestamp) ─┐
+HTTP ingestion from n8n (sourceKind MANUAL) ─────────────┤
+SimulationAdapter (sourceKind SIMULATED, paper only) ────┘
+   → MarketDataService: symbol mapping → schema → ordering → quality (jump → SUSPECT)
+        ├→ latest quote (Observed; INVALID while suspect) → decision gate `data.quote`
+        ├→ bar aggregator M1…D1 → completed bars → market_bars (batched)
+        ├→ listeners (paper broker stops/targets)
+        └→ market snapshot (scanner): levels, sessions, ATR — null when not derivable
+```
+
+| Element         | Where                                    | Rule                                                                                      |
+| --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Adapter port    | `@astra/market-data` `MarketDataAdapter` | provider timestamps, provider symbols, honest `health()`; real providers await the owner  |
+| Quality monitor | `QuoteQualityMonitor`                    | move > `maxQuoteJumpTicks` → quotes INVALID for the cooldown (default 60 s)               |
+| Bars            | `BarAggregator`                          | quote-built, per symbol × source; gaps never filled; partially observed periods discarded |
+| Snapshot        | `computeMarketSnapshot`                  | exact contract served by `/api/v1/market/scanner`; missing → null                         |
+| Feed health     | health probe (`MARKET_DATA`)             | ONLINE all traded instruments fresh · DEGRADED some · UNKNOWN none                        |
 
 ---
 
@@ -118,6 +139,7 @@ astra/
 │   ├── prop-firm/           Rule profiles, account-state engine, prop-firm rule engine (canTrade)
 │   ├── risk/                Capital preservation engine: sizing, policy limits, account health
 │   ├── safety/              Kill switches, component health registry, halt monitor
+│   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
@@ -135,10 +157,11 @@ astra/
 prop-firm   → core
 risk        → core, prop-firm
 safety      → core
+market-data → core   (pure and isomorphic: also runs in the browser)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
 config      → core, prop-firm, risk, decision   (composes their schemas; loads YAML)
-db          → core, decision, execution, prop-firm, safety   (implements their ports)
+db          → core, decision, execution, market-data, prop-firm, safety   (implements their ports)
 apps/api    → everything (composition root)
 apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)
 ```
@@ -192,9 +215,15 @@ two instances migrating concurrently.
 | `order_events`         | every broker interaction and status change                                                        | append-only                                       |
 | `account_snapshots`    | periodic account state (balance, equity, HWM, computed buffers)                                   | append-only                                       |
 
+### Phase-2 tables
+
+| Table         | Purpose                                                                                                                    | Mutability                  |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `market_bars` | completed OHLC bars built from observed quotes; PK (symbol, timeframe, open_time, source); `volume` NULL when not reported | upsert (complete bars only) |
+
 ### Later phases (planned)
 
-`market_bars`, `instruments`, `news_items`, `economic_events`, `sentiment_readings`, `signals`,
+`instruments`, `news_items`, `economic_events`, `sentiment_readings`, `signals`,
 `positions`, `closed_trades`, `journal_entries`, `ai_model_calls`, `workflow_runs`, `alerts`,
 `performance_metrics`, `backtest_runs`, `operating_costs`.
 
@@ -225,7 +254,7 @@ rules in force.
 
 - Rate limiting and security headers on all routes; CORS restricted to the dashboard origin.
 
-### Endpoints (Phase 1)
+### Endpoints (Phases 1–2)
 
 | Method   | Path                                                                        | Role                                         |
 | -------- | --------------------------------------------------------------------------- | -------------------------------------------- |
@@ -242,6 +271,9 @@ rules in force.
 | POST     | `/api/v1/executions` (by approval id)                                       | operator (automation later, per mode policy) |
 | GET      | `/api/v1/audit`, `/api/v1/events`, `/api/v1/stream` (SSE)                   | viewer                                       |
 | POST     | `/api/v1/automation/heartbeat`, `/api/v1/automation/errors`                 | automation                                   |
+| GET/POST | `/api/v1/market/quotes` (latest quotes / ingestion)                         | viewer / automation                          |
+| GET      | `/api/v1/market/scanner` (market snapshots)                                 | viewer                                       |
+| GET      | `/api/v1/market/bars?symbol=&timeframe=&limit=`                             | viewer                                       |
 
 ---
 
@@ -469,6 +501,7 @@ Internet ─TLS─▶ reverse proxy (Caddy) ─▶ dashboard (static)
 | Failure                         | Detection                             | Behaviour                                                                                                                            | Recovery                                    |
 | ------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
 | Market data stale / missing     | `Observed` status, freshness limits   | NO NEW TRADE for affected instruments; halt monitor may trip INSTRUMENT switch                                                       | automatic when fresh data returns           |
+| Abnormal quote jump (bad tick)  | quality monitor (`maxQuoteJumpTicks`) | quotes INVALID for the cooldown → NO NEW TRADE on the instrument; MARKET_DATA not ONLINE                                             | automatic after the cooldown                |
 | News / calendar unavailable     | provider status                       | calendar check UNKNOWN → NO NEW TRADE                                                                                                | automatic                                   |
 | AI unavailable / malformed      | provider status, schema validation    | AI `UNAVAILABLE`/`INVALID`; strategies requiring AI → NO TRADE                                                                       | automatic                                   |
 | n8n down                        | heartbeat age                         | automation `UNKNOWN` → NO NEW TRADE; in-core monitoring continues                                                                    | automatic on heartbeat                      |

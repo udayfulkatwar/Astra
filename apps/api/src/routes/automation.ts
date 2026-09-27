@@ -59,8 +59,15 @@ export function registerAutomationRoutes(
   });
   app.post('/api/v1/market/quotes', automation, (req) => {
     const b = Quotes.parse(req.body);
-    for (const q of b.quotes) runtime.market.ingest(q, `ingest:${b.source}`, 'MANUAL');
-    return { accepted: b.quotes.length };
+    let accepted = 0;
+    const ignored: { symbol: string; reason: string }[] = [];
+    for (const q of b.quotes) {
+      // Unknown instruments and invalid quotes throw (400); out-of-order ones are ignored.
+      const r = runtime.market.ingest(q, `ingest:${b.source}`, 'MANUAL');
+      if (r.status === 'ACCEPTED') accepted++;
+      else ignored.push({ symbol: r.symbol, reason: r.reason });
+    }
+    return { accepted, ignored };
   });
   app.get('/api/v1/market/quotes', read, () => ({ quotes: runtime.market.all() }));
 

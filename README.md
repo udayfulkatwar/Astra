@@ -35,21 +35,22 @@ see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Repository
 
-| Path                 | Purpose                                                                         |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `packages/core`      | Domain primitives: `Observed<T>`, modes, health, time, decimal math, schemas    |
-| `packages/prop-firm` | Rule profiles, account state engine, `canTrade` rule engine                     |
-| `packages/risk`      | Capital preservation engine: sizing, policy limits, account health              |
-| `packages/safety`    | Kill switches, health registry, halt conditions                                 |
-| `packages/decision`  | Fail-closed gate pipeline and decision records                                  |
-| `packages/execution` | Broker adapter interface, paper broker, execution gateway                       |
-| `packages/db`        | SQL migrations, hash-chained audit log, repositories                            |
-| `packages/config`    | Versioned YAML configuration loader                                             |
-| `apps/api`           | ASTRA Core service (Fastify) — composition root                                 |
-| `apps/dashboard`     | Operator command center (React)                                                 |
-| `config/`            | Rule profiles, risk policies, instruments, strategies, accounts (**templates**) |
-| `automation/n8n`     | n8n workflows                                                                   |
-| `docs/`              | Architecture, ADRs, deployment, project state                                   |
+| Path                   | Purpose                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `packages/core`        | Domain primitives: `Observed<T>`, modes, health, time, decimal math, schemas      |
+| `packages/prop-firm`   | Rule profiles, account state engine, `canTrade` rule engine                       |
+| `packages/risk`        | Capital preservation engine: sizing, policy limits, account health                |
+| `packages/safety`      | Kill switches, health registry, halt conditions                                   |
+| `packages/market-data` | Market-data adapter port, quote quality, OHLC bars, market snapshots (isomorphic) |
+| `packages/decision`    | Fail-closed gate pipeline and decision records                                    |
+| `packages/execution`   | Broker adapter interface, paper broker, execution gateway                         |
+| `packages/db`          | SQL migrations, hash-chained audit log, repositories                              |
+| `packages/config`      | Versioned YAML configuration loader                                               |
+| `apps/api`             | ASTRA Core service (Fastify) — composition root                                   |
+| `apps/dashboard`       | Operator command center (React)                                                   |
+| `config/`              | Rule profiles, risk policies, instruments, strategies, accounts (**templates**)   |
+| `automation/n8n`       | n8n workflows                                                                     |
+| `docs/`                | Architecture, ADRs, deployment, project state                                     |
 
 ## Development
 

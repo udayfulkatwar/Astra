@@ -13,3 +13,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0006](0006-configuration-as-versioned-files.md) | Rules, strategies and accounts as versioned config files | Accepted |
 | [0007](0007-one-topology-local-and-cloud.md)     | One docker-compose topology for local and cloud          | Accepted |
 | [0008](0008-live-trading-authorization.md)       | Multi-factor live-trading authorization                  | Accepted |
+| [0009](0009-market-data-architecture.md)         | Market data: one ingestion service, quote-built bars     | Accepted |

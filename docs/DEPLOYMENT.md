@@ -24,7 +24,8 @@ curl -X POST -H "Authorization: Bearer $ASTRA_AUTOMATION_TOKEN" \
 ```
 
 Trading stays disabled until every required component (`DATABASE`, `MARKET_DATA`, `CALENDAR`,
-`EXECUTION`, `AUTOMATION`) is ONLINE — the heartbeat above stands in for n8n.
+`EXECUTION`, `AUTOMATION`) is ONLINE — the heartbeat above stands in for n8n. `MARKET_DATA` is
+ONLINE only while every instrument traded by an ACTIVE account has a fresh, valid quote.
 
 ## 2. Full stack with Docker (Linux, macOS, Windows/WSL2)
 

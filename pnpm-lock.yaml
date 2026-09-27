@@ -59,6 +59,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../../packages/execution
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../../packages/market-data
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../../packages/prop-firm
@@ -197,6 +200,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../execution
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../market-data
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../prop-firm
@@ -240,6 +246,15 @@ importers:
       '@astra/safety':
         specifier: workspace:*
         version: link:../safety
+
+  packages/market-data:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/prop-firm:
     dependencies:
