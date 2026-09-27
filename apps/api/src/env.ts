@@ -17,7 +17,8 @@ export const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   ASTRA_HTTP_HOST: z.string().default('0.0.0.0'),
   ASTRA_HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
-  ASTRA_CONFIG_DIR: z.string().min(1).default('config'),
+  /** Defaults to the nearest `config/` (containing astra.yaml) found walking up from the cwd. */
+  ASTRA_CONFIG_DIR: z.string().min(1).optional(),
   ASTRA_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   DATABASE_URL: z.string().url(),
   ASTRA_RUN_MIGRATIONS: bool.default(true),

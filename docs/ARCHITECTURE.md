@@ -132,13 +132,15 @@ astra/
 **Dependency direction (enforced by package.json dependencies, no cycles):**
 
 ```text
-core ◀── config
-core ◀── prop-firm ◀── risk
-core ◀── safety
-core, prop-firm, risk, safety ◀── decision
-core, safety ◀── execution
-core ◀── db   (implements ports defined by domain packages)
-everything ◀── apps/api (composition root)
+prop-firm   → core
+risk        → core, prop-firm
+safety      → core
+decision    → core, prop-firm, risk, safety
+execution   → core, decision (approval types), safety
+config      → core, prop-firm, risk, decision   (composes their schemas; loads YAML)
+db          → core, decision, execution, prop-firm, safety   (implements their ports)
+apps/api    → everything (composition root)
+apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)
 ```
 
 Domain packages never import `db`, Fastify, or any I/O library. They expose **ports**

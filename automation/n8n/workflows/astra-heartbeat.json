@@ -1,0 +1,41 @@
+{
+  "name": "ASTRA — Heartbeat",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] }
+      },
+      "id": "5f0b7f8e-3b1a-4c55-9a51-000000000001",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/v1/automation/heartbeat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'ONLINE', detail: 'n8n heartbeat', workflowRunId: String($execution.id) }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "5f0b7f8e-3b1a-4c55-9a51-000000000002",
+      "name": "POST heartbeat to ASTRA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "credentials": {
+        "httpHeaderAuth": { "id": "astra-automation-token", "name": "ASTRA automation token" }
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "POST heartbeat to ASTRA", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "" },
+  "active": false,
+  "meta": { "astra": "Health family: tells ASTRA that automation is alive. Silence → AUTOMATION UNKNOWN → no new trades." }
+}

@@ -104,9 +104,12 @@ function explain(
   const why = plan
     ? [...s.rationale, `all ${checks.length} gate checks passed`]
     : failing.flatMap((c) => c.reasons.map((r) => `${c.layer}: ${r}`));
-  const risk = sizing
-    ? `worst-case loss ${sizing.dollarRisk} ${inputs.account?.currency ?? ''} (${sizing.riskPctOfEquity}% of equity), binding limit: ${sizing.bindingConstraint}`.trim()
-    : 'no position sized';
+  const currency = inputs.account?.currency ?? '';
+  const risk = !sizing
+    ? 'no position sized'
+    : plan
+      ? `worst-case loss ${sizing.dollarRisk} ${currency} (${sizing.riskPctOfEquity}% of equity), binding limit: ${sizing.bindingConstraint}`
+      : `not taken — the sized trade would have risked ${sizing.dollarRisk} ${currency} (${sizing.riskPctOfEquity}% of equity)`;
   const invalidatedBy = [
     `price reaching the stop at ${s.stop}`,
     ...(approval ? [`approval expiry at ${approval.expiresAt}`] : []),

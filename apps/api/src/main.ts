@@ -2,7 +2,8 @@
  * ASTRA Core entry point. Invalid environment or configuration stops the process before it can
  * accept requests; a database outage does NOT — the service starts fail-closed and retries.
  */
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { loadAstraConfig } from '@astra/config';
 import { systemClock } from '@astra/core';
 import { createDb } from '@astra/db';
@@ -11,10 +12,21 @@ import { loadEnv } from './env';
 import { createLogger } from './logger';
 import { AstraRuntime } from './runtime/runtime';
 
+/** Nearest directory named `config` containing astra.yaml, searching upward from `start`. */
+function findConfigDir(start: string): string {
+  for (let dir = resolve(start); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, 'config', 'astra.yaml'))) return join(dir, 'config');
+    if (dirname(dir) === dir) throw new Error('config/astra.yaml not found; set ASTRA_CONFIG_DIR');
+  }
+}
+
 async function main(): Promise<void> {
   const env = loadEnv();
   const log = createLogger(env.ASTRA_LOG_LEVEL);
-  const config = loadAstraConfig(resolve(env.ASTRA_CONFIG_DIR));
+  const configDir = env.ASTRA_CONFIG_DIR
+    ? resolve(env.ASTRA_CONFIG_DIR)
+    : findConfigDir(process.cwd());
+  const config = loadAstraConfig(configDir);
   log.info(
     {
       configHash: config.hash,

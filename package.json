@@ -2,7 +2,7 @@
   "name": "astra",
   "version": "0.1.0",
   "private": true,
-  "description": "ASTRA — Autonomous Strategic Trading & Risk Agent. AI-orchestrated prop-firm trading operating system.",
+  "description": "ASTRA \u2014 Autonomous Strategic Trading & Risk Agent. AI-orchestrated prop-firm trading operating system.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "engines": {
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @astra/api --filter @astra/dashboard dev",
-    "build": "pnpm -r --filter ./apps/* build",
+    "build": "pnpm --filter @astra/api --filter @astra/dashboard build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -26,6 +26,7 @@
     "@types/node": "^22.20.0",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "fast-check": "^4.3.0",
     "globals": "^17.0.0",
     "prettier": "^3.6.0",
