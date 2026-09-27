@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, getToken } from './client';
 import { syncAstraClock } from '../lib/format';
@@ -6,6 +6,7 @@ import type {
   AccountDetail,
   AccountView,
   AuditEntry,
+  Bar,
   CalendarWindow,
   ComponentHealth,
   ConfigSummary,
@@ -14,6 +15,7 @@ import type {
   ExecutionResult,
   KillSwitchState,
   MarketSnapshot,
+  MarketStructure,
   TradeDecision,
   ModeInfo,
   Observed,
@@ -21,6 +23,7 @@ import type {
   Quote,
   StatusBar,
   SystemEvent,
+  Timeframe,
   TradingMode,
 } from './types';
 
@@ -115,6 +118,27 @@ export const useScanner = () =>
     queryKey: ['scanner'],
     queryFn: () => api<{ snapshots: MarketSnapshot[] }>('/api/v1/market/scanner'),
     refetchInterval: 2_000,
+  });
+
+export const useStructure = (timeframe: Timeframe) =>
+  useQuery({
+    queryKey: ['structure', timeframe],
+    queryFn: () =>
+      api<{ structures: MarketStructure[] }>(`/api/v1/market/structure?timeframe=${timeframe}`),
+    refetchInterval: 5_000,
+    placeholderData: keepPreviousData,
+  });
+
+export const useBars = (symbol: string | null, timeframe: Timeframe, limit: number) =>
+  useQuery({
+    queryKey: ['bars', symbol, timeframe, limit],
+    queryFn: () =>
+      api<{ bars: Bar[] }>(
+        `/api/v1/market/bars?symbol=${encodeURIComponent(symbol ?? '')}&timeframe=${timeframe}&limit=${limit}`,
+      ),
+    enabled: symbol !== null,
+    refetchInterval: 5_000,
+    placeholderData: keepPreviousData,
   });
 
 export const useCalendar = (hours = 24) =>

@@ -17,7 +17,8 @@ import type {
 } from '@astra/core';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
-import type { MarketSnapshot, Timeframe } from '@astra/market-data';
+import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
+import type { MarketStructure } from '@astra/market-structure';
 import type { AccountState, AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
 import type { AccountHealthAssessment, RiskPolicy } from '@astra/risk';
 import type { KillSwitchState } from '@astra/safety';
@@ -155,5 +156,5 @@ export interface ConfigSummary {
 
 export type { ExecutionResult, Observed, Quote };
 
-/** Market scanner snapshot (GET /api/v1/market/scanner) and bar timeframes. */
-export type { MarketSnapshot, Timeframe };
+/** Market scanner snapshot, bars, bar timeframes and market structure (GET /api/v1/market/…). */
+export type { Bar, MarketSnapshot, MarketStructure, Timeframe };

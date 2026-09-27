@@ -115,6 +115,15 @@ marketData:
   maxBarsPerSeries: 1000
   barCloseGraceMs: 2000
 
+# Market-structure detection (ADR-0010). ASTRA's generic definitions — DEFAULTS, not strategy
+# rules; review them with your strategy in Phase 5.
+structure:
+  swingStrength: 2 # bars on each side of a swing high/low
+  equalLevelTicks: 2 # highs/lows this close count as equal (resting liquidity)…
+  equalLevelAtrFraction: 0.1 # …widened to 10% of ATR(14) once known
+  fvgMinTicks: 1 # smallest fair value gap reported
+  maxItems: 20
+
 # SIMULATED feeds for paper testing — used only when ASTRA_SIMULATION=true.
 # Start prices are simulation seeds, NOT market data. SHADOW and LIVE refuse SIMULATED data.
 simulation:

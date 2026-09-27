@@ -1,6 +1,7 @@
 /** System configuration (config/astra.yaml): engineering parameters, not trading rules. */
 import { COMPONENT_IDS, SessionDefinitionSchema, type ComponentId } from '@astra/core';
 import { DecisionPolicySchema } from '@astra/decision';
+import { StructureParamsSchema } from '@astra/market-structure';
 import { z } from 'zod';
 
 const componentStaleness = z.object(
@@ -56,6 +57,11 @@ export const SystemConfigSchema = z.object({
       barCloseGraceMs: z.number().int().nonnegative().max(60_000).optional(),
     })
     .optional(),
+  /**
+   * Market-structure detection definitions (swings, BOS/CHoCH, liquidity, gaps — ADR-0010).
+   * Omitted → the @astra/market-structure defaults. DEFAULTS to review with the strategy (Phase 5).
+   */
+  structure: StructureParamsSchema.optional(),
   /**
    * SIMULATED feeds for paper testing (only when ASTRA_SIMULATION=true). Start prices are
    * simulation seeds, NOT market data; SIMULATED data is refused in SHADOW and LIVE.

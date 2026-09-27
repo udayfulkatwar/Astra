@@ -10,6 +10,7 @@ import {
   type TradingMode,
 } from '@astra/core';
 import { TimeframeSchema } from '@astra/market-data';
+import { analyzeStructure } from '@astra/market-structure';
 import { KILL_SWITCH_SCOPES, type KillSwitchScope } from '@astra/safety';
 import { ApiError } from '../api/client';
 import type { AccountView, DecisionSummary, StatusBar } from '../api/types';
@@ -189,6 +190,24 @@ export async function handleDemoRequest(
     }
     if (path === '/api/v1/market/quotes') return { quotes: rt.allQuotes() };
     if (path === '/api/v1/market/scanner') return { snapshots: rt.snapshots() };
+    if (path === '/api/v1/market/structure') {
+      const timeframe = TimeframeSchema.safeParse(q.get('timeframe') ?? 'H1');
+      if (!timeframe.success) throw new ApiError(400, 'VALIDATION', 'timeframe must be M1…D1');
+      const only = q.get('symbol');
+      if (only !== null && !rt.config.instruments.has(only))
+        throw new ApiError(404, 'NOT_FOUND', `instrument ${only} is not configured`);
+      return {
+        structures: (only === null ? [...rt.config.instruments.keys()] : [only]).map((symbol) =>
+          analyzeStructure({
+            symbol,
+            timeframe: timeframe.data,
+            bars: rt.market.bars(symbol, timeframe.data),
+            tickSize: rt.config.instruments.get(symbol)!.tickSize,
+            params: rt.config.system.structure,
+          }),
+        ),
+      };
+    }
     if (path === '/api/v1/market/bars') {
       const symbol = q.get('symbol') ?? '';
       const timeframe = TimeframeSchema.safeParse(q.get('timeframe'));

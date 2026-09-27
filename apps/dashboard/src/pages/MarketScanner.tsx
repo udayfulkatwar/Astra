@@ -3,11 +3,12 @@
  * spread, market status, sessions, day and previous-day levels, volatility — derived from real
  * bars only. Structure detection (BOS, CHoCH, liquidity) is Phase 5.
  */
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { ApiError } from '../api/client';
-import { useQuotes, useScanner } from '../api/hooks';
-import type { MarketSnapshot } from '../api/types';
-import { Card, Empty, ErrorBox, Loading, NotBuilt, PageHeader, Pill } from '../components/ui';
+import { useBars, useQuotes, useScanner, useStructure } from '../api/hooks';
+import type { MarketSnapshot, MarketStructure, Timeframe } from '../api/types';
+import { StructureChart } from '../components/StructureChart';
+import { Card, Empty, ErrorBox, Loading, PageHeader, Pill } from '../components/ui';
 import { ago, num, pct } from '../lib/format';
 
 const COLUMNS = 11;
@@ -160,6 +161,205 @@ function Scanner() {
   );
 }
 
+const STRUCTURE_TIMEFRAMES: Timeframe[] = ['M5', 'M15', 'H1', 'H4', 'D1'];
+const TF_KEY = 'astra.structure.timeframe';
+
+function savedTimeframe(): Timeframe {
+  try {
+    const v = window.localStorage.getItem(TF_KEY);
+    return STRUCTURE_TIMEFRAMES.find((t) => t === v) ?? 'H1';
+  } catch {
+    return 'H1';
+  }
+}
+
+type Structure = MarketStructure;
+type Level = NonNullable<Structure['nearestAbove']>;
+type Swing = NonNullable<Structure['lastSwingHigh']>;
+
+function LevelCell({ level, close }: { level: Level | null; close: number | null }) {
+  if (!level) return <span className="muted">none</span>;
+  const kind =
+    level.kind === 'EQUAL_LEVELS'
+      ? level.side === 'BUY_SIDE'
+        ? 'equal highs'
+        : 'equal lows'
+      : level.side === 'BUY_SIDE'
+        ? 'swing high'
+        : 'swing low';
+  return (
+    <>
+      <div>{num(level.level, 5)}</div>
+      <div className="muted small">
+        {kind}
+        {close !== null && ` · ${num(Math.abs(level.level - close), 5)} away`}
+      </div>
+    </>
+  );
+}
+
+function SwingCell({ swing }: { swing: Swing | null }) {
+  if (!swing) return <span className="muted">—</span>;
+  return (
+    <>
+      <div>
+        {num(swing.price, 5)} {swing.label && <span className="tag">{swing.label}</span>}
+      </div>
+      <div className="muted small">
+        {swing.status === 'INTACT' ? 'intact' : swing.status.toLowerCase()} ·{' '}
+        {ago(swing.confirmedAt)}
+      </div>
+    </>
+  );
+}
+
+function BreakCell({ s }: { s: Structure }) {
+  const b = s.lastBreak;
+  if (!b) return <span className="muted">none yet</span>;
+  return (
+    <>
+      <div>
+        <span className="tag">{b.type === 'CHOCH' ? 'CHoCH' : 'BOS'}</span>{' '}
+        {b.direction === 'BULLISH' ? '▲' : '▼'} {num(b.level, 5)}
+      </div>
+      <div className="muted small">{ago(b.at)}</div>
+    </>
+  );
+}
+
+function TrendPill({ trend }: { trend: Structure['trend'] }) {
+  if (trend === 'UP') return <Pill status="INFO" tone="info" label="▲ UP" />;
+  if (trend === 'DOWN') return <Pill status="INFO" tone="info" label="▼ DOWN" />;
+  return <Pill status="UNKNOWN" label="UNKNOWN" />;
+}
+
+function StructureCard() {
+  const [tf, setTf] = useState<Timeframe>(savedTimeframe);
+  const [selected, setSelected] = useState<string | null>(null);
+  const { data, error, isPlaceholderData } = useStructure(tf);
+  const structures = data?.structures ?? [];
+  const current =
+    structures.find((s) => s.symbol === selected) ?? structures.find((s) => s.sufficient) ?? null;
+  const bars = useBars(current?.symbol ?? null, tf, 150);
+  const choose = (t: Timeframe) => {
+    setTf(t);
+    try {
+      window.localStorage.setItem(TF_KEY, t);
+    } catch {
+      /* per-viewer convenience only */
+    }
+  };
+
+  return (
+    <Card
+      title="Market structure"
+      actions={
+        <div className="segmented" role="group" aria-label="Timeframe">
+          {STRUCTURE_TIMEFRAMES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={t === tf ? 'active' : undefined}
+              aria-pressed={t === tf}
+              onClick={() => choose(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      {error instanceof ApiError && error.status === 404 ? (
+        <Empty>Structure data is not available from this ASTRA server yet.</Empty>
+      ) : error ? (
+        <ErrorBox error={error} />
+      ) : !data ? (
+        <Loading />
+      ) : (
+        <div className={isPlaceholderData ? 'refetching' : undefined}>
+          <div className="table-scroll">
+            <table className="table scanner structure">
+              <thead>
+                <tr>
+                  <th>Instrument</th>
+                  <th>Trend</th>
+                  <th>Last break</th>
+                  <th className="num">Swing high</th>
+                  <th className="num">Swing low</th>
+                  <th className="num">Liquidity above</th>
+                  <th className="num">Liquidity below</th>
+                  <th className="num">Open gaps</th>
+                </tr>
+              </thead>
+              <tbody>
+                {structures.map((s) => (
+                  <tr
+                    key={s.symbol ?? ''}
+                    className={s.symbol === current?.symbol ? 'selected' : undefined}
+                  >
+                    <td className="strong">
+                      <button
+                        type="button"
+                        className="linklike"
+                        onClick={() => setSelected(s.symbol)}
+                        aria-pressed={s.symbol === current?.symbol}
+                      >
+                        {s.symbol}
+                      </button>
+                    </td>
+                    {s.sufficient ? (
+                      <>
+                        <td>
+                          <TrendPill trend={s.trend} />
+                        </td>
+                        <td className="stack">
+                          <BreakCell s={s} />
+                        </td>
+                        <td className="num stack">
+                          <SwingCell swing={s.lastSwingHigh} />
+                        </td>
+                        <td className="num stack">
+                          <SwingCell swing={s.lastSwingLow} />
+                        </td>
+                        <td className="num stack">
+                          <LevelCell level={s.nearestAbove} close={s.lastClose} />
+                        </td>
+                        <td className="num stack">
+                          <LevelCell level={s.nearestBelow} close={s.lastClose} />
+                        </td>
+                        <td className="num">{s.fvgs.length}</td>
+                      </>
+                    ) : (
+                      <td colSpan={7} className="muted">
+                        Not enough complete {tf} bars yet ({s.barsAnalysed} of{' '}
+                        {2 * s.params.swingStrength + 1} needed) — nothing is inferred.
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {current && bars.data && (
+            <div className="structure-chart-block">
+              <h3 className="chart-title">
+                {current.symbol} · {tf} · last {Math.min(bars.data.bars.length, 150)} bars (UTC)
+              </h3>
+              <StructureChart bars={bars.data.bars} structure={current} />
+            </div>
+          )}
+          <p className="muted small">
+            From complete bars only — nothing repaints. Swing strength{' '}
+            {data.structures[0]?.params.swingStrength ?? '—'}, equal-level tolerance per instrument
+            (ADR-0010). These are ASTRA&apos;s default definitions, not strategy rules — review them
+            with your strategy (Phase 5).
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function MarketScanner() {
   const quotes = useQuotes();
   return (
@@ -208,12 +408,7 @@ export function MarketScanner() {
           </table>
         )}
       </Card>
-      <Card title="Market structure">
-        <NotBuilt
-          phase="Phase 5"
-          what="Market-structure detection (swings, BOS, CHoCH, liquidity)"
-        />
-      </Card>
+      <StructureCard />
     </div>
   );
 }

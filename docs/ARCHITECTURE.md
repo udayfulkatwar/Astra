@@ -140,6 +140,7 @@ astra/
 │   ├── risk/                Capital preservation engine: sizing, policy limits, account health
 │   ├── safety/              Kill switches, component health registry, halt monitor
 │   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
+│   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
@@ -158,9 +159,10 @@ prop-firm   → core
 risk        → core, prop-firm
 safety      → core
 market-data → core   (pure and isomorphic: also runs in the browser)
+market-structure → core, market-data   (pure and isomorphic; no lookahead)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
-config      → core, prop-firm, risk, decision   (composes their schemas; loads YAML)
+config      → core, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)
 db          → core, decision, execution, market-data, prop-firm, safety   (implements their ports)
 apps/api    → everything (composition root)
 apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)

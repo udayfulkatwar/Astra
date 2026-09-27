@@ -56,8 +56,8 @@ export default tseslint.config(
     },
   },
   {
-    // @astra/market-data also runs in the browser: no Node built-ins in its source.
-    files: ['packages/market-data/src/**/*.ts'],
+    // @astra/market-data and @astra/market-structure also run in the browser: no Node built-ins.
+    files: ['packages/market-data/src/**/*.ts', 'packages/market-structure/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -65,7 +65,7 @@ export default tseslint.config(
           patterns: [
             {
               group: ['node:*', 'fs', 'path', 'crypto', 'os', 'events', 'stream', 'util', 'url'],
-              message: '@astra/market-data must stay isomorphic (Node and browser).',
+              message: 'market packages must stay isomorphic (Node and browser).',
             },
           ],
         },

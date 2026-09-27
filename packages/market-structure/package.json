@@ -1,0 +1,19 @@
+{
+  "name": "@astra/market-structure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Market structure from complete bars: swings, BOS/CHoCH, liquidity (equal highs/lows, sweeps) and fair value gaps. Pure, isomorphic, no lookahead.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/market-data": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

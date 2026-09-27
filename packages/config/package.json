@@ -15,6 +15,7 @@
   "dependencies": {
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",
+    "@astra/market-structure": "workspace:*",
     "@astra/prop-firm": "workspace:*",
     "@astra/risk": "workspace:*",
     "yaml": "^2.9.1",

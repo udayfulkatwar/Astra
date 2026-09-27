@@ -276,3 +276,51 @@ describe.skipIf(!available)('API — market-data quality and health', () => {
     expect(s.simulation).toBe(true);
   });
 });
+
+describe.skipIf(!available)('API — market structure', () => {
+  it('derives swings from complete bars only and validates the query', async () => {
+    h = await createHarness();
+    // One quote per minute from 14:00: M1 mids …000, …001, …005, …002, …001 (+ the live bar).
+    for (const bid of [20_000, 20_001, 20_005, 20_002, 20_001, 20_000]) {
+      await postQuotes(h, [{ symbol: 'MNQ', bid, ask: bid + 0.25 }]);
+      h.clock.advance(60_000);
+    }
+    const r = await get(h, '/api/v1/market/structure?symbol=MNQ&timeframe=M1');
+    expect(r.statusCode).toBe(200);
+    const [s] = json(r).structures as Json[];
+    expect(s).toMatchObject({
+      symbol: 'MNQ',
+      timeframe: 'M1',
+      asOf: '2026-09-28T14:05:00.000Z', // the in-progress 14:05 bar is not analysed
+      barsAnalysed: 5,
+      sufficient: true,
+      trend: 'UNKNOWN',
+      params: { swingStrength: 2, equalLevelTicks: 2 },
+      swings: [
+        {
+          kind: 'HIGH',
+          price: 20_005.125,
+          time: '2026-09-28T14:02:00.000Z',
+          confirmedAt: '2026-09-28T14:05:00.000Z',
+          label: null,
+          status: 'INTACT',
+          resolvedAt: null,
+        },
+      ],
+      breaks: [],
+      nearestAbove: { side: 'BUY_SIDE', level: 20_005.125, kind: 'SWING' },
+      nearestBelow: null,
+    });
+
+    const all = json(await get(h, '/api/v1/market/structure')).structures as Json[];
+    // Default H1: the 14:00 bar is still in progress, so there is nothing to analyse yet.
+    expect(all.map((x) => [x.symbol, x.timeframe, x.barsAnalysed, x.trend]).sort()).toEqual([
+      ['MNQ', 'H1', 0, 'UNKNOWN'],
+      ['NQ', 'H1', 0, 'UNKNOWN'],
+      ['XAUUSD', 'H1', 0, 'UNKNOWN'],
+    ]);
+    expect((await get(h, '/api/v1/market/structure?timeframe=M2')).statusCode).toBe(400);
+    expect((await get(h, '/api/v1/market/structure?symbol=ES')).statusCode).toBe(404);
+    expect((await h.app.inject({ url: '/api/v1/market/structure' })).statusCode).toBe(401);
+  });
+});

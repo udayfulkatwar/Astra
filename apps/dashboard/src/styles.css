@@ -16,6 +16,12 @@
   --shadow: #a78bfa;
   --live: #f43f5e;
   --info: #60a5fa;
+  /* Chart overlay roles — validated all-pairs (CVD + normal vision) on --panel. */
+  --viz-break: #3987e5;
+  --viz-liquidity: #d95926;
+  --viz-fvg: #199e70;
+  --viz-candle: #7d8ba1;
+  --viz-grid: #1a2332;
   --radius: 8px;
   --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -850,4 +856,207 @@ select:focus {
   margin-left: -1px;
   background: var(--accent);
   border-radius: 1px;
+}
+
+/* Market structure */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented button {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 4px 10px;
+  font: 600 12px var(--mono);
+  cursor: pointer;
+}
+.segmented button + button {
+  border-left: 1px solid var(--border-strong);
+}
+.segmented button.active {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.segmented button:focus-visible,
+.linklike:focus-visible,
+.structure-chart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.table.structure tr.selected td {
+  background: rgba(56, 189, 248, 0.06);
+}
+.tag {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font: 600 11px var(--mono);
+  color: var(--text);
+}
+.refetching {
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.structure-chart-block {
+  margin-top: 14px;
+}
+.chart-title {
+  margin: 0 0 6px;
+  font: 600 13px var(--sans);
+  color: var(--text);
+}
+.chart-wrap {
+  position: relative;
+  width: 100%;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.structure-chart {
+  display: block;
+  touch-action: pan-y;
+}
+.structure-chart .grid {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+.structure-chart .axis {
+  fill: var(--muted);
+  font: 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.structure-chart .label {
+  fill: var(--text);
+  font: 600 10px var(--sans);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.structure-chart .wick {
+  stroke: var(--viz-candle);
+  stroke-width: 1;
+}
+.k-candle-up {
+  fill: var(--panel);
+  stroke: var(--viz-candle);
+  stroke-width: 1;
+}
+.k-candle-down {
+  fill: var(--viz-candle);
+}
+.live-bar {
+  opacity: 0.5;
+}
+.m-swing {
+  fill: var(--text);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.m-break {
+  stroke: var(--viz-break);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.m-liq {
+  stroke: var(--viz-liquidity);
+  stroke-width: 1.5;
+}
+.m-liq.faint {
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.m-sweep {
+  fill: none;
+  stroke: var(--viz-liquidity);
+  stroke-width: 2;
+}
+.m-fvg {
+  fill: var(--viz-fvg);
+  fill-opacity: 0.14;
+}
+.structure-chart .last-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.structure-chart .last-tag {
+  fill: var(--panel-2);
+  stroke: var(--border-strong);
+}
+.structure-chart .level-tag {
+  fill: var(--panel-2);
+  stroke: var(--viz-liquidity);
+  stroke-width: 1.5;
+}
+.structure-chart .leader {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.chart-note {
+  margin: 4px 0 0;
+}
+.structure-chart .last-text {
+  fill: var(--text);
+  font: 600 11px var(--mono);
+}
+.structure-chart .crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.chart-tip {
+  position: absolute;
+  width: 220px;
+  pointer-events: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.chart-tip .tip-time {
+  color: var(--muted);
+}
+.chart-tip .tip-ohlc b {
+  color: var(--text);
+  font-weight: 600;
+}
+.chart-tip .tip-ohlc {
+  color: var(--muted);
+  font-size: 11px;
+}
+.chart-tip .tip-event {
+  margin-top: 3px;
+  color: var(--text);
+}
+@media (forced-colors: active) {
+  .m-fvg {
+    fill: none;
+    stroke: CanvasText;
+    stroke-dasharray: 4 3;
+  }
 }
