@@ -796,3 +796,48 @@ select:focus {
 .inline-form.compact input {
   min-width: 140px;
 }
+
+/* Market scanner */
+.table-scroll {
+  overflow-x: auto;
+}
+.table.scanner td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.range {
+  position: relative;
+  width: 150px;
+  height: 22px;
+}
+.range-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 10px;
+  height: 2px;
+  background: #1a2332;
+}
+.range-today {
+  position: absolute;
+  top: 7px;
+  height: 8px;
+  background: #16324a;
+  border-radius: 2px;
+}
+.range-level {
+  position: absolute;
+  top: 3px;
+  width: 1px;
+  height: 16px;
+  background: #64748b;
+}
+.range-price {
+  position: absolute;
+  top: 5px;
+  width: 3px;
+  height: 12px;
+  margin-left: -1px;
+  background: var(--accent);
+  border-radius: 1px;
+}

@@ -12,6 +12,7 @@ import type {
   DecisionSummary,
   ExecutionResult,
   KillSwitchState,
+  MarketSnapshot,
   TradeDecision,
   ModeInfo,
   Observed,
@@ -101,6 +102,13 @@ export const useQuotes = () =>
       api<{ quotes: (Observed<Quote> & { status: 'OK'; value: Quote })[] }>(
         '/api/v1/market/quotes',
       ),
+    refetchInterval: 2_000,
+  });
+
+export const useScanner = () =>
+  useQuery({
+    queryKey: ['scanner'],
+    queryFn: () => api<{ snapshots: MarketSnapshot[] }>('/api/v1/market/scanner'),
     refetchInterval: 2_000,
   });
 

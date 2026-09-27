@@ -1,7 +1,7 @@
 /** Calendar, market scanner, news and AI monitor. Unbuilt engines say so explicitly. */
-import { useCalendar, useQuotes } from '../api/hooks';
+import { useCalendar } from '../api/hooks';
 import { Card, Empty, ErrorBox, Loading, NotBuilt, PageHeader, Pill } from '../components/ui';
-import { ago, dateTime, num } from '../lib/format';
+import { dateTime } from '../lib/format';
 
 export function CalendarPage() {
   const { data, error } = useCalendar(168);
@@ -77,62 +77,6 @@ export function CalendarPage() {
             )}
           </>
         )}
-      </Card>
-    </div>
-  );
-}
-
-export function Market() {
-  const { data, error } = useQuotes();
-  return (
-    <div className="page">
-      <PageHeader
-        title="Market Scanner"
-        subtitle="Latest quotes. Structure detection (BOS, CHoCH, liquidity) arrives with the Phase 5 market-structure engine."
-      />
-      <Card title="Quotes">
-        {error ? (
-          <ErrorBox error={error} />
-        ) : !data ? (
-          <Loading />
-        ) : data.quotes.length === 0 ? (
-          <Empty>No quotes received — market data UNAVAILABLE.</Empty>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th className="num">Bid</th>
-                <th className="num">Ask</th>
-                <th className="num">Spread</th>
-                <th>Source</th>
-                <th>Kind</th>
-                <th>Age</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.quotes.map((q) => (
-                <tr key={q.value.symbol}>
-                  <td className="strong">{q.value.symbol}</td>
-                  <td className="num">{num(q.value.bid, 5)}</td>
-                  <td className="num">{num(q.value.ask, 5)}</td>
-                  <td className="num">{num(q.value.ask - q.value.bid, 5)}</td>
-                  <td>{q.source}</td>
-                  <td>
-                    <Pill
-                      status={q.sourceKind === 'SIMULATED' ? 'SHADOW' : 'INFO'}
-                      label={q.sourceKind}
-                    />
-                  </td>
-                  <td className="muted">{ago(q.asOf)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
-      <Card title="Market structure">
-        <NotBuilt phase="Phase 5" what="Market-structure detection" />
       </Card>
     </div>
   );

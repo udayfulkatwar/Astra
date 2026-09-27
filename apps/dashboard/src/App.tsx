@@ -5,7 +5,8 @@ import { ApiError, DEMO, getToken } from './api/client';
 import { Layout } from './components/Layout';
 import { AccountDetailPage, Accounts } from './pages/Accounts';
 import { Approvals, DecisionDetailPage } from './pages/Approvals';
-import { AiMonitor, Backtesting, CalendarPage, Market, News } from './pages/Intelligence';
+import { AiMonitor, Backtesting, CalendarPage, News } from './pages/Intelligence';
+import { MarketScanner } from './pages/MarketScanner';
 import { Login } from './pages/Login';
 import { Activity, Audit, Automation, Health } from './pages/Operations';
 import { Overview } from './pages/Overview';
@@ -35,7 +36,7 @@ const routes = [
       { path: 'activity', element: <Activity /> },
       { path: 'calendar', element: <CalendarPage /> },
       { path: 'news', element: <News /> },
-      { path: 'market', element: <Market /> },
+      { path: 'market', element: <MarketScanner /> },
       { path: 'strategies', element: <Strategies /> },
       { path: 'rules', element: <Rules /> },
       { path: 'paper', element: <Paper /> },

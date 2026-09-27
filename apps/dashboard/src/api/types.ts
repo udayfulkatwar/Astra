@@ -153,3 +153,32 @@ export interface ConfigSummary {
 }
 
 export type { ExecutionResult, Observed, Quote };
+
+export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1';
+
+/** Market scanner snapshot (contract of GET /api/v1/market/scanner). */
+export interface MarketSnapshot {
+  symbol: string;
+  asOf: string;
+  quote: Observed<Quote>;
+  mid: number | null;
+  spreadTicks: number | null;
+  market: {
+    open: boolean;
+    nextClose: string | null;
+    nextOpen: string | null;
+    minutesToClose: number | null;
+  } | null;
+  activeSessions: string[];
+  today: { open: number; high: number; low: number; close: number } | null;
+  previousDay: { high: number; low: number; close: number } | null;
+  changeFromPrevClosePct: number | null;
+  sessions: { id: string; high: number; low: number }[];
+  atr: { H1: number | null; D1: number | null };
+  quality: {
+    status: 'OK' | 'STALE' | 'SUSPECT' | 'NO_DATA';
+    reason: string | null;
+    lastJumpAt: string | null;
+  };
+  barsAvailable: Record<Timeframe, number>;
+}
