@@ -41,9 +41,11 @@ to run the same logic in the browser.
   (misaligned or duplicate seeds are rejected).
 - **Snapshot contract** (`computeMarketSnapshot`, served by `GET /api/v1/market/scanner`): quote
   with freshness and quality applied, mid/spread (null unless the quote is OK), market status,
-  active sessions, today/previous-day levels, change, per-session high/low (omitted when
-  observation began after the session started), ATR(14) Wilder on complete H1/D1 bars (null with
-  fewer than 15), quality status and bar counts. Anything not derivable is null.
+  active sessions, today's levels, the previous TRADING day's levels (weekends skipped via
+  trading hours; null if that day was not fully observed — an older day is never substituted),
+  change, per-session high/low (omitted when observation began after the session started),
+  ATR(14) Wilder on complete H1/D1 bars (null with fewer than 15), quality status and bar counts.
+  Anything not derivable is null.
 - **MARKET_DATA health** is computed by the health probe from freshness of the instruments traded
   by ACTIVE accounts (decision policy `quoteMaxAgeMs`): ONLINE all fresh, DEGRADED some, UNKNOWN
   none. With `allowDegradedComponents: false`, a partial feed blocks every new trade.

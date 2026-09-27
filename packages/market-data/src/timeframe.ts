@@ -8,7 +8,7 @@
  *   Without configured trading hours, D1 falls back to UTC midnight (documented; such an
  *   instrument is refused by the market.session gate anyway).
  */
-import { tradingDayWindow, type TradingHours } from '@astra/core';
+import { marketStatus, tradingDayWindow, type TradingHours } from '@astra/core';
 import { z } from 'zod';
 
 export const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'] as const;
@@ -42,6 +42,27 @@ export function dailyWindow(atMs: number, hours: TradingHours | undefined): BarW
     time: hours?.dayStart ?? '00:00',
   });
   return { openMs: w.start.getTime(), closeMs: w.end.getTime() };
+}
+
+/**
+ * The trading day before the one opening at `dayOpenMs`: the nearest earlier D1 window in which
+ * the market is scheduled to be open at some point (weekends are skipped; exchange holidays are
+ * not modelled). Without trading hours every UTC day counts. Null if none within a week.
+ */
+export function previousTradingDay(
+  dayOpenMs: number,
+  hours: TradingHours | undefined,
+): BarWindow | null {
+  let w = dailyWindow(dayOpenMs - 1, hours);
+  for (let i = 0; i < 7; i++) {
+    if (!hours) return w;
+    const status = marketStatus(new Date(w.openMs), hours);
+    if (status.open || (status.nextOpen !== null && Date.parse(status.nextOpen) < w.closeMs)) {
+      return w;
+    }
+    w = dailyWindow(w.openMs - 1, hours);
+  }
+  return null;
 }
 
 /** The bar period of `timeframe` containing the instant `atMs`. */

@@ -21,7 +21,7 @@ import {
 import type { Bar } from './bar';
 import { averageTrueRange } from './indicators';
 import { quoteMid, spreadTicks } from './price';
-import { TIMEFRAMES, dailyWindow, type Timeframe } from './timeframe';
+import { TIMEFRAMES, dailyWindow, previousTradingDay, type Timeframe } from './timeframe';
 
 export type MarketQualityStatus = 'OK' | 'STALE' | 'SUSPECT' | 'NO_DATA';
 
@@ -39,7 +39,7 @@ export interface MarketSnapshot {
   activeSessions: string[];
   /** Current D1 bar. */
   today: { open: number; high: number; low: number; close: number } | null;
-  /** Last complete D1 bar. */
+  /** D1 bar of the previous trading day; null unless that day was fully observed. */
   previousDay: { high: number; low: number; close: number } | null;
   changeFromPrevClosePct: number | null;
   /** Per ACTIVE session, from M1 bars since that session's start (omitted when not derivable). */
@@ -124,8 +124,12 @@ export function computeMarketSnapshot(i: MarketSnapshotInputs): MarketSnapshot {
 
   const day = dailyWindow(nowMs, hours);
   const todayBar = i.bars.D1.find((b) => Date.parse(b.openTime) === day.openMs) ?? null;
-  const previousBar =
-    i.bars.D1.filter((b) => b.complete && Date.parse(b.closeTime) <= day.openMs).at(-1) ?? null;
+  // Strictly the previous TRADING day (an older bar would give misleading PDH/PDL). A bar whose
+  // period ended counts even before the loop marks it complete (up to the close grace period).
+  const prevDay = previousTradingDay(day.openMs, hours);
+  const previousBar = prevDay
+    ? (i.bars.D1.find((b) => Date.parse(b.openTime) === prevDay.openMs) ?? null)
+    : null;
   const change =
     todayBar && previousBar
       ? pct(dec(todayBar.close).minus(previousBar.close), dec(previousBar.close))

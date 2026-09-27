@@ -115,6 +115,26 @@ describe('computeMarketSnapshot', () => {
     expect(s.changeFromPrevClosePct).toBeNull();
   });
 
+  it('never presents an older day as the previous day when that day was not observed', () => {
+    // Wednesday: Tuesday's bar is missing (e.g. ASTRA was down) — Monday's range is not PDH/PDL.
+    const s = computeMarketSnapshot(
+      inputs({
+        now: new Date('2026-09-30T14:30:00Z'),
+        quote: quoteAt('2026-09-30T14:29:59.000Z'),
+        bars: { ...noBars(), D1: [monday] },
+      }),
+    );
+    expect(s.previousDay).toBeNull();
+  });
+
+  it('uses the previous day as soon as its period has ended, before the loop finalises it', () => {
+    const ended = { ...monday, complete: false };
+    const s = computeMarketSnapshot(
+      inputs({ now: new Date('2026-09-28T22:00:01Z'), bars: { ...noBars(), D1: [ended] } }),
+    );
+    expect(s.previousDay).toEqual({ high: 20_100, low: 19_900, close: 20_050 });
+  });
+
   it('computes ATR(14) for H1 and D1 only with at least 15 complete bars', () => {
     const start = Date.parse('2026-09-28T00:00:00Z');
     const h1 = Array.from({ length: 15 }, (_, i) =>

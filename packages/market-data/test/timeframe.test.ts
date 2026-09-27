@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { barWindow, dailyWindow, TIMEFRAMES } from '../src/timeframe';
+import { barWindow, dailyWindow, previousTradingDay, TIMEFRAMES } from '../src/timeframe';
 import { GLOBEX, ms } from './fixtures';
 
 const iso = (w: { openMs: number; closeMs: number }) => [
@@ -70,6 +70,35 @@ describe('bar windows', () => {
     expect(iso(spring)).toEqual(['2026-03-07T23:00:00.000Z', '2026-03-08T22:00:00.000Z']);
     expect((spring.closeMs - spring.openMs) / 3_600_000).toBe(23);
     expect(barWindow(ms('2026-03-08T12:00:00Z'), 'D1', GLOBEX)).toEqual(spring);
+  });
+
+  it('finds the previous trading day, skipping the weekend and across DST', () => {
+    const prev = (dayOpen: string, hours = GLOBEX) => {
+      const w = previousTradingDay(ms(dayOpen), hours);
+      return w ? iso(w) : null;
+    };
+    // Tuesday's day (opens Mon 18:00 EDT) → Monday's day.
+    expect(prev('2026-09-28T22:00:00Z')).toEqual([
+      '2026-09-27T22:00:00.000Z',
+      '2026-09-28T22:00:00.000Z',
+    ]);
+    // Monday's day (opens Sun 18:00 EDT) → Friday's day (Thu 18:00 → Fri 18:00 EDT).
+    expect(prev('2026-09-27T22:00:00Z')).toEqual([
+      '2026-09-24T22:00:00.000Z',
+      '2026-09-25T22:00:00.000Z',
+    ]);
+    // Saturday's (closed) window → Friday's day.
+    expect(prev('2026-09-25T22:00:00Z')![0]).toBe('2026-09-24T22:00:00.000Z');
+    // Monday after the fall-back weekend (opens Sun Nov 1 18:00 EST = 23:00Z) → Friday Oct 30.
+    expect(prev('2026-11-01T23:00:00Z')).toEqual([
+      '2026-10-29T22:00:00.000Z',
+      '2026-10-30T22:00:00.000Z',
+    ]);
+    // No trading hours: the previous UTC day.
+    expect(previousTradingDay(ms('2026-09-28T00:00:00Z'), undefined)).toEqual({
+      openMs: ms('2026-09-27T00:00:00Z'),
+      closeMs: ms('2026-09-28T00:00:00Z'),
+    });
   });
 
   it('falls back to UTC midnight for D1 without trading hours', () => {
