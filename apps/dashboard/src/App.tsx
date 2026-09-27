@@ -10,6 +10,7 @@ import { MarketScanner } from './pages/MarketScanner';
 import { Login } from './pages/Login';
 import { Activity, Audit, Automation, Health } from './pages/Operations';
 import { Overview } from './pages/Overview';
+import { Positions } from './pages/Positions';
 import { RiskControls } from './pages/RiskControls';
 import { Configuration, Paper, Rules, Strategies } from './pages/Trading';
 
@@ -31,6 +32,7 @@ const routes = [
       { path: 'approvals', element: <Approvals /> },
       { path: 'approvals/:id', element: <DecisionDetailPage /> },
       { path: 'accounts', element: <Accounts /> },
+      { path: 'positions', element: <Positions /> },
       { path: 'accounts/:id', element: <AccountDetailPage /> },
       { path: 'risk', element: <RiskControls /> },
       { path: 'activity', element: <Activity /> },

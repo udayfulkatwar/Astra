@@ -242,6 +242,13 @@ export async function handleDemoRequest(
       );
       return w.status === 'OK' ? w : { ...w, value: null };
     }
+    if (path === '/api/v1/monitor/positions')
+      return {
+        asOf: rt.monitorAsOf,
+        policy: rt.monitorPolicy,
+        accounts: rt.monitorViews,
+        alerts: rt.monitorAlerts.list(),
+      };
     if (path === '/api/v1/calendar/risk')
       return eventRiskView({
         calendar: rt.calendarService.fresh(),

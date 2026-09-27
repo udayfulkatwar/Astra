@@ -9,6 +9,8 @@ Phase 2 (market data) complete except the real provider adapter**, which needs t
 platform choice (see _Owner inputs_). **Phase 4 calendar groundwork done** (provider port,
 poller, validation, change events, event-risk view; a real provider needs the owner's choice);
 news is not started. **Phase 5 groundwork done:** market-structure detection (no lookahead).
+**Phase 8 started:** the position monitor (live positions, limit buffers, trailing path risk,
+alerts) is done; the trade journal and backtesting are next.
 Paper trading runs end to end on simulated or ingested data, with bars, a market scanner,
 market structure, a quote-quality guard and event blackouts.
 
@@ -20,7 +22,7 @@ market structure, a quote-quality guard and event blackouts.
 | Tooling            | pnpm workspace, TS 6 strict, ESLint (type-aware), Prettier, Vitest, GitHub Actions CI with Postgres                                                                                                             | —                                |
 | `@astra/core`      | `Observed<T>` (no-fabrication wrapper), modes, health, UTC/time-zone (DST-safe) utilities, sessions/trading hours, decimal math, UUIDv7, canonical JSON/hash, DATA/SIGNAL/CONTEXT schemas                       | 38                               |
 | `@astra/prop-firm` | Rule-profile schema (all §13 rule families), account tracking (peaks, day-start), account state engine, worst-case `canTrade` rule engine, firm quantity headroom                                               | 51 (incl. property tests)        |
-| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN                                                                              | 20 (incl. 500-run property test) |
+| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN; position monitor + alert tracker (ADR-0012)                                 | 33 (incl. 500-run property test) |
 | `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                    | 24                               |
 | `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                       | 83 (incl. property test)         |
 | `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt) | 22                               |
@@ -34,7 +36,7 @@ market structure, a quote-quality guard and event blackouts.
 | Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                  | compose validated                |
 | n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                | JSON validated                   |
 
-**Total: 389 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 403 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -83,18 +85,30 @@ Remaining:
   `assessBlackout` the gate uses. With `ASTRA_SIMULATION=true` (and in the demo) a SIMULATED
   weekly schedule is polled; the demo can jump to 5 minutes before the next high-impact event.
 
+## Phase 8 — position monitor (done)
+
+- `monitorAccount` / `MonitorAlertTracker` in `@astra/risk`, run by the safety loop after each
+  account sync; `GET /api/v1/monitor/positions`; dashboard **Position Monitor** page (alerts,
+  worst-case limit buffers, positions with mark, P&L, R, stop/target distance and a stop → target
+  gauge). Also in the demo.
+- Marks come from fresh exit-side quotes only; the trailing intraday-equity **path risk** (run up
+  to the targets, then reverse to the stops) is computed and alerted — known issue 4 is now
+  monitored (the gate does not price it yet; see decisions).
+- Alerts are events (WARN/CRITICAL) raised once per crossing with hysteresis; missing data never
+  clears one. It warns only — no automatic closing.
+
 ## Remaining (by phase)
 
-| Phase | Scope                                                                                                                                                           |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                                  |
-| 4     | Real economic-calendar provider adapter (owner's choice); news ingestion + classification; sentiment; flip `decision.news.required`                             |
-| 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation               |
-| 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                                  |
-| 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                                  |
-| 8     | Position monitor events (stop/target approaching, live trailing-threshold distance), trade journal, learning metrics, backtesting subsystem; extended paper run |
-| 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                                        |
-| 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                                             |
+| Phase | Scope                                                                                                                                             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                    |
+| 4     | Real economic-calendar provider adapter (owner's choice); news ingestion + classification; sentiment; flip `decision.news.required`               |
+| 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
+| 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                    |
+| 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
+| 8     | Trade journal, learning metrics, backtesting subsystem; extended paper run                                                                        |
+| 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                          |
+| 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                               |
 
 ## Owner inputs needed (not blocking current work)
 
@@ -110,6 +124,9 @@ Remaining:
    means every event blocks every instrument (safe but restrictive).
 8. **Review the structure definitions** (ADR-0010: swing strength, equal-level tolerance, FVG
    minimum) against your strategy.
+9. **Decisions on protection** (ADR-0012): should the gate size new trades against the trailing
+   path risk (stricter), and should ASTRA ever close positions automatically (e.g. before a
+   trailing breach)? Today it only warns.
 
 ## Decisions made autonomously (summary)
 
@@ -127,9 +144,9 @@ authorization. Details in `docs/adr/`.
    adjusting to the installed n8n version.
 3. Day-start values are observed from the first snapshot after the reset unless the platform
    reports them; late observations use the conservative (higher) value.
-4. Intraday trailing drawdown: worst-case checks use the current threshold. A trade that runs up
-   then reverses raises the threshold during the trade — Phase 8's position monitor must watch
-   live distance to the trailing threshold.
+4. Intraday trailing drawdown: the gate's worst-case checks use the current threshold. The
+   position monitor now prices and alerts the run-up-then-reverse path (ADR-0012); using it in
+   the gate is an owner decision (stricter sizing).
 5. "No holding through news" (a position opened before a restricted window) is not modelled.
 6. Cross-currency instruments are rejected (no FX conversion of tick values yet).
 7. Only MARKET entries are supported; LIMIT entries are rejected by the gate.
@@ -160,8 +177,7 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
-Without owner input: Phase 8 groundwork — the position monitor (stop/target approaching, live
-distance to the trailing drawdown threshold) and the trade journal; then the news-ingestion
-port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
+Without owner input: the trade journal (per-trade record from decision to close, with MAE/MFE
+and outcome vs plan), then the news-ingestion port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

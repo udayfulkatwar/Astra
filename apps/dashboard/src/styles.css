@@ -22,6 +22,9 @@
   --viz-fvg: #199e70;
   --viz-candle: #7d8ba1;
   --viz-grid: #1a2332;
+  /* Diverging pair for loss / profit zones (validated on --panel). */
+  --viz-loss: #e66767;
+  --viz-profit: #3987e5;
   --radius: 8px;
   --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -1063,4 +1066,74 @@ select:focus {
 
 .table tr.row-alert td {
   background: rgba(239, 68, 68, 0.08);
+}
+
+/* Position monitor */
+.alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.buffers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 20px;
+  margin-bottom: 14px;
+}
+.buffer-row .usage {
+  margin: 3px 0;
+}
+.table.positions td {
+  vertical-align: middle;
+}
+.path-gauge {
+  width: 140px;
+}
+.pg-track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--panel-2);
+}
+.pg-loss,
+.pg-profit {
+  position: absolute;
+  top: 3px;
+  height: 4px;
+}
+.pg-loss {
+  left: 0;
+  background: var(--viz-loss);
+  opacity: 0.45;
+  border-radius: 2px 0 0 2px;
+}
+.pg-profit {
+  background: var(--viz-profit);
+  opacity: 0.45;
+  border-radius: 0 2px 2px 0;
+}
+.pg-entry {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 10px;
+  background: var(--muted);
+}
+.pg-mark {
+  position: absolute;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.pg-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
 }

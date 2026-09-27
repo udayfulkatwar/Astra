@@ -16,3 +16,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0009](0009-market-data-architecture.md)         | Market data: one ingestion service, quote-built bars          | Accepted |
 | [0010](0010-market-structure-definitions.md)     | Market structure: deterministic definitions, no lookahead     | Accepted |
 | [0011](0011-economic-calendar-provider-port.md)  | Economic calendar: pulled provider port, shared blackout rule | Accepted |
+| [0012](0012-position-monitor.md)                 | Position monitor: observe and warn, trailing path risk        | Accepted |

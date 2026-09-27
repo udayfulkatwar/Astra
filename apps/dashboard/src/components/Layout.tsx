@@ -7,6 +7,7 @@ const NAV: { to: string; label: string; section?: string }[] = [
   { to: '/', label: 'Overview', section: 'Command' },
   { to: '/approvals', label: 'Trade Approval Center' },
   { to: '/accounts', label: 'Accounts' },
+  { to: '/positions', label: 'Position Monitor' },
   { to: '/risk', label: 'Risk Controls' },
   { to: '/activity', label: 'Live Activity' },
   { to: '/calendar', label: 'Economic Calendar', section: 'Intelligence' },

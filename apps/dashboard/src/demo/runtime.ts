@@ -49,7 +49,14 @@ import {
 } from '@astra/prop-firm';
 import { CalendarService, SimulatedCalendarAdapter } from '@astra/calendar';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
-import { classifyAccountHealth, type AccountHealthAssessment } from '@astra/risk';
+import {
+  DEFAULT_MONITOR_POLICY,
+  MonitorAlertTracker,
+  classifyAccountHealth,
+  monitorAccount,
+  type AccountHealthAssessment,
+  type AccountMonitorView,
+} from '@astra/risk';
 import {
   ComponentHealthRegistry,
   KillSwitchRegistry,
@@ -556,6 +563,10 @@ export class DemoRuntime {
   }
 
   private syncing = false;
+  readonly monitorPolicy = DEFAULT_MONITOR_POLICY;
+  readonly monitorAlerts = new MonitorAlertTracker(DEFAULT_MONITOR_POLICY);
+  monitorViews: AccountMonitorView[] = [];
+  monitorAsOf: string | null = null;
   private historyQuotes = 0;
 
   private async syncAccounts(): Promise<void> {
@@ -563,8 +574,40 @@ export class DemoRuntime {
     this.syncing = true;
     try {
       await this.syncAll();
+      this.runMonitor();
     } finally {
       this.syncing = false;
+    }
+  }
+
+  /** Position monitor after each sync — the same evaluation and alert tracking as the core. */
+  private runMonitor(): void {
+    const now = this.clock.now();
+    this.monitorViews = [...this.config.accounts.values()]
+      .filter((a) => a.status === 'ACTIVE')
+      .map((a) => {
+        const e = this.accounts.get(a.id)!;
+        return monitorAccount({
+          accountId: a.id,
+          now,
+          snapshot: e.snapshot,
+          state: e.state,
+          drawdownRule: this.config.profiles.get(a.propFirmProfileId)!.maxDrawdown,
+          instruments: (s) => this.config.instruments.get(s),
+          quote: (s) => this.market.fresh(s),
+          policy: this.monitorPolicy,
+        });
+      });
+    this.monitorAsOf = now.toISOString();
+    for (const c of this.monitorAlerts.update(this.monitorViews, now)) {
+      const a = c.alert;
+      this.emit(
+        c.change === 'CLEARED' ? 'INFO' : a.level,
+        'position-monitor',
+        `POSITION_${a.kind}_${c.change}`,
+        c.change === 'CLEARED' ? `cleared: ${a.message}` : a.message,
+        a.accountId,
+      );
     }
   }
 

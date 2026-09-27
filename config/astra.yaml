@@ -107,6 +107,13 @@ tracking:
 monitors:
   haltMonitorIntervalMs: 2000
   snapshotPersistIntervalMs: 60000
+  # Position monitor alerts (it warns — it never changes orders or closes positions). DEFAULTS.
+  positions:
+    stopProximityPct: 25 # STOP_NEAR when ≤ 25% of the initial stop distance is left
+    targetProximityPct: 80 # TARGET_NEAR when ≥ 80% of the way to the target
+    bufferWarnPct: 70 # worst case uses ≥ 70% of a hard limit (incl. the trailing path)…
+    bufferCriticalPct: 90 # …critical from 90%
+    hysteresisPct: 5 # an alert clears only 5 points back on the safe side
 
 # Market-data quality and OHLC bars (Phase 2). A quote-to-quote move above an instrument's
 # maxQuoteJumpTicks makes its quotes INVALID (no new trades) for suspectCooldownMs.

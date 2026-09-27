@@ -2,6 +2,7 @@
 import { COMPONENT_IDS, SessionDefinitionSchema, type ComponentId } from '@astra/core';
 import { DecisionPolicySchema } from '@astra/decision';
 import { StructureParamsSchema } from '@astra/market-structure';
+import { MonitorPolicySchema } from '@astra/risk';
 import { z } from 'zod';
 
 const componentStaleness = z.object(
@@ -45,6 +46,8 @@ export const SystemConfigSchema = z.object({
     haltMonitorIntervalMs: z.number().int().positive(),
     /** Minimum interval between persisted account snapshots (history), per account. */
     snapshotPersistIntervalMs: z.number().int().positive(),
+    /** Position monitor alert levels (DEFAULTS when omitted); it warns, never acts. */
+    positions: MonitorPolicySchema.optional(),
   }),
   /** Market-data quality and bar settings. Omitted → the @astra/market-data defaults. */
   marketData: z

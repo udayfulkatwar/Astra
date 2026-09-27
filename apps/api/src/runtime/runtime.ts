@@ -45,6 +45,7 @@ import { HealthService } from './health-service';
 import { KillSwitchService } from './kill-switch-service';
 import { BarPersister } from './market-data';
 import { ModeService } from './mode-service';
+import { PositionMonitorService } from './position-monitor';
 import { createSimulation } from './simulation';
 
 export interface RuntimeOptions {
@@ -91,6 +92,7 @@ export class AstraRuntime {
   /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
   readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
+  readonly monitor: PositionMonitorService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
@@ -197,6 +199,13 @@ export class AstraRuntime {
       killSwitches: this.killSwitches,
       log,
       providerTimeoutMs: config.system.assembler.providerTimeoutMs,
+    });
+    this.monitor = new PositionMonitorService({
+      config,
+      clock,
+      accounts: this.accounts,
+      market: this.market,
+      events: this.events,
     });
     this.decisions = new DecisionService({
       config,
@@ -359,6 +368,7 @@ export class AstraRuntime {
       void this.barPersister.flush();
       await this.health.probe();
       await this.accounts.syncAll();
+      await this.monitor.evaluate();
       await this.killSwitches.autoClearDue();
       const expired = await this.repos.decisions.expireStaleApprovals(
         this.clock.now().toISOString(),

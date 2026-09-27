@@ -22,7 +22,14 @@ import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
 import type { MarketStructure } from '@astra/market-structure';
 import type { AccountState, AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
-import type { AccountHealthAssessment, RiskPolicy } from '@astra/risk';
+import type {
+  AccountHealthAssessment,
+  AccountMonitorView,
+  MonitorAlert,
+  MonitorPolicy,
+  PositionView,
+  RiskPolicy,
+} from '@astra/risk';
 import type { KillSwitchState } from '@astra/safety';
 
 export type {
@@ -164,3 +171,12 @@ export type { Bar, MarketSnapshot, MarketStructure, Timeframe };
 
 /** Event risk per instrument (GET /api/v1/calendar/risk). */
 export type { EventRiskView, InstrumentEventRisk };
+
+/** Position monitor (GET /api/v1/monitor/positions). */
+export type { AccountMonitorView, MonitorAlert, MonitorPolicy, PositionView };
+export interface PositionMonitor {
+  asOf: string | null;
+  policy: MonitorPolicy;
+  accounts: AccountMonitorView[];
+  alerts: MonitorAlert[];
+}

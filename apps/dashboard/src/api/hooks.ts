@@ -21,6 +21,7 @@ import type {
   ModeInfo,
   Observed,
   OrderRecord,
+  PositionMonitor,
   Quote,
   StatusBar,
   SystemEvent,
@@ -154,6 +155,13 @@ export const useCalendarRisk = () =>
     queryKey: ['calendar-risk'],
     queryFn: () => api<EventRiskView>('/api/v1/calendar/risk'),
     refetchInterval: 5_000,
+  });
+
+export const usePositionMonitor = () =>
+  useQuery({
+    queryKey: ['position-monitor'],
+    queryFn: () => api<PositionMonitor>('/api/v1/monitor/positions'),
+    refetchInterval: 2_000,
   });
 
 export const useOrders = () =>
