@@ -1,0 +1,22 @@
+{
+  "name": "@astra/calendar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Economic-calendar DATA: provider port, validation and instrument mapping, change detection, poller with timeout, SIMULATED schedule for paper tests. Pure and isomorphic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "zod": "^4.6.5",
+    "luxon": "^3.7.2"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.5"
+  }
+}

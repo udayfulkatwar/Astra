@@ -59,6 +59,14 @@ export const InstrumentSpecSchema = z
     maxEntryDeviationTicks: PositiveNumberSchema.optional(),
     /** Data-quality guard: a quote-to-quote move larger than this is treated as abnormal. */
     maxQuoteJumpTicks: PositiveNumberSchema.optional(),
+    /**
+     * Currencies whose economic events affect this instrument (e.g. ["USD"]). Omitted → events of
+     * every currency affect it (fail-safe). Used to map provider events to instruments.
+     */
+    eventCurrencies: z
+      .array(z.string().regex(/^[A-Z]{3}$/, 'ISO 4217 code'))
+      .min(1)
+      .optional(),
     /** Symbol used by each market-data/broker adapter, keyed by adapter id (e.g. { mt5: "XAUUSD.r" }). */
     providerSymbols: z.record(z.string(), z.string().min(1)).optional(),
     verification: VerificationSchema,

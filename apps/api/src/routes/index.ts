@@ -3,6 +3,7 @@ import type { TokenAuthenticator } from '../auth';
 import type { AstraRuntime } from '../runtime/runtime';
 import { registerAccountRoutes } from './accounts';
 import { registerAutomationRoutes } from './automation';
+import { registerCalendarRoutes } from './calendar';
 import { registerDecisionRoutes } from './decisions';
 import { registerMarketRoutes } from './market';
 import { registerRecordRoutes } from './records';
@@ -20,5 +21,6 @@ export function registerRoutes(
   registerDecisionRoutes(app, runtime, auth);
   registerRecordRoutes(app, runtime, auth);
   registerAutomationRoutes(app, runtime, auth);
+  registerCalendarRoutes(app, runtime, auth);
   registerMarketRoutes(app, runtime, auth);
 }

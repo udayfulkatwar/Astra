@@ -23,6 +23,7 @@ export default function DemoBanner() {
   }).format(now);
 
   const jump = (target: Date) => rt.jumpClock(target);
+  const nextEvent = rt.nextRestrictedEvent();
   const closeSoon = status?.nextClose ? new Date(Date.parse(status.nextClose) - 5 * 60_000) : null;
   const backToOpen = () => {
     const next =
@@ -51,6 +52,16 @@ export default function DemoBanner() {
         {!status?.open && (
           <button type="button" className="btn small" onClick={backToOpen}>
             Jump to market hours
+          </button>
+        )}
+        {nextEvent && (
+          <button
+            type="button"
+            className="btn small"
+            title={`Moves the clock to 5 minutes before "${nextEvent.title}" (SIMULATED): the event blackout should block trades`}
+            onClick={() => jump(new Date(Date.parse(nextEvent.scheduledAt) - 5 * 60_000))}
+          >
+            Jump to 5 min before next high-impact event
           </button>
         )}
         {status?.open && (

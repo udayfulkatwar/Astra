@@ -21,6 +21,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@astra/calendar": "workspace:*",
     "@astra/config": "workspace:*",
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",

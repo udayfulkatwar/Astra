@@ -58,6 +58,21 @@ export const SystemConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Economic-calendar provider polling (ADR-0011). Omitted → no provider: windows arrive only by
+   * push (n8n → POST /api/v1/calendar/window), or from the SIMULATED schedule in simulation mode.
+   */
+  calendar: z
+    .object({
+      /** Provider adapter; real ones are added once the owner chooses a provider. */
+      provider: z.enum(['none']).default('none'),
+      pollIntervalMs: z.number().int().min(10_000).default(300_000),
+      timeoutMs: z.number().int().positive().max(60_000).default(10_000),
+      lookbackHours: z.number().int().min(0).max(168).default(24),
+      lookaheadHours: z.number().int().min(1).max(720).default(168),
+    })
+    .strict()
+    .optional(),
+  /**
    * Market-structure detection definitions (swings, BOS/CHoCH, liquidity, gaps — ADR-0010).
    * Omitted → the @astra/market-structure defaults. DEFAULTS to review with the strategy (Phase 5).
    */

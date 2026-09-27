@@ -8,6 +8,7 @@ import type {
   AccountSnapshot,
   CalendarWindow,
   ComponentHealth,
+  EventImpact,
   HealthStatus,
   InstrumentSpec,
   Observed,
@@ -15,6 +16,7 @@ import type {
   StrategyDefinition,
   TradingMode,
 } from '@astra/core';
+import type { EventRiskView, InstrumentEventRisk } from '@astra/calendar';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
@@ -26,6 +28,7 @@ import type { KillSwitchState } from '@astra/safety';
 export type {
   AccountState,
   CalendarWindow,
+  EventImpact,
   ComponentHealth,
   HealthStatus,
   KillSwitchState,
@@ -158,3 +161,6 @@ export type { ExecutionResult, Observed, Quote };
 
 /** Market scanner snapshot, bars, bar timeframes and market structure (GET /api/v1/market/…). */
 export type { Bar, MarketSnapshot, MarketStructure, Timeframe };
+
+/** Event risk per instrument (GET /api/v1/calendar/risk). */
+export type { EventRiskView, InstrumentEventRisk };

@@ -56,8 +56,12 @@ export default tseslint.config(
     },
   },
   {
-    // @astra/market-data and @astra/market-structure also run in the browser: no Node built-ins.
-    files: ['packages/market-data/src/**/*.ts', 'packages/market-structure/src/**/*.ts'],
+    // Market and calendar packages also run in the browser: no Node built-ins.
+    files: [
+      'packages/market-data/src/**/*.ts',
+      'packages/market-structure/src/**/*.ts',
+      'packages/calendar/src/**/*.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',

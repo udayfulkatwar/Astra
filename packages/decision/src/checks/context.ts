@@ -1,5 +1,5 @@
 /** CALENDAR, NEWS and AI layers — CONTEXT can restrict a trade, never approve one. */
-import { describeNotOk, effectiveImpact, eventAffects, type EventImpact } from '@astra/core';
+import { assessBlackout, describeNotOk, type EventImpact } from '@astra/core';
 import { fail, pass, unknown, type GateCheck } from './check';
 
 /** Most restrictive merge of the global default blackout and the strategy blackout. */
@@ -25,31 +25,19 @@ export const calendarEventBlackout: GateCheck = {
     const c = d.fresh.calendar;
     if (c.status !== 'OK') return unknown(describeNotOk('economic calendar', c));
     const rule = mergedBlackout(i.policy.eventBlackout, i.strategy?.eventBlackout);
-    const now = Date.parse(i.now);
-    const from = now - rule.minutesAfter * 60_000;
-    const to = now + rule.minutesBefore * 60_000;
-    if (Date.parse(c.value.from) > from || Date.parse(c.value.to) < to) {
+    const a = assessBlackout(c.value, i.candidate.signal.symbol, new Date(i.now), rule);
+    if (a.state === 'UNCOVERED') {
       return unknown('economic calendar does not cover the blackout window', {
         coverage: { from: c.value.from, to: c.value.to },
       });
     }
-    const symbol = i.candidate.signal.symbol;
-    const blocking = c.value.events.filter((e) => {
-      const t = Date.parse(e.scheduledAt);
-      return (
-        rule.impactLevels.includes(effectiveImpact(e.impact)) &&
-        eventAffects(e, symbol) &&
-        t >= from &&
-        t <= to
-      );
-    });
-    if (blocking.length > 0) {
+    if (a.state === 'BLACKOUT') {
       return fail(
-        blocking.map(
+        a.blocking.map(
           (e) =>
             `${e.impact}-impact event "${e.title}" at ${e.scheduledAt} is within the restricted window`,
         ),
-        { blackout: rule, events: blocking.map((e) => e.id) },
+        { blackout: rule, events: a.blocking.map((e) => e.id) },
       );
     }
     return pass(`no restricted events within −${rule.minutesAfter}/+${rule.minutesBefore} min`, {

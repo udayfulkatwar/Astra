@@ -141,6 +141,7 @@ astra/
 │   ├── safety/              Kill switches, component health registry, halt monitor
 │   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
+│   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
@@ -160,6 +161,7 @@ risk        → core, prop-firm
 safety      → core
 market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
+calendar    → core   (pure and isomorphic)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
 config      → core, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)

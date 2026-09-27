@@ -8,7 +8,13 @@
  * Until that completes, the effective mode is HALTED and the kill-switch registry is unloaded,
  * so every decision is rejected. If the database is unavailable, initialization is retried.
  */
-import { errorMessage, type Clock } from '@astra/core';
+import {
+  CalendarPoller,
+  CalendarService,
+  SimulatedCalendarAdapter,
+  type CalendarChange,
+} from '@astra/calendar';
+import { effectiveImpact, errorMessage, type Clock } from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import {
   AccountRepository,
@@ -32,7 +38,6 @@ import {
 } from '@astra/market-data';
 import type { Logger } from 'pino';
 import { AccountService } from './account-service';
-import { CalendarService } from './calendar';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
 import { ExecutionService } from './execution-service';
@@ -90,6 +95,8 @@ export class AstraRuntime {
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
   readonly simulation: SimulationAdapter | null;
+  /** Economic-calendar provider poller (null: windows arrive by push only). */
+  readonly calendarPoller: CalendarPoller | null;
   /** Quote sources started after initialization (simulation now; real providers later). */
   readonly marketAdapters: readonly MarketDataAdapter[];
 
@@ -98,6 +105,7 @@ export class AstraRuntime {
   private loopTimer: NodeJS.Timeout | undefined;
   private initTimer: NodeJS.Timeout | undefined;
   private cycleRunning = false;
+  private calendarEvents: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(private readonly opts: RuntimeOptions) {
@@ -134,6 +142,7 @@ export class AstraRuntime {
       heartbeats: this.repos.heartbeats,
       adapters: () => [...this.execution.adapters.values()],
       marketData: () => this.market.feedHealth(this.tradedSymbols),
+      calendar: () => this.calendar.health(),
     });
     this.barPersister = new BarPersister(this.repos.marketBars, log);
     const freshness = config.system.decision.freshness;
@@ -151,9 +160,20 @@ export class AstraRuntime {
       onListenerError: (err) =>
         log.error({ err: errorMessage(err) }, 'market-data quote listener failed'),
     });
-    this.calendar = new CalendarService(() =>
-      this.health.report('CALENDAR', 'ONLINE', 'calendar window received'),
-    );
+    this.calendar = new CalendarService({
+      clock,
+      freshness: {
+        maxAgeMs: freshness.calendarMaxAgeMs,
+        maxFutureSkewMs: freshness.maxFutureSkewMs,
+      },
+      instruments: config.instruments,
+      // Queued: change events are recorded in order, and pushes can wait for them.
+      onChanges: (changes, source) => {
+        this.calendarEvents = this.calendarEvents.then(() =>
+          this.reportCalendarChanges(changes, source),
+        );
+      },
+    });
     this.execution = new ExecutionService({
       config,
       store: this.repos.execution,
@@ -193,7 +213,23 @@ export class AstraRuntime {
       events: this.events,
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
     });
-    this.simulation = opts.simulation ? createSimulation(config, this.calendar, clock) : null;
+    this.simulation = opts.simulation ? createSimulation(config, clock) : null;
+    // Calendar provider: the SIMULATED schedule in simulation mode; real providers once chosen.
+    const cal = config.system.calendar;
+    this.calendarPoller = opts.simulation
+      ? new CalendarPoller({
+          adapter: new SimulatedCalendarAdapter(),
+          service: this.calendar,
+          clock,
+          intervalMs: cal?.pollIntervalMs ?? 300_000,
+          timeoutMs: cal?.timeoutMs ?? 10_000,
+          lookbackMs: (cal?.lookbackHours ?? 24) * 3_600_000,
+          lookaheadMs: (cal?.lookaheadHours ?? 168) * 3_600_000,
+          onResult: (r) => {
+            if (!r.ok) log.warn({ err: r.error, failures: r.failures }, 'calendar poll failed');
+          },
+        })
+      : null;
     // Real provider adapters (owner's platform, Phase 2 remainder) are registered here.
     this.marketAdapters = this.simulation ? [this.simulation] : [];
   }
@@ -252,6 +288,10 @@ export class AstraRuntime {
     });
     for (const w of config.warnings) this.log.warn({ config: true }, w);
     await this.startMarketAdapters();
+    if (this.calendarPoller) {
+      await this.calendarPoller.poll();
+      if (this.opts.startLoops) this.calendarPoller.start();
+    }
     if (this.opts.startLoops) {
       await this.cycle();
       this.loopTimer = setInterval(
@@ -259,6 +299,38 @@ export class AstraRuntime {
         config.system.monitors.haltMonitorIntervalMs,
       );
       this.loopTimer.unref();
+    }
+  }
+
+  /** Resolves once every calendar change reported so far is recorded as a system event. */
+  calendarEventsRecorded(): Promise<void> {
+    return this.calendarEvents;
+  }
+
+  /** Calendar changes become system events (restricted-impact ones as warnings). Never rejects. */
+  private async reportCalendarChanges(
+    changes: readonly CalendarChange[],
+    source: string,
+  ): Promise<void> {
+    for (const c of changes) {
+      const e = c.event;
+      const what: Record<CalendarChange['type'], string> = {
+        ADDED: `new ${e.impact}-impact event "${e.title}" at ${e.scheduledAt}`,
+        REMOVED: `event "${e.title}" at ${e.scheduledAt} was removed`,
+        RESCHEDULED: `event "${e.title}" moved from ${c.previous?.scheduledAt ?? '?'} to ${e.scheduledAt}`,
+        IMPACT_CHANGED: `event "${e.title}" impact ${c.previous?.impact ?? '?'} → ${e.impact}`,
+        ACTUAL_RELEASED: `"${e.title}" released: actual ${e.actual ?? '?'} (expected ${e.expected ?? '—'})`,
+      };
+      const restricted = this.config.system.decision.eventBlackout.impactLevels.includes(
+        effectiveImpact(e.impact),
+      );
+      await this.events.emit({
+        level: restricted && c.type !== 'ACTUAL_RELEASED' ? 'WARN' : 'INFO',
+        component: 'calendar',
+        type: `CALENDAR_${c.type}`,
+        message: what[c.type],
+        data: { source, eventId: e.id, previous: c.previous },
+      });
     }
   }
 
@@ -305,6 +377,7 @@ export class AstraRuntime {
     this.stopped = true;
     clearTimeout(this.initTimer);
     clearInterval(this.loopTimer);
+    this.calendarPoller?.stop();
     for (const adapter of this.marketAdapters) {
       try {
         await adapter.stop();

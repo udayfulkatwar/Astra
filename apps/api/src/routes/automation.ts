@@ -3,7 +3,7 @@
  * Ingested data is labelled sourceKind MANUAL: acceptable in PAPER, refused in SHADOW/LIVE
  * (which require first-class LIVE adapters, Phase 2/4).
  */
-import { CalendarWindowSchema, QuoteSchema } from '@astra/core';
+import { QuoteSchema } from '@astra/core';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { READ_ROLES, requireRole, type TokenAuthenticator } from '../auth';
@@ -70,27 +70,4 @@ export function registerAutomationRoutes(
     return { accepted, ignored };
   });
   app.get('/api/v1/market/quotes', read, () => ({ quotes: runtime.market.all() }));
-
-  const Calendar = z.object({ source: z.string().min(1).max(100), window: CalendarWindowSchema });
-  app.post('/api/v1/calendar/window', automation, (req) => {
-    const b = Calendar.parse(req.body);
-    runtime.calendar.ingest(
-      b.window,
-      `ingest:${b.source}`,
-      'MANUAL',
-      runtime.clock.now().toISOString(),
-    );
-    return { accepted: b.window.events.length };
-  });
-  app.get('/api/v1/calendar/upcoming', read, (req) => {
-    const q = z
-      .object({ hours: z.coerce.number().int().min(1).max(168).default(24) })
-      .parse(req.query);
-    const now = runtime.clock.now();
-    const w = runtime.calendar.upcoming(
-      new Date(now.getTime() - 3_600_000),
-      new Date(now.getTime() + q.hours * 3_600_000),
-    );
-    return w.status === 'OK' ? w : { ...w, value: null };
-  });
 }

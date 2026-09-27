@@ -1,5 +1,5 @@
 /**
- * Component health: active probes (database, market-data freshness, execution adapters) +
+ * Component health: active probes (database, market-data and calendar freshness, execution adapters) +
  * passive reports.
  */
 import { type Clock, type ComponentId, type HealthStatus } from '@astra/core';
@@ -19,6 +19,8 @@ export class HealthService {
       adapters: () => readonly BrokerAdapter[];
       /** MARKET_DATA from quote freshness of the traded instruments (all / some / none fresh). */
       marketData: () => { status: HealthStatus; detail: string };
+      /** CALENDAR from calendar freshness (the gate's `calendarMaxAgeMs`). */
+      calendar: () => { status: HealthStatus; detail: string };
     },
   ) {
     const policies = Object.fromEntries(
@@ -48,6 +50,9 @@ export class HealthService {
 
     const market = this.deps.marketData();
     this.registry.report('MARKET_DATA', market.status, market.detail);
+
+    const calendar = this.deps.calendar();
+    this.registry.report('CALENDAR', calendar.status, calendar.detail);
 
     const adapters = this.deps.adapters();
     if (adapters.length === 0) {

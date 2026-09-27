@@ -1060,3 +1060,7 @@ select:focus {
     stroke-dasharray: 4 3;
   }
 }
+
+.table tr.row-alert td {
+  background: rgba(239, 68, 68, 0.08);
+}

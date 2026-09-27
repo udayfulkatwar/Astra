@@ -9,6 +9,8 @@ import {
   type HealthStatus,
   type TradingMode,
 } from '@astra/core';
+import { eventRiskView } from '@astra/calendar';
+import { mergedBlackout } from '@astra/decision';
 import { TimeframeSchema } from '@astra/market-data';
 import { analyzeStructure } from '@astra/market-structure';
 import { KILL_SWITCH_SCOPES, type KillSwitchScope } from '@astra/safety';
@@ -46,7 +48,7 @@ function statusBar(rt: DemoRuntime): StatusBar {
     trading: { enabled: reasons.length === 0, reasons },
     risk,
     news: { status: byId.NEWS!.status, detail: 'news engine not implemented yet (Phase 4)' },
-    calendar: { status: byId.CALENDAR!.status, highImpactNext4h: 0, source: 'SIMULATED' },
+    calendar: calendarStatus(rt, byId.CALENDAR!.status),
     ai: { status: byId.AI!.status, detail: 'AI engine not implemented yet (Phase 6)' },
     automation: { status: byId.AUTOMATION!.status, detail: byId.AUTOMATION!.detail },
     data: { status: byId.MARKET_DATA!.status, detail: byId.MARKET_DATA!.detail },
@@ -54,6 +56,19 @@ function statusBar(rt: DemoRuntime): StatusBar {
     simulation: true,
     configHash: rt.config.hash,
     configWarnings: [...rt.config.warnings],
+  };
+}
+
+function calendarStatus(rt: DemoRuntime, status: HealthStatus): StatusBar['calendar'] {
+  const now = rt.clock.now().getTime();
+  const w = rt.calendarService.upcoming(new Date(now), new Date(now + 4 * 3_600_000));
+  return {
+    status,
+    highImpactNext4h:
+      w.status === 'OK'
+        ? w.value.events.filter((e) => e.impact === 'HIGH' || e.impact === 'UNKNOWN').length
+        : null,
+    source: w.status === 'OK' ? w.sourceKind : null,
   };
 }
 
@@ -218,7 +233,23 @@ export async function handleDemoRequest(
         throw new ApiError(404, 'NOT_FOUND', `instrument ${symbol} is not configured`);
       return { bars: rt.market.bars(symbol, timeframe.data, limit) };
     }
-    if (path === '/api/v1/calendar/upcoming') return rt.calendar();
+    if (path === '/api/v1/calendar/upcoming') {
+      const hours = Math.min(168, Math.max(1, Number(q.get('hours') ?? 24) || 24));
+      const now = rt.clock.now().getTime();
+      const w = rt.calendarService.upcoming(
+        new Date(now - 3_600_000),
+        new Date(now + hours * 3_600_000),
+      );
+      return w.status === 'OK' ? w : { ...w, value: null };
+    }
+    if (path === '/api/v1/calendar/risk')
+      return eventRiskView({
+        calendar: rt.calendarService.fresh(),
+        symbols: [...rt.config.instruments.keys()],
+        now: rt.clock.now(),
+        rule: mergedBlackout(rt.config.system.decision.eventBlackout),
+        poller: null,
+      });
   }
 
   if (method === 'POST') {

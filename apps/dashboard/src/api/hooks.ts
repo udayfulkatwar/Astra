@@ -12,6 +12,7 @@ import type {
   ConfigSummary,
   DecisionDetail,
   DecisionSummary,
+  EventRiskView,
   ExecutionResult,
   KillSwitchState,
   MarketSnapshot,
@@ -146,6 +147,13 @@ export const useCalendar = (hours = 24) =>
     queryKey: ['calendar', hours],
     queryFn: () => api<Observed<CalendarWindow | null>>(`/api/v1/calendar/upcoming?hours=${hours}`),
     refetchInterval: 30_000,
+  });
+
+export const useCalendarRisk = () =>
+  useQuery({
+    queryKey: ['calendar-risk'],
+    queryFn: () => api<EventRiskView>('/api/v1/calendar/risk'),
+    refetchInterval: 5_000,
   });
 
 export const useOrders = () =>

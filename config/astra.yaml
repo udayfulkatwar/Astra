@@ -115,6 +115,16 @@ marketData:
   maxBarsPerSeries: 1000
   barCloseGraceMs: 2000
 
+# Economic calendar (ADR-0011). No provider is chosen yet (owner input): windows arrive by push
+# from n8n (POST /api/v1/calendar/window). With ASTRA_SIMULATION=true a SIMULATED weekly schedule
+# is polled instead (paper tests only; refused in SHADOW and LIVE).
+calendar:
+  provider: none
+  pollIntervalMs: 300000
+  timeoutMs: 10000
+  lookbackHours: 24
+  lookaheadHours: 168
+
 # Market-structure detection (ADR-0010). ASTRA's generic definitions — DEFAULTS, not strategy
 # rules; review them with your strategy in Phase 5.
 structure:

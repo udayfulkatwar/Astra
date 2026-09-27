@@ -47,6 +47,7 @@ import {
   type AccountState,
   type AccountTracking,
 } from '@astra/prop-firm';
+import { CalendarService, SimulatedCalendarAdapter } from '@astra/calendar';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
 import { classifyAccountHealth, type AccountHealthAssessment } from '@astra/risk';
 import {
@@ -132,6 +133,9 @@ export class DemoRuntime {
   readonly accounts = new Map<string, AccountEntry>();
   /** The real market-data engine (quality monitor, bars, snapshots) fed by the simulator. */
   readonly market: MarketDataService;
+  /** The real calendar engine, fed by the SIMULATED weekly schedule. */
+  readonly calendarService: CalendarService;
+  private readonly calendarAdapter = new SimulatedCalendarAdapter();
   /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
   readonly tradedSymbols: readonly string[];
 
@@ -165,6 +169,23 @@ export class DemoRuntime {
       observingSince: historyStart,
       onRejected: (source, reason) =>
         this.emit('WARN', 'market-data', 'QUOTE_REJECTED', `${source}: ${reason}`),
+    });
+    this.calendarService = new CalendarService({
+      clock: this.clock,
+      freshness: {
+        maxAgeMs: freshness.calendarMaxAgeMs,
+        maxFutureSkewMs: freshness.maxFutureSkewMs,
+      },
+      instruments: this.config.instruments,
+      onChanges: (changes) => {
+        for (const c of changes)
+          this.emit(
+            'INFO',
+            'calendar',
+            `CALENDAR_${c.type}`,
+            `${c.type}: "${c.event.title}" at ${c.event.scheduledAt}`,
+          );
+      },
     });
     const traded = new Set<string>();
     for (const a of this.config.accounts.values())
@@ -239,6 +260,7 @@ export class DemoRuntime {
   start(): void {
     this.health.report('DATABASE', 'ONLINE', 'in-browser demo store (not persisted)');
     this.heartbeat();
+    this.refreshCalendar();
     this.feed();
     void this.syncAccounts();
     this.emit(
@@ -262,6 +284,7 @@ export class DemoRuntime {
       ),
       window.setInterval(() => void this.syncAccounts(), 1_000),
       window.setInterval(() => this.heartbeat(), 30_000),
+      window.setInterval(() => this.refreshCalendar(), 60_000),
     );
   }
 
@@ -279,6 +302,9 @@ export class DemoRuntime {
       'CLOCK_JUMP',
       `simulated clock moved to ${to.toISOString().slice(0, 16)}Z`,
     );
+    // Simulated inputs keep reporting across simulated time (n8n would have kept beating).
+    this.heartbeat();
+    this.refreshCalendar();
     this.feed();
     void this.syncAccounts();
   }
@@ -366,7 +392,8 @@ export class DemoRuntime {
     this.market.advance();
     const h = this.market.feedHealth(this.tradedSymbols);
     this.health.report('MARKET_DATA', h.status, `${h.detail} (SIMULATED demo feed)`);
-    this.health.report('CALENDAR', 'ONLINE', 'SIMULATED calendar window (demo, no events)');
+    const cal = this.calendarService.health();
+    this.health.report('CALENDAR', cal.status, `${cal.detail} (SIMULATED demo schedule)`);
   }
 
   /**
@@ -468,15 +495,32 @@ export class DemoRuntime {
     return this.market.snapshots();
   }
 
+  /** Polls the SIMULATED schedule like the core's calendar poller (24 h back, 7 days ahead). */
+  private refreshCalendar(): void {
+    const now = this.clock.now().getTime();
+    const window = this.calendarAdapter.window({
+      from: new Date(now - 24 * 3_600_000),
+      to: new Date(now + 7 * 24 * 3_600_000),
+    });
+    this.calendarService.ingest(window, this.calendarAdapter.id, this.calendarAdapter.kind);
+  }
+
   calendar(): Observed<CalendarWindow> {
-    const now = this.clock.now();
-    return observed(
-      {
-        from: new Date(now.getTime() - 86_400_000).toISOString(),
-        to: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
-        events: [],
-      },
-      { source: 'simulation', sourceKind: 'SIMULATED', asOf: now.toISOString() },
+    return this.calendarService.current();
+  }
+
+  /** The next restricted (blackout) event from now, for the demo's clock jump. */
+  nextRestrictedEvent(): { title: string; scheduledAt: string } | null {
+    const w = this.calendarService.current();
+    if (w.status !== 'OK') return null;
+    const levels = this.config.system.decision.eventBlackout.impactLevels;
+    const now = this.clock.now().getTime();
+    return (
+      w.value.events.find(
+        (e) =>
+          Date.parse(e.scheduledAt) > now + 60_000 &&
+          levels.includes(e.impact === 'UNKNOWN' ? 'HIGH' : e.impact),
+      ) ?? null
     );
   }
 
