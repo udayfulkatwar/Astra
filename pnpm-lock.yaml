@@ -188,6 +188,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../execution
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../market-data
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../prop-firm
