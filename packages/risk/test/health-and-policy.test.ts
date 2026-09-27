@@ -191,3 +191,63 @@ describe('evaluateRiskPolicy', () => {
     expect(failed).toEqual(expect.arrayContaining(['pyramiding', 'positions-per-instrument']));
   });
 });
+
+describe('evaluateRiskPolicy — survival buffer on the trailing path', () => {
+  const survival = (pathRemaining: number | null) => {
+    const state = stateFor(makeSnapshot());
+    const policy = makePolicy();
+    const health = classifyAccountHealth({ state, policy, activity, accountStatus: 'ACTIVE' });
+    const sizing = calculatePositionSize({
+      instrument: NQ,
+      accountCurrency: 'USD',
+      direction: 'LONG',
+      entry: 20_000,
+      stop: 19_990,
+      state,
+      policy,
+      strategyMaxRiskPercent: null,
+      healthMultiplier: health.sizeMultiplier,
+      firmMaxRiskPerTrade: null,
+      firmHeadroom: noHeadroomLimit,
+    }); // 1 contract, $209
+    const v = evaluateRiskPolicy({
+      policy,
+      strategy,
+      health,
+      sizing,
+      state,
+      snapshot: makeSnapshot(),
+      activity,
+      symbol: 'NQ',
+      direction: 'LONG',
+      entry: 20_000,
+      stop: 19_990,
+      target: 20_030, // run-up 30 pt × $20 = 600
+      valuePerPoint: 20,
+      trailing: {
+        applies: true,
+        locked: false,
+        threshold: 47_500,
+        lockLevel: null,
+        runUp: 0,
+        pathThreshold: 47_500,
+        pathRemaining,
+        riseCapRemaining: null,
+        note: 'test',
+      },
+    });
+    return v.checks.find((c) => c.check === 'survival-buffer')!;
+  };
+
+  it('independently re-checks the run-up-then-stop path (defense in depth)', () => {
+    expect(survival(1_000)).toMatchObject({
+      verdict: 'PASS',
+      details: { drawdownRemainingAfter: 191 },
+    });
+    expect(survival(700)).toMatchObject({
+      verdict: 'FAIL',
+      details: { drawdownRemainingAfter: -109 },
+    });
+    expect(survival(null).verdict).toBe('FAIL'); // unknown path risk never passes
+  });
+});

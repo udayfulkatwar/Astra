@@ -9,6 +9,7 @@
 import {
   ZERO,
   dec,
+  decMax,
   directionSign,
   effectiveImpact,
   eventAffects,
@@ -27,6 +28,7 @@ import {
 } from '@astra/core';
 import type { AccountState, InstrumentLookup } from './account-state';
 import { resolveInitialBasedLimit } from './account-state';
+import { trailingConsumption, trailingExposure } from './trailing';
 import type { NewsRestriction, PropFirmRuleProfile } from './profile';
 
 export type RuleVerdict = 'PASS' | 'FAIL' | 'UNKNOWN';
@@ -295,20 +297,66 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
             ),
       );
     }
-    const ddAfter = dec(state.drawdown.worstCaseRemaining ?? 0).minus(tradeLoss);
-    const ddDetails = {
-      remainingAfterWorstCase: toNum(ddAfter),
-      threshold: state.drawdown.threshold,
-    };
-    checks.push(
-      ddAfter.gt(0)
-        ? pass('drawdown-worst-case', 'drawdown threshold holds if all stops are hit', ddDetails)
-        : fail(
-            'drawdown-worst-case',
-            'remaining drawdown buffer insufficient: worst case would breach the max drawdown threshold',
-            ddDetails,
-          ),
+    const trailing = trailingExposure(
+      profile.maxDrawdown,
+      state,
+      snapshot.openPositions,
+      input.instruments,
     );
+    if (trailing?.applies) {
+      // Trailing intraday equity: the trade may run to its target (raising the threshold) and
+      // then reverse to its stop — the buffer must survive that path, not just the stop.
+      if (trailing.pathRemaining === null || !spec) {
+        checks.push(
+          unknown(
+            'drawdown-worst-case',
+            `trailing drawdown path risk unknown: ${spec ? trailing.note : `no instrument spec for ${proposal.symbol}`}`,
+          ),
+        );
+      } else {
+        const runUp = decMax(ZERO, dec(proposal.target).minus(proposal.entry).mul(sign))
+          .mul(valuePerPoint(spec))
+          .mul(proposal.quantity);
+        const consumed = trailingConsumption(trailing, tradeLoss, runUp);
+        const ddAfter = dec(trailing.pathRemaining).minus(consumed);
+        const ddDetails = {
+          mode: 'TRAILING_PATH',
+          remainingAfterWorstPath: toNum(ddAfter),
+          threshold: state.drawdown.threshold,
+          pathThresholdBefore: trailing.pathThreshold,
+          tradeRunUp: toNum(runUp, 2),
+          lockLevel: trailing.lockLevel,
+        };
+        checks.push(
+          ddAfter.gt(0)
+            ? pass(
+                'drawdown-worst-case',
+                'trailing drawdown threshold holds even if the trade runs to its target and then reverses to its stop',
+                ddDetails,
+              )
+            : fail(
+                'drawdown-worst-case',
+                'remaining trailing drawdown buffer insufficient: a run to the target followed by a reversal to the stop would breach the threshold',
+                ddDetails,
+              ),
+        );
+      }
+    } else {
+      const ddAfter = dec(state.drawdown.worstCaseRemaining ?? 0).minus(tradeLoss);
+      const ddDetails = {
+        remainingAfterWorstCase: toNum(ddAfter),
+        threshold: state.drawdown.threshold,
+      };
+      checks.push(
+        ddAfter.gt(0)
+          ? pass('drawdown-worst-case', 'drawdown threshold holds if all stops are hit', ddDetails)
+          : fail(
+              'drawdown-worst-case',
+              'remaining drawdown buffer insufficient: worst case would breach the max drawdown threshold',
+              ddDetails,
+            ),
+      );
+    }
   }
 
   // Firm max risk per trade.

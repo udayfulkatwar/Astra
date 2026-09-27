@@ -6,6 +6,9 @@
  *                      open-risk capacity) × health multiplier
  *   quantity     = floor(allowed risk / risk per unit, step), clamped by quantity caps
  *
+ * With a trailing intraday-equity drawdown the drawdown share also caps the quantity so that a
+ * run to the target followed by a reversal to the stop fits (`trailing-drawdown-path`).
+ *
  * The smallest applicable limit always wins; quantities are never rounded up; a size below the
  * minimum tradable quantity is a rejection, never a round-up.
  */
@@ -21,7 +24,12 @@ import {
   type Direction,
   type InstrumentSpec,
 } from '@astra/core';
-import type { AccountState, QuantityHeadroom } from '@astra/prop-firm';
+import {
+  maxQuantityWithinTrailingPath,
+  type AccountState,
+  type QuantityHeadroom,
+  type TrailingExposure,
+} from '@astra/prop-firm';
 import type { RiskPolicy } from './policy';
 
 export interface SizingConstraint {
@@ -46,6 +54,10 @@ export interface PositionSizingInput {
   readonly firmMaxRiskPerTrade: number | null;
   /** Firm quantity headroom from the prop-firm engine. */
   readonly firmHeadroom: QuantityHeadroom;
+  /** Target price: with a trailing intraday threshold the run-up to it raises the threshold. */
+  readonly target?: number | undefined;
+  /** Trailing intraday-equity exposure (prop-firm `trailingExposure`); null/undefined = none. */
+  readonly trailing?: TrailingExposure | null | undefined;
 }
 
 export interface PositionSizingOk {
@@ -167,6 +179,36 @@ export function calculatePositionSize(input: PositionSizingInput): PositionSizin
     caps.push({
       name: `firm-${input.firmHeadroom.bindingRule ?? 'quantity-limit'}`,
       qty: dec(input.firmHeadroom.maxQuantity),
+    });
+  }
+  // Trailing intraday drawdown: the same buffer share, but each unit also consumes the threshold
+  // rise of its run-up to the target (bounded by the lock level) — ADR-0013.
+  const trailing = input.trailing;
+  if (trailing?.applies) {
+    if (trailing.pathRemaining === null || input.target === undefined) {
+      return reject(
+        `trailing drawdown path risk unknown: ${input.target === undefined ? 'no target' : trailing.note}`,
+        constraints,
+      );
+    }
+    const budget = dec(trailing.pathRemaining)
+      .minus(survival)
+      .mul(policy.buffers.maxDrawdownBufferUsePct)
+      .div(100)
+      .mul(input.healthMultiplier);
+    const runUpPerUnit = dec(input.target)
+      .minus(input.entry)
+      .mul(directionSign(input.direction))
+      .mul(instrument.tickValue)
+      .div(instrument.tickSize);
+    caps.push({
+      name: 'trailing-drawdown-path',
+      qty: maxQuantityWithinTrailingPath(
+        budget,
+        perUnit,
+        runUpPerUnit.lt(0) ? ZERO : runUpPerUnit,
+        trailing.riseCapRemaining === null ? null : dec(trailing.riseCapRemaining),
+      ),
     });
   }
   for (const c of caps) constraints.push({ name: c.name, kind: 'QUANTITY', value: toNum(c.qty) });

@@ -11,7 +11,7 @@ import {
   type Direction,
   type StrategyDefinition,
 } from '@astra/core';
-import type { AccountState } from '@astra/prop-firm';
+import { trailingConsumption, type AccountState, type TrailingExposure } from '@astra/prop-firm';
 import type { AccountHealthAssessment } from './health';
 import type { RiskPolicy } from './policy';
 import type { PositionSizing } from './position-sizing';
@@ -44,6 +44,10 @@ export interface RiskPolicyInput {
   readonly entry: number;
   readonly stop: number;
   readonly target: number;
+  /** Trailing intraday-equity exposure (prop-firm `trailingExposure`); null/undefined = none. */
+  readonly trailing?: TrailingExposure | null | undefined;
+  /** Value of one point for one unit (instrument tick value / tick size). */
+  readonly valuePerPoint?: number | undefined;
 }
 
 /** Reward-to-risk on price distance. null when levels are invalid. */
@@ -169,7 +173,25 @@ export function evaluateRiskPolicy(input: RiskPolicyInput): RiskVerdict {
     // Defense in depth: independently verify the survival buffer after a worst-case loss.
     const survival = dec(policy.buffers.survivalBufferAmount);
     const risk = dec(sizing.dollarRisk);
-    const dd = dec(state.drawdown.worstCaseRemaining ?? 0).minus(risk);
+    const trailing = input.trailing;
+    let dd = dec(state.drawdown.worstCaseRemaining ?? 0).minus(risk);
+    if (trailing?.applies) {
+      // Trailing intraday equity: the worst path runs to the target, then reverses to the stop.
+      const runUp =
+        input.valuePerPoint === undefined
+          ? null
+          : dec(input.target)
+              .minus(input.entry)
+              .mul(directionSign(input.direction))
+              .mul(input.valuePerPoint)
+              .mul(sizing.quantity);
+      dd =
+        trailing.pathRemaining === null || runUp === null
+          ? dec(-1) // unknown path risk never passes
+          : dec(trailing.pathRemaining).minus(
+              trailingConsumption(trailing, risk, runUp.lt(0) ? dec(0) : runUp),
+            );
+    }
     const daily = state.dailyLoss ? dec(state.dailyLoss.worstCaseRemaining ?? 0).minus(risk) : null;
     const ok = dd.gte(survival) && (daily === null || daily.gte(survival));
     add(

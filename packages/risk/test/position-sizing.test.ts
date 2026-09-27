@@ -1,3 +1,4 @@
+import { PropFirmRuleProfileSchema, trailingExposure } from '@astra/prop-firm';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
@@ -8,10 +9,12 @@ import {
 import {
   NQ,
   XAU,
+  lookup,
   makePolicy,
   makeSnapshot,
   makeTracking,
   noHeadroomLimit,
+  profile,
   stateFor,
 } from './fixtures';
 
@@ -168,5 +171,52 @@ describe('calculatePositionSize', () => {
       ),
       { numRuns: 500 },
     );
+  });
+});
+
+describe('calculatePositionSize — trailing intraday drawdown path', () => {
+  const trailingProfile = PropFirmRuleProfileSchema.parse({
+    ...profile,
+    maxDrawdown: {
+      type: 'TRAILING_INTRADAY_EQUITY',
+      limit: { kind: 'AMOUNT', value: 2_500 },
+      measure: 'EQUITY',
+      trailingStopsAt: { kind: 'INITIAL_BALANCE' },
+    },
+  });
+  const state = stateFor(makeSnapshot(), makeTracking(), trailingProfile);
+  const exposure = trailingExposure(trailingProfile.maxDrawdown, state, [], lookup);
+
+  it('caps the quantity so a run to the target and back to the stop fits the buffer share', () => {
+    // Budget (2,500 − 100 survival) × 25% = 600; each contract: $209 stop + $400 run-up (20 pt).
+    const r = calculatePositionSize(base({ state, target: 20_020, trailing: exposure }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toMatch(/binding: trailing-drawdown-path/);
+    expect(r.constraints.find((c) => c.name === 'trailing-drawdown-path')?.value).toBeCloseTo(
+      600 / 609,
+      6,
+    );
+    // Without the trailing path the same trade sizes to 1 contract.
+    expect(calculatePositionSize(base({ state })).ok).toBe(true);
+  });
+
+  it('allows the trade when the target is close enough', () => {
+    const r = calculatePositionSize(base({ state, target: 20_005, trailing: exposure }));
+    expect(r.ok && r.quantity).toBe(1); // 600 / (209 + 100) = 1.94 → the risk % limit (1) binds
+  });
+
+  it('refuses to size when the path risk is unknown', () => {
+    const r = calculatePositionSize(
+      base({
+        state,
+        target: 20_020,
+        trailing: { ...exposure!, pathRemaining: null, note: 'unbounded' },
+      }),
+    );
+    expect(r).toMatchObject({
+      ok: false,
+      reason: 'trailing drawdown path risk unknown: unbounded',
+    });
   });
 });

@@ -28,7 +28,7 @@ import {
 } from '@astra/core';
 import {
   positionRiskToStop,
-  resolveInitialBasedLimit,
+  trailingExposure,
   type AccountState,
   type InstrumentLookup,
   type MaxDrawdownRule,
@@ -235,83 +235,28 @@ function buffer(s: {
   };
 }
 
-/** Worst path for a TRAILING_INTRADAY_EQUITY threshold: run up to the targets, then stop out. */
+/** Worst path for a TRAILING_INTRADAY_EQUITY threshold (shared with the gate: prop-firm
+ *  `trailingExposure`), shown while positions are open. */
 export function trailingPathRisk(
   rule: MaxDrawdownRule,
   state: AccountState,
   positions: readonly OpenPosition[],
   instruments: InstrumentLookup,
 ): TrailingPathRisk | null {
-  if (rule.type !== 'TRAILING_INTRADAY_EQUITY' || positions.length === 0) return null;
-  const initial = dec(state.initialBalance);
-  const limit = resolveInitialBasedLimit(rule.limit, initial);
-  const stop = rule.trailingStopsAt;
-  const lockLevel =
-    stop.kind === 'NEVER'
-      ? null
-      : stop.kind === 'INITIAL_BALANCE'
-        ? initial
-        : initial.plus(stop.amount);
-  const base = {
-    locked: state.drawdown.thresholdLocked,
-    threshold: state.drawdown.threshold,
-    lockLevel: lockLevel ? toNum(lockLevel) : null,
-  };
-  const worstCaseEquity = state.worstCaseEquity;
-  const used = (remaining: Dec) => pct(decMax(ZERO, limit.minus(remaining)), limit);
-
-  if (state.drawdown.thresholdLocked) {
-    const remaining = state.drawdown.worstCaseRemaining;
-    return {
-      ...base,
-      runUp: 0,
-      pathThreshold: state.drawdown.threshold,
-      pathRemaining: remaining,
-      pathUsedPct: remaining === null ? null : used(dec(remaining)),
-      note: 'threshold locked: open profit can no longer raise it',
-    };
-  }
-
-  // Run-up measured from the prices the snapshot's equity is based on (the broker's marks).
-  let runUp: Dec | null = ZERO;
-  for (const p of positions) {
-    const spec = instruments(p.symbol);
-    if (p.targetPrice === null || !spec) {
-      runUp = null;
-      break;
-    }
-    const room = decMax(
-      ZERO,
-      dec(p.targetPrice).minus(p.currentPrice).mul(directionSign(p.direction)),
-    );
-    runUp = runUp.plus(room.mul(spec.tickValue).div(spec.tickSize).mul(p.quantity));
-  }
-
-  const current = dec(state.drawdown.threshold);
-  let pathThreshold: Dec | null;
-  let note: string;
-  if (runUp === null) {
-    pathThreshold = lockLevel;
-    note = lockLevel
-      ? 'a position has no target: the run-up is unbounded, so the threshold can rise to its lock level'
-      : 'a position has no target and the threshold never locks: the path risk is unbounded';
-  } else {
-    const peak = decMax(dec(state.drawdown.peak), dec(state.equity).plus(runUp));
-    let raised = peak.minus(limit);
-    if (lockLevel && raised.gte(lockLevel)) raised = lockLevel;
-    pathThreshold = decMax(current, raised);
-    note = 'every position runs to its target, lifting the threshold, then reverses to its stop';
-  }
-  if (pathThreshold && pathThreshold.lt(current)) pathThreshold = current;
-  const pathRemaining =
-    pathThreshold && worstCaseEquity !== null ? dec(worstCaseEquity).minus(pathThreshold) : null;
+  if (positions.length === 0) return null;
+  const ex = trailingExposure(rule, state, positions, instruments);
+  if (!ex) return null;
+  const limit = dec(state.drawdown.limit);
   return {
-    ...base,
-    runUp: runUp ? toNum(runUp, 2) : null,
-    pathThreshold: pathThreshold ? toNum(pathThreshold, 2) : null,
-    pathRemaining: pathRemaining ? toNum(pathRemaining, 2) : null,
-    pathUsedPct: pathRemaining ? used(pathRemaining) : null,
-    note,
+    locked: ex.locked,
+    threshold: ex.threshold,
+    lockLevel: ex.lockLevel,
+    runUp: ex.runUp,
+    pathThreshold: ex.pathThreshold,
+    pathRemaining: ex.pathRemaining,
+    pathUsedPct:
+      ex.pathRemaining === null ? null : pct(decMax(ZERO, limit.minus(ex.pathRemaining)), limit),
+    note: ex.note,
   };
 }
 

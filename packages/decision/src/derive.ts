@@ -22,10 +22,12 @@ import {
   evaluatePropFirmRules,
   firmQuantityHeadroom,
   resolveInitialBasedLimit,
+  trailingExposure,
   type AccountState,
   type AccountTracking,
   type PropFirmVerdict,
   type QuantityHeadroom,
+  type TrailingExposure,
 } from '@astra/prop-firm';
 import {
   calculatePositionSize,
@@ -73,6 +75,8 @@ export interface Derivations {
   readonly accountState: Derived<AccountState>;
   readonly health: Derived<AccountHealthAssessment>;
   readonly headroom: Derived<QuantityHeadroom>;
+  /** Trailing intraday-equity path exposure (null value: the rule is not trailing intraday). */
+  readonly trailing: Derived<TrailingExposure | null>;
   readonly sizing: Derived<PositionSizing>;
   readonly propFirm: Derived<PropFirmVerdict>;
   readonly risk: Derived<RiskVerdict>;
@@ -163,6 +167,21 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
     );
   });
 
+  // Trailing intraday-equity drawdown: the run-up-then-reverse path (ADR-0013); null otherwise.
+  const trailing: Derived<TrailingExposure | null> = guard('trailing drawdown exposure', () => {
+    if (!inputs.profile) return missing('prop-firm profile not found');
+    if (!accountState.ok) return accountState;
+    if (!snapshot.ok) return snapshot;
+    return ok(
+      trailingExposure(
+        inputs.profile.maxDrawdown,
+        accountState.value,
+        snapshot.value.openPositions,
+        lookup,
+      ),
+    );
+  });
+
   const sizing: Derived<PositionSizing> = guard('position sizing', () => {
     if (!inputs.instrument) return missing('instrument spec not found');
     if (!inputs.account) return missing('account not found');
@@ -173,6 +192,7 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
     if (!accountState.ok) return accountState;
     if (!health.ok) return health;
     if (!headroom.ok) return headroom;
+    if (!trailing.ok) return trailing;
     const firmMax = inputs.profile.trading.maxRiskPerTrade
       ? toNum(
           resolveInitialBasedLimit(
@@ -194,6 +214,8 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
         healthMultiplier: health.value.sizeMultiplier,
         firmMaxRiskPerTrade: firmMax,
         firmHeadroom: headroom.value,
+        target: signal.target,
+        trailing: trailing.value,
       }),
     );
   });
@@ -239,6 +261,7 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
     if (!snapshot.ok) return snapshot;
     if (!activity.ok) return activity;
     if (!effectiveEntry.ok) return effectiveEntry;
+    if (!trailing.ok) return trailing;
     return ok(
       evaluateRiskPolicy({
         policy: inputs.riskPolicy,
@@ -253,6 +276,10 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
         entry: effectiveEntry.value,
         stop: signal.stop,
         target: signal.target,
+        trailing: trailing.value,
+        valuePerPoint: inputs.instrument
+          ? toNum(dec(inputs.instrument.tickValue).div(inputs.instrument.tickSize))
+          : undefined,
       }),
     );
   });
@@ -265,6 +292,7 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
     accountState,
     health,
     headroom,
+    trailing,
     sizing,
     propFirm,
     risk,
