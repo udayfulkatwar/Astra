@@ -59,6 +59,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../../packages/execution
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../../packages/market-data
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../../packages/prop-firm

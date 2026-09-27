@@ -1,47 +1,72 @@
 /**
- * Latest quotes per instrument (Phase 1: fed by ingestion or the simulation feed; Phase 2 adds
- * real market-data adapters). A symbol with no quote is UNAVAILABLE — never a guessed price.
+ * Core wiring of @astra/market-data: persistence of completed bars.
+ *
+ * Bars are queued as they complete and written in batches by the safety loop (and on shutdown).
+ * A failed write is logged and retried on the next flush — it never throws into quote ingestion
+ * or the loop. The queue is bounded: during a long database outage the oldest unpersisted bars
+ * are dropped (logged); they stay in the in-memory windows until evicted.
  */
-import {
-  AstraError,
-  notObserved,
-  observed,
-  type DataSourceKind,
-  type Observed,
-  type ObservedOk,
-  type Quote,
-} from '@astra/core';
+import { errorMessage } from '@astra/core';
+import type { Bar, BarStore } from '@astra/market-data';
+import type { Logger } from 'pino';
 
-export class MarketDataService {
-  private readonly quotes = new Map<string, ObservedOk<Quote>>();
-  private readonly listeners = new Set<(q: Quote) => void>();
+const FLUSH_BATCH = 500;
+
+export class BarPersister {
+  private pending: Bar[] = [];
+  private inFlight: Promise<void> | null = null;
+  private persistedCount = 0;
+  private droppedCount = 0;
 
   constructor(
-    private readonly knownSymbol: (symbol: string) => boolean,
-    private readonly onIngest: (source: string) => void,
+    private readonly store: BarStore,
+    private readonly log: Logger,
+    private readonly maxPending = 20_000,
   ) {}
 
-  ingest(quote: Quote, source: string, sourceKind: DataSourceKind): void {
-    if (!this.knownSymbol(quote.symbol))
-      throw new AstraError('VALIDATION', `unknown instrument ${quote.symbol}`);
-    this.quotes.set(quote.symbol, observed(quote, { source, sourceKind, asOf: quote.asOf }));
-    this.onIngest(source);
-    for (const l of this.listeners) l(quote);
+  enqueue(bars: readonly Bar[]): void {
+    this.pending.push(...bars);
+    const excess = this.pending.length - this.maxPending;
+    if (excess > 0) {
+      this.pending.splice(0, excess);
+      this.droppedCount += excess;
+      this.log.error(
+        { dropped: excess, totalDropped: this.droppedCount },
+        'market bar queue full (database unavailable?): oldest unpersisted bars dropped',
+      );
+    }
   }
 
-  latest(symbol: string): Observed<Quote> {
-    return (
-      this.quotes.get(symbol) ??
-      notObserved('UNAVAILABLE', `no quote received for ${symbol}`, 'market-data')
-    );
+  /** Writes every queued bar; resolves (never rejects) when done or after a failed batch. */
+  flush(): Promise<void> {
+    this.inFlight ??= this.drain().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
   }
 
-  all(): ObservedOk<Quote>[] {
-    return [...this.quotes.values()];
+  stats(): { pending: number; persisted: number; dropped: number } {
+    return {
+      pending: this.pending.length,
+      persisted: this.persistedCount,
+      dropped: this.droppedCount,
+    };
   }
 
-  onQuote(listener: (q: Quote) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  private async drain(): Promise<void> {
+    while (this.pending.length > 0) {
+      const batch = this.pending.slice(0, FLUSH_BATCH);
+      try {
+        await this.store.upsert(batch);
+      } catch (err) {
+        this.log.error(
+          { err: errorMessage(err), bars: batch.length, pending: this.pending.length },
+          'failed to persist market bars; will retry',
+        );
+        return;
+      }
+      this.pending.splice(0, batch.length);
+      this.persistedCount += batch.length;
+    }
   }
 }

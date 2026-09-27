@@ -108,6 +108,13 @@ monitors:
   haltMonitorIntervalMs: 2000
   snapshotPersistIntervalMs: 60000
 
+# Market-data quality and OHLC bars (Phase 2). A quote-to-quote move above an instrument's
+# maxQuoteJumpTicks makes its quotes INVALID (no new trades) for suspectCooldownMs.
+marketData:
+  suspectCooldownMs: 60000
+  maxBarsPerSeries: 1000
+  barCloseGraceMs: 2000
+
 # SIMULATED feeds for paper testing — used only when ASTRA_SIMULATION=true.
 # Start prices are simulation seeds, NOT market data. SHADOW and LIVE refuse SIMULATED data.
 simulation:

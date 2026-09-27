@@ -10,13 +10,13 @@ import {
   type TradeDecision,
 } from '@astra/decision';
 import type { ExecutionResult } from '@astra/execution';
+import type { MarketDataService } from '@astra/market-data';
 import type { AccountService } from './account-service';
 import type { CalendarService } from './calendar';
 import type { EventBus } from './event-bus';
 import type { ExecutionService } from './execution-service';
 import type { HealthService } from './health-service';
 import type { KillSwitchService } from './kill-switch-service';
-import type { MarketDataService } from './market-data';
 import type { ModeService } from './mode-service';
 
 export interface EvaluationResult {

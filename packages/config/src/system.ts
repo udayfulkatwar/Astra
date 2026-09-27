@@ -45,6 +45,17 @@ export const SystemConfigSchema = z.object({
     /** Minimum interval between persisted account snapshots (history), per account. */
     snapshotPersistIntervalMs: z.number().int().positive(),
   }),
+  /** Market-data quality and bar settings. Omitted → the @astra/market-data defaults. */
+  marketData: z
+    .object({
+      /** How long a symbol's quotes are INVALID after an abnormal price jump (default 60 s). */
+      suspectCooldownMs: z.number().int().positive().optional(),
+      /** Completed bars kept in memory per instrument, source and timeframe (default 1000). */
+      maxBarsPerSeries: z.number().int().min(15).max(10_000).optional(),
+      /** A bar closes this long after its period ends when no newer quote arrives (default 2 s). */
+      barCloseGraceMs: z.number().int().nonnegative().max(60_000).optional(),
+    })
+    .optional(),
   /**
    * SIMULATED feeds for paper testing (only when ASTRA_SIMULATION=true). Start prices are
    * simulation seeds, NOT market data; SIMULATED data is refused in SHADOW and LIVE.

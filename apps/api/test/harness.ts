@@ -36,7 +36,7 @@ export interface Harness {
 async function boot(
   sql: Sql,
   clock: ManualClock,
-  opts: { liveTradingAuthorized?: boolean },
+  opts: HarnessOptions,
 ): Promise<Omit<Harness, 'restart' | 'close' | 'db'>> {
   const log = pino({ level: 'silent' });
   const runtime = new AstraRuntime({
@@ -46,7 +46,7 @@ async function boot(
     log,
     runMigrations: true,
     liveTradingAuthorized: opts.liveTradingAuthorized ?? false,
-    simulation: false,
+    simulation: opts.simulation ?? false,
     startLoops: false,
   });
   await runtime.start();
@@ -61,9 +61,13 @@ async function boot(
   return { app, runtime, clock };
 }
 
-export async function createHarness(
-  opts: { liveTradingAuthorized?: boolean } = {},
-): Promise<Harness> {
+export interface HarnessOptions {
+  liveTradingAuthorized?: boolean;
+  /** Start the SIMULATED market-data adapter (paper testing feed). */
+  simulation?: boolean;
+}
+
+export async function createHarness(opts: HarnessOptions = {}): Promise<Harness> {
   const db = await createTestDb();
   const clock = new ManualClock(START);
   const make = async (sql: Sql): Promise<Harness> => {
@@ -94,7 +98,10 @@ export async function createHarness(
   return make(db.sql);
 }
 
-/** Brings every required input online: heartbeat, quotes, calendar, one safety cycle. */
+/**
+ * Brings every required input online: heartbeat, quotes for every instrument the paper-demo
+ * account trades (MARKET_DATA is ONLINE only when all are fresh), calendar, one safety cycle.
+ */
 export async function bringOnline(
   h: Harness,
   prices: { bid: number; ask: number } = { bid: 20_000, ask: 20_000.25 },
@@ -115,6 +122,7 @@ export async function bringOnline(
       quotes: [
         { symbol: 'MNQ', ...prices, asOf: at },
         { symbol: 'NQ', ...prices, asOf: at },
+        { symbol: 'XAUUSD', bid: 2_600, ask: 2_600.2, asOf: at },
       ],
     },
   });
