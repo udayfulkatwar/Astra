@@ -108,7 +108,16 @@ importers:
       react-router:
         specifier: ^7.18.4
         version: 7.18.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
+      '@astra/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@astra/core':
         specifier: workspace:*
         version: link:../../packages/core

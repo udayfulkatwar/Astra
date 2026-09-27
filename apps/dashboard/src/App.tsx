@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router';
-import { ApiError, getToken } from './api/client';
+import { createBrowserRouter, createMemoryRouter, RouterProvider } from 'react-router';
+import { ApiError, DEMO, getToken } from './api/client';
 import { Layout } from './components/Layout';
 import { AccountDetailPage, Accounts } from './pages/Accounts';
 import { Approvals, DecisionDetailPage } from './pages/Approvals';
@@ -21,7 +21,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const router = createBrowserRouter([
+const routes = [
   {
     path: '/',
     element: <Layout />,
@@ -48,10 +48,13 @@ const router = createBrowserRouter([
       { path: '*', element: <div className="empty">Page not found.</div> },
     ],
   },
-]);
+];
+
+// The demo runs inside embedded viewers where the URL is fixed, so it navigates in memory.
+const router = DEMO ? createMemoryRouter(routes) : createBrowserRouter(routes);
 
 export function App() {
-  const [authed, setAuthed] = useState(() => getToken() !== null);
+  const [authed, setAuthed] = useState(() => DEMO || getToken() !== null);
   useEffect(() => {
     const onLogout = () => {
       queryClient.clear();

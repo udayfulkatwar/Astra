@@ -583,3 +583,22 @@ describe('DecisionEngine — market session (Phase 2)', () => {
     ).toBe('UNKNOWN');
   });
 });
+
+describe('DecisionEngine — per-instrument entry tolerance', () => {
+  const moved = observed(
+    { symbol: 'NQ', bid: 20_002.75, ask: 20_003, asOf: '2026-09-28T13:59:59.000Z' },
+    { source: 't', sourceKind: 'SIMULATED' as const, asOf: '2026-09-28T13:59:59.000Z' },
+  );
+
+  it('uses the instrument override instead of the global default', () => {
+    // 12 ticks from entry: rejected by the global 8-tick default…
+    expect(
+      decide(makeInputs({ quote: moved })).checks.find((c) => c.checkId === 'market.entry')!
+        .verdict,
+    ).toBe('FAIL');
+    // …accepted when the instrument allows 20 ticks.
+    const wide = { ...NQ, maxEntryDeviationTicks: 20 };
+    const d = decide(makeInputs({ quote: moved, instrument: wide, instruments: { NQ: wide } }));
+    expect(d.checks.find((c) => c.checkId === 'market.entry')!.verdict).toBe('PASS');
+  });
+});

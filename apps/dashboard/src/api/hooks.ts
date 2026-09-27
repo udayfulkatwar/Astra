@@ -12,6 +12,7 @@ import type {
   DecisionSummary,
   ExecutionResult,
   KillSwitchState,
+  TradeDecision,
   ModeInfo,
   Observed,
   OrderRecord,
@@ -157,6 +158,21 @@ export function useExecute() {
   });
 }
 
+export interface EvaluateResponse {
+  decision: TradeDecision;
+  persisted: boolean;
+  execution: ExecutionResult | null;
+}
+
+export function useEvaluate() {
+  const invalidate = useInvalidateAll();
+  return useMutation({
+    mutationFn: (b: { candidate: unknown; autoExecute: boolean }) =>
+      api<EvaluateResponse>('/api/v1/decisions/evaluate', { method: 'POST', body: b }),
+    onSettled: invalidate,
+  });
+}
+
 export function useVerifyAudit() {
   return useMutation({
     mutationFn: () =>
@@ -230,6 +246,18 @@ export function useEventStream(limit = 200): { events: SystemEvent[]; connected:
     };
 
     void seed();
+    if (__ASTRA_DEMO__) {
+      let unsubscribe: (() => void) | undefined;
+      void import('../demo/router').then(({ subscribeDemoEvents }) => {
+        if (stopped.current) return;
+        setConnected(true);
+        unsubscribe = subscribeDemoEvents((e) => setEvents((prev) => [e, ...prev].slice(0, limit)));
+      });
+      return () => {
+        stopped.current = true;
+        unsubscribe?.();
+      };
+    }
     void connect();
     return () => {
       stopped.current = true;

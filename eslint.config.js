@@ -7,7 +7,15 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', 'eslint.config.js'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/dist-demo/**',
+      '**/coverage/**',
+      'eslint.config.js',
+      'apps/dashboard/scripts/**',
+      '.claude/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

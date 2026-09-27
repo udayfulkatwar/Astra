@@ -5,7 +5,8 @@
   "description": "Loads, validates, cross-checks and hashes ASTRA's versioned YAML configuration.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./system": "./src/system.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

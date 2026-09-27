@@ -4,6 +4,12 @@
  */
 const TOKEN_KEY = 'astra.token';
 
+/**
+ * Demo build (`vite build --mode demo`): every call is answered by the in-browser demo runtime
+ * (real engines, SIMULATED data) instead of the ASTRA API. Normal builds never include it.
+ */
+export const DEMO: boolean = __ASTRA_DEMO__;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -45,6 +51,12 @@ export async function api<T>(
   path: string,
   init: { method?: 'GET' | 'POST'; body?: unknown } = {},
 ): Promise<T> {
+  if (__ASTRA_DEMO__) {
+    const { handleDemoRequest } = await import('../demo/router');
+    const result = await handleDemoRequest(init.method ?? 'GET', path, init.body);
+    // Round-trip through JSON exactly like an HTTP response would.
+    return JSON.parse(JSON.stringify(result ?? null)) as T;
+  }
   const token = getToken();
   const res = await fetch(path, {
     method: init.method ?? 'GET',

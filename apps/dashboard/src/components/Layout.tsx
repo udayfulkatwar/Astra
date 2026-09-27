@@ -1,5 +1,6 @@
+import { lazy, Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router';
-import { clearToken } from '../api/client';
+import { DEMO, clearToken } from '../api/client';
 import { StatusBar } from './StatusBar';
 
 const NAV: { to: string; label: string; section?: string }[] = [
@@ -22,9 +23,17 @@ const NAV: { to: string; label: string; section?: string }[] = [
   { to: '/config', label: 'Configuration' },
 ];
 
+// Loaded only in demo builds.
+const DemoBanner = __ASTRA_DEMO__ ? lazy(() => import('../demo/DemoBanner')) : null;
+
 export function Layout() {
   return (
     <div className="app">
+      {DemoBanner && (
+        <Suspense fallback={null}>
+          <DemoBanner />
+        </Suspense>
+      )}
       <StatusBar />
       <div className="shell">
         <nav className="sidebar" aria-label="Main">
@@ -47,9 +56,11 @@ export function Layout() {
               </NavLink>
             </div>
           ))}
-          <button className="btn ghost logout" onClick={clearToken}>
-            Sign out
-          </button>
+          {!DEMO && (
+            <button className="btn ghost logout" onClick={clearToken}>
+              Sign out
+            </button>
+          )}
         </nav>
         <main className="main">
           <Outlet />

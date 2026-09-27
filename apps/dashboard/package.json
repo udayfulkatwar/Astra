@@ -9,15 +9,19 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:demo": "vite build --mode demo --outDir dist-demo && node scripts/inline-demo.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router": "^7.18.4"
+    "react-router": "^7.18.4",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@astra/config": "workspace:*",
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",
     "@astra/execution": "workspace:*",

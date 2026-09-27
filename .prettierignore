@@ -4,3 +4,5 @@ coverage
 pnpm-lock.yaml
 *.sql
 automation/n8n/workflows/*.json
+dist-demo
+.claude

@@ -4,6 +4,7 @@ node_modules/
 
 # build output
 dist/
+dist-demo/
 build/
 coverage/
 *.tsbuildinfo
@@ -26,3 +27,6 @@ secrets/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Agent worktrees (local only)
+.claude/worktrees/

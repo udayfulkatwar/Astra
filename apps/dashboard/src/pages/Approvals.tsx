@@ -4,6 +4,8 @@ import { Link, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useDecision, useDecisions, useExecute, useStatus } from '../api/hooks';
 import type { TradeDecision } from '../api/types';
+import { CandidateForm } from '../components/CandidateForm';
+import { ConfirmButton } from '../components/ConfirmButton';
 import { Card, Empty, ErrorBox, KV, Loading, PageHeader, Pill } from '../components/ui';
 import { ago, dateTime, money, num, shortHash, utcTime } from '../lib/format';
 
@@ -41,6 +43,9 @@ export function Approvals() {
           </select>
         }
       />
+      <Card title="Submit a test trade">
+        <CandidateForm />
+      </Card>
       <Card>
         {error ? (
           <ErrorBox error={error} />
@@ -302,7 +307,9 @@ function ApprovalPanel({
 }) {
   const exec = useExecute();
   const status = useStatus();
-  const expired = decision.approval ? Date.parse(decision.approval.expiresAt) <= Date.now() : true;
+  // Judge expiry against ASTRA's clock (the server's, or the demo's simulated one).
+  const now = status.data ? Date.parse(status.data.now) : Date.now();
+  const expired = decision.approval ? Date.parse(decision.approval.expiresAt) <= now : true;
   const canExecute = approvalState === 'PENDING' && !expired;
   return (
     <Card title="Approval">
@@ -312,21 +319,12 @@ function ApprovalPanel({
           <Pill status={approvalState} /> · expires {utcTime(decision.approval?.expiresAt)}
           {expired && approvalState === 'PENDING' && <span className="muted"> (expired)</span>}
         </div>
-        <button
-          className="btn danger"
+        <ConfirmButton
+          label="Execute (operator)"
+          confirmLabel={`Confirm ${decision.orderPlan?.direction} ${decision.orderPlan?.quantity} ${decision.symbol} (${status.data?.mode ?? decision.mode})`}
           disabled={!canExecute || exec.isPending}
-          onClick={() => {
-            if (
-              window.confirm(
-                `Execute ${decision.orderPlan?.direction} ${decision.orderPlan?.quantity} ${decision.symbol} in ${status.data?.mode ?? decision.mode} mode? The gateway re-validates everything before sending.`,
-              )
-            ) {
-              exec.mutate(decision.approval!.approvalId);
-            }
-          }}
-        >
-          Execute (operator)
-        </button>
+          onConfirm={() => exec.mutate(decision.approval!.approvalId)}
+        />
       </div>
       {exec.data && (
         <div

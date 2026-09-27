@@ -52,6 +52,11 @@ export const InstrumentSpecSchema = z
      * Broker/exchange specific: verify against your platform.
      */
     tradingHours: TradingHoursSchema.optional(),
+    /**
+     * Max distance between a signal's entry and the executable price for this instrument (ticks).
+     * Overrides the global decision policy value: ticks differ greatly in value across instruments.
+     */
+    maxEntryDeviationTicks: PositiveNumberSchema.optional(),
     /** Data-quality guard: a quote-to-quote move larger than this is treated as abnormal. */
     maxQuoteJumpTicks: PositiveNumberSchema.optional(),
     /** Symbol used by each market-data/broker adapter, keyed by adapter id (e.g. { mt5: "XAUUSD.r" }). */

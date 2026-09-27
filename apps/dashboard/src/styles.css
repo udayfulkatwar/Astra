@@ -87,7 +87,7 @@ h2 {
 }
 .statusbar {
   position: sticky;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   z-index: 10;
   display: flex;
   flex-wrap: wrap;
@@ -722,4 +722,77 @@ select:focus {
 .login-card label {
   font-size: 12px;
   color: var(--muted);
+}
+
+/* Demo banner (demo builds only) */
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 16px;
+  background: #160f29;
+  border-bottom: 1px solid #3f2c6b;
+  color: #d9ccff;
+  font-size: 13px;
+}
+.demo-banner strong {
+  font: 700 11px/1 var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--shadow);
+  border: 1px solid #3f2c6b;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.demo-clock {
+  color: var(--text);
+}
+.demo-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Forms */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.field input,
+.field select {
+  color: var(--text);
+  font-size: 14px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.candidate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.confirm-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inline-form.compact input {
+  min-width: 140px;
 }

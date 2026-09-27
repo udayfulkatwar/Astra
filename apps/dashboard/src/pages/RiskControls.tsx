@@ -9,6 +9,7 @@ import {
   useSetMode,
 } from '../api/hooks';
 import type { TradingMode } from '../api/types';
+import { ConfirmButton } from '../components/ConfirmButton';
 import { Card, Empty, ErrorBox, KV, Loading, PageHeader, Pill } from '../components/ui';
 import { dateTime } from '../lib/format';
 
@@ -35,31 +36,31 @@ export function RiskControls() {
 
 function EmergencyStop() {
   const action = useKillSwitchAction();
+  const [reason, setReason] = useState('operator emergency stop');
   return (
     <Card title="Emergency stop">
       <p className="muted">
         Activates the GLOBAL kill switch: no new trades on any account, strategy or instrument until
         an operator clears it.
       </p>
-      <button
+      <label className="field">
+        <span>Reason (recorded in the audit log)</span>
+        <input id="emergency-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <ConfirmButton
         className="btn danger big"
-        disabled={action.isPending}
-        onClick={() => {
-          const reason = window.prompt(
-            'Reason for the emergency stop (recorded in the audit log):',
-            'operator emergency stop',
-          );
-          if (reason && reason.trim().length >= 3)
-            action.mutate({
-              action: 'activate',
-              scope: 'GLOBAL',
-              target: null,
-              reason: reason.trim(),
-            });
-        }}
-      >
-        EMERGENCY STOP
-      </button>
+        label="EMERGENCY STOP"
+        confirmLabel="Confirm: stop all new trading"
+        disabled={action.isPending || reason.trim().length < 3}
+        onConfirm={() =>
+          action.mutate({
+            action: 'activate',
+            scope: 'GLOBAL',
+            target: null,
+            reason: reason.trim(),
+          })
+        }
+      />
       {action.error && <ErrorBox error={action.error} />}
     </Card>
   );
@@ -70,15 +71,15 @@ function ModeControl() {
   const setMode = useSetMode();
   const [mode, setModeValue] = useState<TradingMode>('HALTED');
   const [reason, setReason] = useState('');
+  const [liveArmed, setLiveArmed] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (
-      mode === 'LIVE' &&
-      !window.confirm(
-        'LIVE mode sends real orders. It also requires server authorization, verified configuration and account authorization. Continue?',
-      )
-    )
+    // LIVE sends real orders: require an explicit second step on the page.
+    if (mode === 'LIVE' && !liveArmed) {
+      setLiveArmed(true);
       return;
+    }
+    setLiveArmed(false);
     setMode.mutate({ mode, reason });
   };
   return (
@@ -103,7 +104,10 @@ function ModeControl() {
           <form className="inline-form" onSubmit={submit}>
             <select
               value={mode}
-              onChange={(e) => setModeValue(e.target.value as TradingMode)}
+              onChange={(e) => {
+                setModeValue(e.target.value as TradingMode);
+                setLiveArmed(false);
+              }}
               aria-label="New mode"
             >
               {(['HALTED', 'PAPER', 'SHADOW', 'BACKTEST', 'LIVE'] as const).map((m) => (
@@ -119,10 +123,19 @@ function ModeControl() {
               minLength={3}
               required
             />
-            <button className="btn" disabled={setMode.isPending}>
-              Change mode
+            <button
+              className={mode === 'LIVE' && liveArmed ? 'btn danger' : 'btn'}
+              disabled={setMode.isPending}
+            >
+              {mode === 'LIVE' && liveArmed ? 'Confirm LIVE (real orders)' : 'Change mode'}
             </button>
           </form>
+          {mode === 'LIVE' && liveArmed && (
+            <div className="warn-box">
+              LIVE mode sends real orders. The server also requires environment authorization,
+              verified configuration and per-account authorization.
+            </div>
+          )}
           {setMode.error && <ErrorBox error={setMode.error} />}
         </>
       )}
@@ -249,24 +262,17 @@ function KillSwitchList() {
                 </td>
                 <td>
                   {s.active && (
-                    <button
-                      className="btn small"
+                    <ClearSwitch
                       disabled={action.isPending}
-                      onClick={() => {
-                        const reason = window.prompt(
-                          `Why is it safe to clear the ${s.scope} kill switch?`,
-                        );
-                        if (reason && reason.trim().length >= 3)
-                          action.mutate({
-                            action: 'deactivate',
-                            scope: s.scope,
-                            target: s.target,
-                            reason: reason.trim(),
-                          });
-                      }}
-                    >
-                      Clear
-                    </button>
+                      onClear={(reason) =>
+                        action.mutate({
+                          action: 'deactivate',
+                          scope: s.scope,
+                          target: s.target,
+                          reason,
+                        })
+                      }
+                    />
                   )}
                 </td>
               </tr>
@@ -276,5 +282,50 @@ function KillSwitchList() {
       )}
       {action.error && <ErrorBox error={action.error} />}
     </Card>
+  );
+}
+
+/** Clearing a kill switch requires a written reason (audited). */
+function ClearSwitch({
+  disabled,
+  onClear,
+}: {
+  disabled: boolean;
+  onClear: (reason: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  if (!open) {
+    return (
+      <button type="button" className="btn small" disabled={disabled} onClick={() => setOpen(true)}>
+        Clear
+      </button>
+    );
+  }
+  return (
+    <form
+      className="inline-form compact"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onClear(reason.trim());
+        setOpen(false);
+        setReason('');
+      }}
+    >
+      <input
+        aria-label="Why is it safe to clear this kill switch?"
+        placeholder="why is it safe to clear?"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        minLength={3}
+        required
+      />
+      <button className="btn small" disabled={disabled || reason.trim().length < 3}>
+        Clear switch
+      </button>
+      <button type="button" className="btn small ghost" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </form>
   );
 }

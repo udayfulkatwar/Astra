@@ -25,6 +25,8 @@ tradingHours:
     - { open: { day: TUE, time: '18:00' }, close: { day: WED, time: '17:00' } }
     - { open: { day: WED, time: '18:00' }, close: { day: THU, time: '17:00' } }
     - { open: { day: THU, time: '18:00' }, close: { day: FRI, time: '17:00' } }
+# Entry tolerance: up to $0.50 between the signal's entry and the executable price.
+maxEntryDeviationTicks: 50
 # Data-quality guard: a quote-to-quote move above 2000 ticks ($20) is treated as abnormal.
 maxQuoteJumpTicks: 2000
 verification:

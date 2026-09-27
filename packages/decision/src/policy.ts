@@ -13,7 +13,7 @@ export const DecisionPolicySchema = z.object({
     aiAnalysisMaxAgeMs: z.number().int().positive(),
     maxFutureSkewMs: z.number().int().nonnegative(),
   }),
-  /** Max distance between the signal's entry and the executable price, in ticks. */
+  /** Default max distance between signal entry and executable price, in ticks (instruments may override). */
   maxEntryDeviationTicks: PositiveNumberSchema,
   /** No new trades this many minutes before an instrument's scheduled market close. */
   minMinutesBeforeMarketClose: z.number().int().nonnegative(),

@@ -35,6 +35,7 @@ export const marketEntry: GateCheck = {
     if (!i.instrument) return unknown('instrument spec not found');
     if (!d.effectiveEntry.ok) return unknown(d.effectiveEntry.reason);
     const px = dec(d.effectiveEntry.value);
+    const maxDeviation = i.instrument.maxEntryDeviationTicks ?? i.policy.maxEntryDeviationTicks;
     const deviation = px.minus(s.entry).abs().div(i.instrument.tickSize);
     const details = {
       executablePrice: d.effectiveEntry.value,
@@ -42,9 +43,9 @@ export const marketEntry: GateCheck = {
       deviationTicks: toNum(deviation, 2),
     };
     const reasons: string[] = [];
-    if (deviation.gt(i.policy.maxEntryDeviationTicks)) {
+    if (deviation.gt(maxDeviation)) {
       reasons.push(
-        `price moved ${toNum(deviation, 2)} ticks from signal entry (limit ${i.policy.maxEntryDeviationTicks})`,
+        `price moved ${toNum(deviation, 2)} ticks from signal entry (limit ${maxDeviation})`,
       );
     }
     const long = s.direction === 'LONG';
