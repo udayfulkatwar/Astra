@@ -5,7 +5,8 @@
   "description": "ASTRA domain primitives: Observed<T>, trading modes, health, time, decimal math, DATA/SIGNAL/CONTEXT schemas.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

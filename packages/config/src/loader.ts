@@ -14,13 +14,13 @@ import {
   InstrumentSpecSchema,
   StrategyDefinitionSchema,
   canonicalJson,
-  sha256,
   type AccountDefinition,
   type InstrumentSpec,
   type StrategyDefinition,
 } from '@astra/core';
 import { PropFirmRuleProfileSchema, type PropFirmRuleProfile } from '@astra/prop-firm';
 import { RiskPolicySchema, type RiskPolicy } from '@astra/risk';
+import { sha256 } from '@astra/core/node';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 

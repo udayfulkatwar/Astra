@@ -3,7 +3,8 @@
  * the canonical entry, so any alteration or removal of history is detectable by verifyChain().
  * Appends are serialised with a transaction-scoped advisory lock to keep the chain linear.
  */
-import { canonicalJson, newId, sha256 } from '@astra/core';
+import { canonicalJson, newId } from '@astra/core';
+import { sha256 } from '@astra/core/node';
 import type { Queryable, Sql } from '../client';
 import { iso, json, jsonb } from '../client';
 

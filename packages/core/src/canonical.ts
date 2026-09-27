@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 /** Deterministic JSON: object keys sorted recursively, so equal configs hash equally. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));
@@ -15,8 +13,4 @@ function sortKeys(value: unknown): unknown {
     );
   }
   return value;
-}
-
-export function sha256(text: string): string {
-  return `sha256:${createHash('sha256').update(text).digest('hex')}`;
 }
