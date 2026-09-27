@@ -51,6 +51,25 @@ export interface BrokerOrderState {
   readonly updatedAt: string;
 }
 
+export interface ClosePositionRequest {
+  /** Idempotency key: repeating it never closes (or reports) a second time. */
+  readonly clientCloseId: string;
+  readonly accountRef: string;
+  readonly positionId: string;
+  readonly reason: string;
+}
+
+export interface ClosePositionResult {
+  readonly clientCloseId: string;
+  readonly positionId: string;
+  /** NOT_FOUND: the position is not open (already closed / never existed) — the account is flat in it. */
+  readonly status: 'CLOSED' | 'NOT_FOUND' | 'REJECTED';
+  readonly exitPrice: number | null;
+  readonly realizedPnl: number | null;
+  readonly detail: string | null;
+  readonly updatedAt: string;
+}
+
 export interface AdapterHealth {
   readonly status: HealthStatus;
   readonly detail: string;
@@ -67,6 +86,11 @@ export interface BrokerAdapter {
   getOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState | null>;
   cancelOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState>;
   listOpenOrders(accountRef: string): Promise<BrokerOrderState[]>;
+  /**
+   * Closes an open position at market and cancels its protective orders. Idempotent on
+   * clientCloseId. May throw on transport errors (the outcome is then unknown).
+   */
+  closePosition(req: ClosePositionRequest): Promise<ClosePositionResult>;
   getAccountSnapshot(accountRef: string, accountId: string): Promise<AccountSnapshot>;
 }
 

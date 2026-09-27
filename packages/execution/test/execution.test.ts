@@ -284,3 +284,68 @@ describe('ExecutionGateway — broker failures', () => {
     expect(r.brokerState).toMatchObject({ status: 'FILLED', filledQuantity: 2, quantity: 2 });
   });
 });
+
+describe('ExecutionGateway — protective close (ADR-0014)', () => {
+  async function withPosition(opts: Parameters<typeof setup>[0] = {}) {
+    const s = setup(opts);
+    s.store.addApproval(approval());
+    await s.gateway.execute('apr_1');
+    const snap = await s.broker.getAccountSnapshot('PAPER-A', 'acct-a');
+    return { ...s, positionId: snap.openPositions[0]!.positionId };
+  }
+  const close = (g: ExecutionGateway, positionId: string, id = 'protect:LIMIT_PROXIMITY:x') =>
+    g.protectiveClose({ accountId: 'acct-a', positionId, clientCloseId: id, reason: 'test' });
+
+  it('closes at market, idempotently, even under an ACCOUNT kill switch (it only removes risk)', async () => {
+    const { gateway, broker, ks, positionId } = await withPosition();
+    ks.activate({
+      scope: 'ACCOUNT',
+      target: 'acct-a',
+      reason: 'limit near',
+      actor: { type: 'SYSTEM', id: 't' },
+    });
+    broker.onQuote({ symbol: 'NQ', bid: 19_995, ask: 19_995.25, asOf: NOW });
+    expect(await close(gateway, positionId)).toEqual({
+      outcome: 'CLOSED',
+      reason: 'test',
+      exitPrice: 19_995,
+      realizedPnl: -200, // −5 pts × $20 × 2
+    });
+    expect(broker.closedTrades('PAPER-A').at(-1)).toMatchObject({ exitReason: 'PROTECTIVE' });
+    // Same clientCloseId: the stored result, no second close; a new id: already flat.
+    expect((await close(gateway, positionId)).outcome).toBe('CLOSED');
+    expect(broker.closedTrades('PAPER-A')).toHaveLength(1);
+    expect((await close(gateway, positionId, 'other')).outcome).toBe('ALREADY_FLAT');
+  });
+
+  it('never sends in SHADOW or while an EXECUTION kill switch is active', async () => {
+    const s = setup({ mode: 'SHADOW' });
+    expect((await close(s.gateway, 'x')).outcome).toBe('SKIPPED');
+
+    const { gateway, ks, positionId, broker } = await withPosition();
+    ks.activate({
+      scope: 'EXECUTION',
+      target: 'acct-a',
+      reason: 'order state unknown',
+      actor: { type: 'SYSTEM', id: 't' },
+    });
+    const r = await close(gateway, positionId);
+    expect(r).toMatchObject({
+      outcome: 'SKIPPED',
+      reason: expect.stringMatching(/EXECUTION kill switch .* manual action required/),
+    });
+    expect(broker.closedTrades('PAPER-A')).toHaveLength(0);
+  });
+
+  it('reports rejections and treats a lost response as UNKNOWN (execution halted)', async () => {
+    const { gateway, broker, onUnknown, positionId } = await withPosition();
+    broker.failures.rejectNextClose = 'market closed';
+    expect(await close(gateway, positionId, 'a')).toMatchObject({
+      outcome: 'REJECTED',
+      reason: 'market closed',
+    });
+    broker.failures.failNextClose = true;
+    expect(await close(gateway, positionId, 'b')).toMatchObject({ outcome: 'UNKNOWN' });
+    expect(onUnknown).toHaveBeenCalledWith('acct-a', 'b', expect.stringMatching(/outcome unknown/));
+  });
+});

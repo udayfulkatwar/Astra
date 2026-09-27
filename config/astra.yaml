@@ -122,6 +122,18 @@ marketData:
   maxBarsPerSeries: 1000
   barCloseGraceMs: 2000
 
+# Automatic protective closing (ADR-0014) — authorised by the owner on 2026-09-27. ASTRA closes
+# positions by itself (risk-reducing only; never while an EXECUTION kill switch is active, never
+# in SHADOW) when: a hard limit is flattenAtLimitUsagePct used at the current mark (and blocks the
+# account), a position has no stop for unprotectedGraceMs, or the firm's flat time / weekly close
+# is within flattenMinutesBeforeFlat. Every close is audited and raised as a CRITICAL event.
+protection:
+  enabled: true
+  flattenAtLimitUsagePct: 90
+  unprotectedGraceMs: 10000
+  flattenMinutesBeforeFlat: 2
+  maxCloseAttempts: 3
+
 # Economic calendar (ADR-0011). No provider is chosen yet (owner input): windows arrive by push
 # from n8n (POST /api/v1/calendar/window). With ASTRA_SIMULATION=true a SIMULATED weekly schedule
 # is polled instead (paper tests only; refused in SHADOW and LIVE).

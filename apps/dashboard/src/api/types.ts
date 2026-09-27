@@ -28,6 +28,8 @@ import type {
   MonitorAlert,
   MonitorPolicy,
   PositionView,
+  ProtectionStatus,
+  ProtectiveActionRecord,
   RiskPolicy,
 } from '@astra/risk';
 import type { KillSwitchState } from '@astra/safety';
@@ -173,10 +175,19 @@ export type { Bar, MarketSnapshot, MarketStructure, Timeframe };
 export type { EventRiskView, InstrumentEventRisk };
 
 /** Position monitor (GET /api/v1/monitor/positions). */
-export type { AccountMonitorView, MonitorAlert, MonitorPolicy, PositionView };
+export type {
+  AccountMonitorView,
+  MonitorAlert,
+  MonitorPolicy,
+  PositionView,
+  ProtectionStatus,
+  ProtectiveActionRecord,
+};
 export interface PositionMonitor {
   asOf: string | null;
   policy: MonitorPolicy;
   accounts: AccountMonitorView[];
   alerts: MonitorAlert[];
+  /** Automatic protection (ADR-0014); absent on older servers. */
+  protection?: ProtectionStatus;
 }

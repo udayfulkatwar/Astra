@@ -6,7 +6,13 @@
  */
 import { ApiError } from '../api/client';
 import { usePositionMonitor } from '../api/hooks';
-import type { AccountMonitorView, MonitorAlert, PositionView } from '../api/types';
+import type {
+  AccountMonitorView,
+  MonitorAlert,
+  PositionView,
+  ProtectionStatus,
+  ProtectiveActionRecord,
+} from '../api/types';
 import { Card, Empty, ErrorBox, Loading, PageHeader, Pill, UsageBar } from '../components/ui';
 import { ago, money, num } from '../lib/format';
 
@@ -188,13 +194,100 @@ function PositionsTable({ v }: { v: AccountMonitorView }) {
   );
 }
 
+const OUTCOME_TONE: Record<ProtectiveActionRecord['outcome'], 'ok' | 'bad' | 'warn' | 'info'> = {
+  CLOSED: 'bad',
+  ALREADY_FLAT: 'info',
+  SKIPPED: 'warn',
+  REJECTED: 'bad',
+  UNKNOWN: 'bad',
+  GAVE_UP: 'bad',
+};
+
+function Protection({ p }: { p: ProtectionStatus }) {
+  const pol = p.policy;
+  return (
+    <Card
+      title="Automatic protection"
+      actions={
+        <Pill
+          status={p.enabled ? 'ONLINE' : 'DISABLED'}
+          tone={p.enabled ? 'ok' : 'unknown'}
+          label={p.enabled ? 'ON — ASTRA MAY CLOSE POSITIONS' : 'OFF'}
+        />
+      }
+    >
+      <ul className="rules-list small">
+        <li>
+          A hard limit (daily loss, max drawdown or a trailing threshold) is{' '}
+          <b>{pol.flattenAtLimitUsagePct}%</b> used at the current price → close every position and
+          block new trades on the account.
+        </li>
+        <li>
+          A position has <b>no stop</b> for {pol.unprotectedGraceMs / 1000} s → close it.
+        </li>
+        <li>
+          <b>{pol.flattenMinutesBeforeFlat} min</b> before the firm&apos;s mandatory flat time or
+          weekly close (weekend holding prohibited) → close every position.
+        </li>
+        <li className="muted">
+          Never while an EXECUTION kill switch is active or in SHADOW mode; a failed close is
+          retried {pol.maxCloseAttempts}× and then needs you. Every action is audited.
+        </li>
+      </ul>
+      {p.recent.length === 0 ? (
+        <Empty>No automatic actions yet.</Empty>
+      ) : (
+        <div className="table-scroll">
+          <table className="table compact">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Trigger</th>
+                <th>Position</th>
+                <th>Outcome</th>
+                <th className="num">Exit</th>
+                <th className="num">P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.recent.map((r) => (
+                <tr key={`${r.at}-${r.positionId}-${r.outcome}`}>
+                  <td className="muted">{ago(r.at)}</td>
+                  <td>
+                    <span className="tag">{r.trigger.replace('_', ' ')}</span>
+                  </td>
+                  <td className="small">{r.reason}</td>
+                  <td>
+                    <Pill
+                      status={r.outcome}
+                      tone={OUTCOME_TONE[r.outcome]}
+                      label={r.outcome.replace('_', ' ')}
+                    />
+                    {r.outcome !== 'CLOSED' && <div className="muted small">{r.detail}</div>}
+                  </td>
+                  <td className="num">{r.exitPrice === null ? '—' : num(r.exitPrice, 5)}</td>
+                  <td
+                    className={`num ${r.realizedPnl === null ? '' : r.realizedPnl < 0 ? 'tone-text-bad' : 'tone-text-ok'}`}
+                  >
+                    {r.realizedPnl === null ? '—' : money(r.realizedPnl)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function Positions() {
   const { data, error } = usePositionMonitor();
   return (
     <div className="page">
       <PageHeader
         title="Position Monitor"
-        subtitle="Every open position at a fresh exit-side price, and each account's worst-case distance to its limits. ASTRA warns here — it never closes a position on its own."
+        subtitle="Every open position at a fresh exit-side price, and each account's worst-case distance to its limits. plus the automatic protection that closes positions when a hard rule demands it."
       />
       {error instanceof ApiError && error.status === 404 ? (
         <Card>
@@ -213,6 +306,7 @@ export function Positions() {
           <Card title={`Active alerts (${data.alerts.length})`}>
             <Alerts alerts={data.alerts} />
           </Card>
+          {data.protection && <Protection p={data.protection} />}
           {data.accounts.length === 0 && (
             <Card>
               <Empty>No active accounts.</Empty>

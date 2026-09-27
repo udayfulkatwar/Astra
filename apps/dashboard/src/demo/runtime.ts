@@ -51,11 +51,16 @@ import { CalendarService, SimulatedCalendarAdapter } from '@astra/calendar';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
 import {
   DEFAULT_MONITOR_POLICY,
+  DEFAULT_PROTECTION_POLICY,
   MonitorAlertTracker,
+  ProtectionEvaluator,
   classifyAccountHealth,
   monitorAccount,
   type AccountHealthAssessment,
   type AccountMonitorView,
+  type ProtectionStatus,
+  type ProtectiveAction,
+  type ProtectiveActionRecord,
 } from '@astra/risk';
 import {
   ComponentHealthRegistry,
@@ -567,6 +572,11 @@ export class DemoRuntime {
   readonly monitorAlerts = new MonitorAlertTracker(DEFAULT_MONITOR_POLICY);
   monitorViews: AccountMonitorView[] = [];
   monitorAsOf: string | null = null;
+  private protectionEval: ProtectionEvaluator | null = null;
+  private readonly protectionDone = new Set<string>();
+  private readonly protectionAttempts = new Map<string, number>();
+  private readonly protectionReported = new Set<string>();
+  private readonly protectionRecent: ProtectiveActionRecord[] = [];
   private historyQuotes = 0;
 
   private async syncAccounts(): Promise<void> {
@@ -575,6 +585,7 @@ export class DemoRuntime {
     try {
       await this.syncAll();
       this.runMonitor();
+      await this.runProtection();
     } finally {
       this.syncing = false;
     }
@@ -609,6 +620,153 @@ export class DemoRuntime {
         a.accountId,
       );
     }
+  }
+
+  // ------------------------------------------------------------------ automatic protection
+
+  protectionStatus(): ProtectionStatus {
+    const policy = this.config.system.protection ?? DEFAULT_PROTECTION_POLICY;
+    return { enabled: policy.enabled, policy, recent: [...this.protectionRecent] };
+  }
+
+  /** The core's ProtectionService logic (ADR-0014), on the in-browser gateway. */
+  private async runProtection(): Promise<void> {
+    const policy = this.config.system.protection ?? DEFAULT_PROTECTION_POLICY;
+    this.protectionEval ??= new ProtectionEvaluator(policy);
+    const actions = this.protectionEval.evaluate(this.monitorViews, {
+      now: this.clock.now(),
+      holding: (id) => {
+        const a = this.config.accounts.get(id);
+        return (a && this.config.profiles.get(a.propFirmProfileId)?.holding) ?? null;
+      },
+    });
+    for (const a of actions) {
+      const key = `${a.accountId}:${a.positionId}`;
+      if (this.protectionDone.has(key)) continue;
+      if (
+        a.blockAccount &&
+        !this.killSwitches.active().some((k) => k.scope === 'ACCOUNT' && k.target === a.accountId)
+      ) {
+        const profile = this.config.profiles.get(
+          this.config.accounts.get(a.accountId)!.propFirmProfileId,
+        )!;
+        const nextDay = tradingDayWindow(
+          this.clock.now(),
+          profile.tradingDayReset,
+        ).end.toISOString();
+        this.activateKillSwitch(
+          'ACCOUNT',
+          a.accountId,
+          `automatic protection: ${a.reason}`,
+          { type: 'SYSTEM', id: 'protection' },
+          a.blockAccount,
+          a.blockAccount === 'NEXT_TRADING_DAY' ? nextDay : null,
+        );
+      }
+      const failed = this.protectionAttempts.get(key) ?? 0;
+      if (failed >= policy.maxCloseAttempts) {
+        this.recordProtection(
+          a,
+          'GAVE_UP',
+          failed,
+          `${failed} close attempts failed — MANUAL ACTION REQUIRED`,
+          `${key}:GAVE_UP`,
+        );
+        continue;
+      }
+      const r = await this.gateway.protectiveClose({
+        accountId: a.accountId,
+        positionId: a.positionId,
+        clientCloseId: `protect-${a.trigger}-${a.positionId}-${failed + 1}`,
+        reason: `automatic protection (${a.trigger}): ${a.reason}`,
+      });
+      if (r.outcome === 'SKIPPED') {
+        this.recordProtection(a, 'SKIPPED', failed + 1, r.reason, `${key}:SKIPPED:${r.reason}`);
+        continue;
+      }
+      if (r.outcome === 'REJECTED') this.protectionAttempts.set(key, failed + 1);
+      else this.protectionDone.add(key);
+      this.recordProtection(a, r.outcome, failed + 1, r.reason, null, r.exitPrice, r.realizedPnl);
+    }
+  }
+
+  private recordProtection(
+    a: ProtectiveAction,
+    outcome: ProtectiveActionRecord['outcome'],
+    attempt: number,
+    detail: string,
+    onceKey: string | null,
+    exitPrice: number | null = null,
+    realizedPnl: number | null = null,
+  ): void {
+    if (onceKey !== null) {
+      if (this.protectionReported.has(onceKey)) return;
+      this.protectionReported.add(onceKey);
+    }
+    const rec: ProtectiveActionRecord = {
+      at: this.clock.now().toISOString(),
+      trigger: a.trigger,
+      accountId: a.accountId,
+      positionId: a.positionId,
+      symbol: a.symbol,
+      reason: a.reason,
+      outcome,
+      detail,
+      exitPrice,
+      realizedPnl,
+      attempt,
+    };
+    this.protectionRecent.unshift(rec);
+    if (this.protectionRecent.length > 50) this.protectionRecent.pop();
+    this.emit(
+      outcome === 'ALREADY_FLAT' ? 'INFO' : 'CRITICAL',
+      'protection',
+      `PROTECTIVE_CLOSE_${outcome}`,
+      outcome === 'CLOSED'
+        ? `ASTRA closed ${a.reason} — automatic protection (${a.trigger}) at ${exitPrice}, P&L ${realizedPnl}`
+        : `automatic protection (${a.trigger}) could not close ${a.reason}: ${outcome} — ${detail}`,
+      a.accountId,
+    );
+    void this.appendAudit({
+      actorType: 'SYSTEM',
+      actorId: 'protection',
+      category: 'PROTECTION',
+      action: `PROTECTIVE_CLOSE_${outcome}`,
+      entityType: 'position',
+      entityId: a.positionId,
+      payload: { ...rec },
+    });
+  }
+
+  /**
+   * Demo only: books a large realized loss on the paper account (as if other trades today had
+   * lost) so the open positions push the daily loss limit past the protection level.
+   */
+  simulateLargeLoss(accountId = 'paper-demo'): void {
+    const account = this.config.accounts.get(accountId);
+    const e = this.accounts.get(accountId);
+    const daily = e?.state?.dailyLoss;
+    if (!account || !e?.state || !daily || e.state.openRisk.positions.length === 0) {
+      this.emit(
+        'WARN',
+        'demo',
+        'SIMULATED_LOSS_SKIPPED',
+        'open a trade first (Trade Approval Center), then simulate the loss',
+      );
+      return;
+    }
+    const ref = account.broker.accountRef;
+    // Leave only 6% of the daily limit: 94% used → above the 90% protection level.
+    const balance = daily.floor + daily.limit * 0.06 - e.state.floatingPnl;
+    this.paper.importAccount(ref, { ...this.paper.exportAccount(ref), balance });
+    this.emit(
+      'WARN',
+      'demo',
+      'SIMULATED_LOSS',
+      `demo booked a SIMULATED realized loss: paper balance set to ${balance.toFixed(2)} (daily loss limit ~94% used)`,
+      accountId,
+    );
+    void this.syncAccounts();
   }
 
   private async syncAll(): Promise<void> {

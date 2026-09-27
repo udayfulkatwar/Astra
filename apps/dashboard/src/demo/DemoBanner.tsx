@@ -64,6 +64,14 @@ export default function DemoBanner() {
             Jump to 5 min before next high-impact event
           </button>
         )}
+        <button
+          type="button"
+          className="btn small"
+          title="Books a SIMULATED realized loss so open trades push the daily loss limit past 90%: automatic protection should close them"
+          onClick={() => rt.simulateLargeLoss()}
+        >
+          Simulate a big loss
+        </button>
         {status?.open && (
           <button
             type="button"

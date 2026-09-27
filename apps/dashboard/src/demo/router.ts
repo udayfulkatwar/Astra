@@ -248,6 +248,7 @@ export async function handleDemoRequest(
         policy: rt.monitorPolicy,
         accounts: rt.monitorViews,
         alerts: rt.monitorAlerts.list(),
+        protection: rt.protectionStatus(),
       };
     if (path === '/api/v1/calendar/risk')
       return eventRiskView({

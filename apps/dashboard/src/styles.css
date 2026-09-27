@@ -1137,3 +1137,10 @@ select:focus {
   font-size: 10px;
   color: var(--muted);
 }
+
+.rules-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+}

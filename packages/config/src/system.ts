@@ -2,7 +2,7 @@
 import { COMPONENT_IDS, SessionDefinitionSchema, type ComponentId } from '@astra/core';
 import { DecisionPolicySchema } from '@astra/decision';
 import { StructureParamsSchema } from '@astra/market-structure';
-import { MonitorPolicySchema } from '@astra/risk';
+import { MonitorPolicySchema, ProtectionPolicySchema } from '@astra/risk';
 import { z } from 'zod';
 
 const componentStaleness = z.object(
@@ -60,6 +60,10 @@ export const SystemConfigSchema = z.object({
       barCloseGraceMs: z.number().int().nonnegative().max(60_000).optional(),
     })
     .optional(),
+  /**
+   * Automatic protective closing (ADR-0014; owner-authorised). Omitted → DEFAULTS (enabled).
+   */
+  protection: ProtectionPolicySchema.optional(),
   /**
    * Economic-calendar provider polling (ADR-0011). Omitted → no provider: windows arrive only by
    * push (n8n → POST /api/v1/calendar/window), or from the SIMULATED schedule in simulation mode.

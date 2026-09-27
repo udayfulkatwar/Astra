@@ -46,6 +46,7 @@ import { KillSwitchService } from './kill-switch-service';
 import { BarPersister } from './market-data';
 import { ModeService } from './mode-service';
 import { PositionMonitorService } from './position-monitor';
+import { ProtectionService } from './protection-service';
 import { createSimulation } from './simulation';
 
 export interface RuntimeOptions {
@@ -93,6 +94,7 @@ export class AstraRuntime {
   readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
   readonly monitor: PositionMonitorService;
+  readonly protection: ProtectionService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
@@ -206,6 +208,14 @@ export class AstraRuntime {
       accounts: this.accounts,
       market: this.market,
       events: this.events,
+    });
+    this.protection = new ProtectionService({
+      config,
+      clock,
+      gateway: this.execution.gateway,
+      killSwitches: this.killSwitches,
+      events: this.events,
+      audit: this.repos.audit,
     });
     this.decisions = new DecisionService({
       config,
@@ -369,6 +379,7 @@ export class AstraRuntime {
       await this.health.probe();
       await this.accounts.syncAll();
       await this.monitor.evaluate();
+      await this.protection.run(this.monitor.snapshot().accounts);
       await this.killSwitches.autoClearDue();
       const expired = await this.repos.decisions.expireStaleApprovals(
         this.clock.now().toISOString(),

@@ -21,7 +21,14 @@ import {
   type OpenPosition,
   type Quote,
 } from '@astra/core';
-import type { AdapterHealth, BrokerAdapter, BrokerOrderState, OrderRequest } from '../types';
+import type {
+  AdapterHealth,
+  BrokerAdapter,
+  BrokerOrderState,
+  ClosePositionRequest,
+  ClosePositionResult,
+  OrderRequest,
+} from '../types';
 
 export interface PaperClosedTrade {
   readonly positionId: string;
@@ -31,7 +38,8 @@ export interface PaperClosedTrade {
   readonly quantity: number;
   readonly entryPrice: number;
   readonly exitPrice: number;
-  readonly exitReason: 'STOP' | 'TARGET' | 'MANUAL';
+  /** PROTECTIVE: closed by ASTRA's automatic protection (ADR-0014). */
+  readonly exitReason: 'STOP' | 'TARGET' | 'MANUAL' | 'PROTECTIVE';
   readonly realizedPnl: number;
   readonly openedAt: string;
   readonly closedAt: string;
@@ -50,6 +58,10 @@ export interface PaperFailureInjection {
   partialFillRatio?: number;
   /** Health reported by the adapter. */
   health?: AdapterHealth;
+  /** Reject the next close request with this reason. */
+  rejectNextClose?: string;
+  /** Throw a transport error on the next close request (outcome unknown to the caller). */
+  failNextClose?: boolean;
 }
 
 interface PaperAccount {
@@ -58,6 +70,8 @@ interface PaperAccount {
   orders: Map<string, BrokerOrderState>;
   closed: PaperClosedTrade[];
   currency: string;
+  /** Close results by clientCloseId (idempotency; not persisted). */
+  closes: Map<string, ClosePositionResult>;
 }
 
 export interface PaperBrokerOptions {
@@ -100,6 +114,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       orders: new Map(),
       closed: [],
       currency,
+      closes: new Map(),
     });
   }
 
@@ -129,6 +144,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       positions: new Map(state.positions.map((p) => [p.positionId, { ...p }])),
       orders: new Map(state.orders.map((o) => [o.clientOrderId, o])),
       closed: [...state.closed],
+      closes: new Map(),
     });
   }
 
@@ -156,13 +172,13 @@ export class PaperBrokerAdapter implements BrokerAdapter {
         ) {
           // Gap-through: fill at the worse of the stop and the market.
           const fill = long ? Math.min(pos.stopPrice, exitSide) : Math.max(pos.stopPrice, exitSide);
-          this.closePosition(ref, pos.positionId, fill, 'STOP');
+          this.settlePosition(ref, pos.positionId, fill, 'STOP');
           this.changed(ref);
         } else if (
           pos.targetPrice !== null &&
           (long ? exitSide >= pos.targetPrice : exitSide <= pos.targetPrice)
         ) {
-          this.closePosition(ref, pos.positionId, pos.targetPrice, 'TARGET');
+          this.settlePosition(ref, pos.positionId, pos.targetPrice, 'TARGET');
           this.changed(ref);
         }
       }
@@ -277,13 +293,58 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     });
   }
 
+  closePosition(req: ClosePositionRequest): Promise<ClosePositionResult> {
+    const acct = this.account(req.accountRef);
+    const previous = acct.closes.get(req.clientCloseId);
+    if (previous) return Promise.resolve(previous); // idempotent
+    if (this.failures.failNextClose) {
+      this.failures.failNextClose = false;
+      return Promise.reject(new Error('paper broker: simulated transport failure on close'));
+    }
+    const now = this.opts.clock.now().toISOString();
+    const result = (
+      status: ClosePositionResult['status'],
+      detail: string | null,
+      exitPrice: number | null = null,
+      realizedPnl: number | null = null,
+    ): ClosePositionResult => ({
+      clientCloseId: req.clientCloseId,
+      positionId: req.positionId,
+      status,
+      exitPrice,
+      realizedPnl,
+      detail,
+      updatedAt: now,
+    });
+    const rejectReason = this.failures.rejectNextClose;
+    if (rejectReason !== undefined) {
+      this.failures.rejectNextClose = undefined;
+      return Promise.resolve(result('REJECTED', rejectReason)); // not stored: a retry may succeed
+    }
+    const pos = acct.positions.get(req.positionId);
+    let r: ClosePositionResult;
+    if (!pos) {
+      r = result('NOT_FOUND', 'position is not open');
+    } else {
+      const q = this.quotes.get(pos.symbol);
+      if (!q) return Promise.resolve(result('REJECTED', `no market for ${pos.symbol}`));
+      const exit = pos.direction === 'LONG' ? q.bid : q.ask;
+      this.settlePosition(req.accountRef, req.positionId, exit, 'PROTECTIVE');
+      const trade = acct.closed.at(-1)!;
+      r = result('CLOSED', req.reason, trade.exitPrice, trade.realizedPnl);
+      this.changed(req.accountRef);
+    }
+    acct.closes.set(req.clientCloseId, r);
+    return Promise.resolve(r);
+  }
+
   /** Test/operator helper: close a position at the current market. */
   closeAtMarket(accountRef: string, positionId: string): void {
     const pos = this.account(accountRef).positions.get(positionId);
     if (!pos) throw new AstraError('NOT_FOUND', `position ${positionId} not found`);
     const q = this.quotes.get(pos.symbol);
     if (!q) throw new AstraError('UNAVAILABLE', `no quote for ${pos.symbol}`);
-    this.closePosition(accountRef, positionId, pos.direction === 'LONG' ? q.bid : q.ask, 'MANUAL');
+    this.settlePosition(accountRef, positionId, pos.direction === 'LONG' ? q.bid : q.ask, 'MANUAL');
     this.changed(accountRef);
   }
 
@@ -347,7 +408,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     };
   }
 
-  private closePosition(
+  private settlePosition(
     accountRef: string,
     positionId: string,
     exitPrice: number,

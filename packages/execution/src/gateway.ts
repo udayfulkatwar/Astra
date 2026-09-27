@@ -35,6 +35,15 @@ export interface ExecutionResult {
   readonly brokerState: BrokerOrderState | null;
 }
 
+export type ProtectiveCloseOutcome = 'CLOSED' | 'ALREADY_FLAT' | 'SKIPPED' | 'REJECTED' | 'UNKNOWN';
+
+export interface ProtectiveCloseResult {
+  readonly outcome: ProtectiveCloseOutcome;
+  readonly reason: string;
+  readonly exitPrice: number | null;
+  readonly realizedPnl: number | null;
+}
+
 export interface ExecutionGatewayDeps {
   readonly store: ExecutionStore;
   readonly adapter: (adapterId: string) => BrokerAdapter | undefined;
@@ -289,6 +298,64 @@ export class ExecutionGateway {
         order,
         brokerState: confirmed,
       };
+    });
+  }
+
+  /**
+   * Risk-reducing close of one position (ADR-0014). Unlike new trades it is not blocked by mode
+   * or GLOBAL / ACCOUNT / STRATEGY / INSTRUMENT kill switches — it only removes risk — but it is
+   * never sent while an EXECUTION kill switch says the execution path itself cannot be trusted,
+   * and never in SHADOW (nothing is transmitted there). An unknown outcome halts execution for the
+   * account, exactly like an unconfirmed order. Runs under the account's execution lock.
+   */
+  async protectiveClose(req: {
+    accountId: string;
+    positionId: string;
+    clientCloseId: string;
+    reason: string;
+  }): Promise<ProtectiveCloseResult> {
+    const result = (
+      outcome: ProtectiveCloseOutcome,
+      reason: string,
+      exitPrice: number | null = null,
+      realizedPnl: number | null = null,
+    ): ProtectiveCloseResult => ({ outcome, reason, exitPrice, realizedPnl });
+    const account = this.deps.account(req.accountId);
+    if (!account) return result('REJECTED', `account ${req.accountId} not found`);
+    const mode = this.deps.mode();
+    if (mode === 'SHADOW' || mode === 'BACKTEST') {
+      return result('SKIPPED', `mode ${mode} never transmits orders`);
+    }
+    const ks = this.deps.killSwitches({ accountId: req.accountId });
+    if (!ks.loaded) return result('SKIPPED', ks.reasons.join('; '));
+    const execution = ks.blocking.filter((s) => s.scope === 'EXECUTION');
+    if (execution.length > 0) {
+      return result(
+        'SKIPPED',
+        `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
+      );
+    }
+    const adapter = this.deps.adapter(account.broker.adapterId);
+    if (!adapter) return result('REJECTED', `adapter ${account.broker.adapterId} not registered`);
+
+    return this.locks.run(req.accountId, async () => {
+      try {
+        const r = await adapter.closePosition({
+          clientCloseId: req.clientCloseId,
+          accountRef: account.broker.accountRef,
+          positionId: req.positionId,
+          reason: req.reason,
+        });
+        if (r.status === 'CLOSED')
+          return result('CLOSED', r.detail ?? req.reason, r.exitPrice, r.realizedPnl);
+        if (r.status === 'NOT_FOUND')
+          return result('ALREADY_FLAT', r.detail ?? 'position not open');
+        return result('REJECTED', r.detail ?? 'close rejected by the broker');
+      } catch (err) {
+        const reason = `close of ${req.positionId} outcome unknown: ${err instanceof Error ? err.message : String(err)}`;
+        await this.deps.onExecutionUnknown(req.accountId, req.clientCloseId, reason);
+        return result('UNKNOWN', reason);
+      }
     });
   }
 
