@@ -4,15 +4,9 @@
  * up, filled = down) so the structure reads first; only the three overlay roles carry color
  * (palette validated all-pairs on the panel surface). Times are UTC.
  */
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent,
-} from 'react';
+import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { Bar, MarketStructure } from '../api/types';
+import { niceTicks, useWidth } from '../lib/chart';
 import { num } from '../lib/format';
 
 const HEIGHT = 300;
@@ -21,34 +15,8 @@ const PAD = { top: 16, right: 80, bottom: 24, left: 12 };
 const TAG_CLEARANCE = 14;
 const TAG_H = 16;
 
-function niceTicks(min: number, max: number, count: number): number[] {
-  const span = max - min;
-  if (!(span > 0)) return [min];
-  const raw = span / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw;
-  const out: number[] = [];
-  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step)
-    out.push(Number(v.toFixed(10)));
-  return out;
-}
-
 function timeLabel(iso: string, daily: boolean): string {
   return daily ? iso.slice(5, 10) : iso.slice(11, 16);
-}
-
-function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e!.contentRect.width)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, width] as const;
 }
 
 export function StructureChart({ bars, structure }: { bars: Bar[]; structure: MarketStructure }) {

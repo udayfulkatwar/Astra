@@ -4,6 +4,10 @@ import { api, getToken } from './client';
 import { syncAstraClock } from '../lib/format';
 import type {
   AccountDetail,
+  BacktestRequestInput,
+  BacktestResult,
+  BacktestRun,
+  BacktestRunListItem,
   AccountView,
   AuditEntry,
   Bar,
@@ -183,6 +187,33 @@ export const useJournalSummary = (strategy: string | null) =>
     queryFn: () => api<JournalSummary>(`/api/v1/journal/summary?${journalQuery(strategy)}`),
     refetchInterval: 5_000,
   });
+
+export const useBacktests = () =>
+  useQuery({
+    queryKey: ['backtests'],
+    queryFn: () => api<{ runs: BacktestRunListItem[]; running: boolean }>('/api/v1/backtests'),
+    refetchInterval: 10_000,
+  });
+
+export const useBacktest = (runId: string | null) =>
+  useQuery({
+    queryKey: ['backtest', runId],
+    queryFn: () => api<BacktestRun>(`/api/v1/backtests/${encodeURIComponent(runId!)}`),
+    enabled: runId !== null,
+    staleTime: Infinity, // a stored run never changes
+  });
+
+export function useRunBacktest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: BacktestRequestInput) =>
+      api<{ runId: string; createdAt: string; result: BacktestResult }>('/api/v1/backtests', {
+        method: 'POST',
+        body: b,
+      }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['backtests'] }),
+  });
+}
 
 export const useOrders = () =>
   useQuery({

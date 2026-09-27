@@ -238,14 +238,3 @@ export function AiMonitor() {
     </div>
   );
 }
-
-export function Backtesting() {
-  return (
-    <div className="page">
-      <PageHeader title="Backtesting" />
-      <Card>
-        <NotBuilt phase="Phase 8" what="The backtesting subsystem" />
-      </Card>
-    </div>
-  );
-}

@@ -76,6 +76,8 @@ export interface AssembleOptions {
   /** Per-provider timeout. */
   readonly timeoutMs: number;
   readonly decisionId?: string;
+  /** Set only by the backtest simulator (see `DecisionInputs.environment`). */
+  readonly environment?: DecisionInputs['environment'];
 }
 
 function notRequested<T>(what: string): Observed<T> {
@@ -136,6 +138,7 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
     decisionId: opts.decisionId ?? newId('decision'),
     // Decision time is taken AFTER gathering so freshness is judged at the moment of decision.
     now: clock.now().toISOString(),
+    ...(opts.environment ? { environment: opts.environment } : {}),
     mode: state.mode(),
     configHash: config.configHash,
     policy: config.policy,

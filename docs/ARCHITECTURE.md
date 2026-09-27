@@ -143,6 +143,7 @@ astra/
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
 │   ├── journal/             Trade journal: excursions, plan-vs-actual entries, statistics (ADR-0015)
+│   ├── backtest/            M1 replay through the real gate, protection and journal (ADR-0016)
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
@@ -164,10 +165,12 @@ market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
 calendar    → core   (pure and isomorphic)
 journal     → core   (pure and isomorphic)
+backtest    → core, calendar, decision, journal, market-data, market-structure, prop-firm, risk, safety
+              (pure and isomorphic; composes the real engines; no lookahead)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
 config      → core, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)
-db          → core, decision, execution, journal, market-data, prop-firm, safety   (implements their ports)
+db          → core, backtest, decision, execution, journal, market-data, prop-firm, safety   (implements their ports)
 apps/api    → everything (composition root)
 apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)
 ```
@@ -227,11 +230,18 @@ two instances migrating concurrently.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | `market_bars` | completed OHLC bars built from observed quotes; PK (symbol, timeframe, open_time, source); `volume` NULL when not reported | upsert (complete bars only) |
 
+### Phase-8 tables
+
+| Table           | Purpose                                                                            | Mutability  |
+| --------------- | ---------------------------------------------------------------------------------- | ----------- |
+| `trade_journal` | one entry per closed trade: plan vs actual, costs, R, observed excursions          | append-only |
+| `backtest_runs` | each backtest's request and full deterministic result (label, assumptions, trades) | append-only |
+
 ### Later phases (planned)
 
 `instruments`, `news_items`, `economic_events`, `sentiment_readings`, `signals`,
-`positions`, `closed_trades`, `journal_entries`, `ai_model_calls`, `workflow_runs`, `alerts`,
-`performance_metrics`, `backtest_runs`, `operating_costs`.
+`positions`, `ai_model_calls`, `workflow_runs`, `alerts`, `performance_metrics`,
+`operating_costs`.
 
 The conceptual entities of spec §47 that are _configuration_ (prop-firm profiles, rules,
 strategies, instruments, risk policies, account definitions) live in version-controlled YAML
@@ -280,6 +290,9 @@ rules in force.
 | GET/POST | `/api/v1/market/quotes` (latest quotes / ingestion)                         | viewer / automation                          |
 | GET      | `/api/v1/market/scanner` (market snapshots)                                 | viewer                                       |
 | GET      | `/api/v1/market/bars?symbol=&timeframe=&limit=`                             | viewer                                       |
+| GET      | `/api/v1/journal`, `/api/v1/journal/summary`                                | viewer                                       |
+| POST     | `/api/v1/backtests` (replay; never trades)                                  | operator                                     |
+| GET      | `/api/v1/backtests`, `/api/v1/backtests/:id`                                | viewer                                       |
 
 ---
 

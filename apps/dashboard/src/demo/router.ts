@@ -17,6 +17,7 @@ import { analyzeStructure } from '@astra/market-structure';
 import { KILL_SWITCH_SCOPES, type KillSwitchScope } from '@astra/safety';
 import { ApiError } from '../api/client';
 import type { AccountView, DecisionSummary, StatusBar } from '../api/types';
+import { getBacktest, listBacktests, runDemoBacktest } from './backtests';
 import { demoRuntime, type DemoRuntime } from './runtime';
 
 const RISK_ORDER = ['SAFE', 'CAUTION', 'RESTRICTED', 'BREACH_RISK', 'UNKNOWN', 'HALTED'];
@@ -253,6 +254,9 @@ export async function handleDemoRequest(
         ? { entries: entries.slice(0, Number(q.get('limit') ?? 100)) }
         : journalSummary(entries);
     }
+    if (path === '/api/v1/backtests') return listBacktests();
+    const bt = /^\/api\/v1\/backtests\/([^/]+)$/.exec(path);
+    if (bt) return getBacktest(decodeURIComponent(bt[1]!));
     if (path === '/api/v1/monitor/positions')
       return {
         asOf: rt.monitorAsOf,
@@ -272,6 +276,7 @@ export async function handleDemoRequest(
   }
 
   if (method === 'POST') {
+    if (path === '/api/v1/backtests') return runDemoBacktest(rt, requestBody);
     if (path === '/api/v1/decisions/evaluate') {
       const b = body<{ candidate?: unknown; autoExecute?: boolean }>(requestBody);
       const parsed = TradeCandidateSchema.omit({ submittedAt: true }).safeParse(b.candidate);

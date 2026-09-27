@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dec, floorToStep, ceilToStep, decMin, pct } from '../src/decimal';
+import { dec, floorToStep, ceilToStep, decMin, pct, toNum } from '../src/decimal';
 import { newId, uuidv7 } from '../src/ids';
 import { MODE_POLICIES } from '../src/modes';
 import { worstHealth } from '../src/health';
@@ -7,6 +7,11 @@ import { worstHealth } from '../src/health';
 describe('decimal helpers', () => {
   it('avoids binary float drift', () => {
     expect(dec(0.1).plus(0.2).eq(0.3)).toBe(true);
+  });
+
+  it('never returns a negative zero (it would not survive a JSON round trip)', () => {
+    expect(Object.is(toNum(dec(0).mul(-1)), 0)).toBe(true);
+    expect(Object.is(toNum(dec('-0.0001'), 2), 0)).toBe(true);
   });
 
   it('never rounds quantities up', () => {

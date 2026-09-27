@@ -9,36 +9,37 @@ Phase 2 (market data) complete except the real provider adapter**, which needs t
 platform choice (see _Owner inputs_). **Phase 4 calendar groundwork done** (provider port,
 poller, validation, change events, event-risk view; a real provider needs the owner's choice);
 news is not started. **Phase 5 groundwork done:** market-structure detection (no lookahead).
-**Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised) and the
-trade journal are done; the gate prices the trailing-drawdown path (owner decision). Backtesting
-and learning metrics are next.
+**Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised), the
+trade journal and **backtesting** are done; the gate prices the trailing-drawdown path (owner
+decision). Learning metrics are next.
 Paper trading runs end to end on simulated or ingested data, with bars, a market scanner,
 market structure, a quote-quality guard and event blackouts.
 
 ## Completed
 
-| Area               | What exists                                                                                                                                                                                                     | Tests                            |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| Architecture       | `docs/ARCHITECTURE.md` (18 sections), ADR-0001…0009                                                                                                                                                             | —                                |
-| Tooling            | pnpm workspace, TS 6 strict, ESLint (type-aware), Prettier, Vitest, GitHub Actions CI with Postgres                                                                                                             | —                                |
-| `@astra/core`      | `Observed<T>` (no-fabrication wrapper), modes, health, UTC/time-zone (DST-safe) utilities, sessions/trading hours, decimal math, UUIDv7, canonical JSON/hash, DATA/SIGNAL/CONTEXT schemas                       | 38                               |
-| `@astra/prop-firm` | Rule-profile schema (all §13 rule families), account tracking (peaks, day-start), account state engine, worst-case `canTrade` rule engine, firm quantity headroom                                               | 51 (incl. property tests)        |
-| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN; position monitor + alert tracker (ADR-0012)                                 | 33 (incl. 500-run property test) |
-| `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                    | 24                               |
-| `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                       | 83 (incl. property test)         |
-| `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt) | 22                               |
-| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                         | 57                               |
-| Market structure   | `@astra/market-structure` (pure; ADR-0010): swings with labels, BOS/CHoCH, liquidity pools and sweeps, fair value gaps — complete bars only, every item stamped with when it became known                       | 13 (incl. no-lookahead property) |
-| Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                | 7 + DB + API                     |
-| Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`    | 12 + 3 (core)                    |
-| `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                           | 21 (real Postgres)               |
-| `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                        | 10                               |
-| `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                           | 25 (real Postgres, end to end)   |
-| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build            | 5 + browser walkthrough          |
-| Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                  | compose validated                |
-| n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                | JSON validated                   |
+| Area               | What exists                                                                                                                                                                                                     | Tests                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Architecture       | `docs/ARCHITECTURE.md` (18 sections), ADR-0001…0009                                                                                                                                                             | —                                           |
+| Tooling            | pnpm workspace, TS 6 strict, ESLint (type-aware), Prettier, Vitest, GitHub Actions CI with Postgres                                                                                                             | —                                           |
+| `@astra/core`      | `Observed<T>` (no-fabrication wrapper), modes, health, UTC/time-zone (DST-safe) utilities, sessions/trading hours, decimal math, UUIDv7, canonical JSON/hash, DATA/SIGNAL/CONTEXT schemas                       | 38                                          |
+| `@astra/prop-firm` | Rule-profile schema (all §13 rule families), account tracking (peaks, day-start), account state engine, worst-case `canTrade` rule engine, firm quantity headroom                                               | 51 (incl. property tests)                   |
+| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN; position monitor + alert tracker (ADR-0012)                                 | 33 (incl. 500-run property test)            |
+| `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                    | 24                                          |
+| `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                       | 83 (incl. property test)                    |
+| `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt) | 22                                          |
+| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                         | 57                                          |
+| Market structure   | `@astra/market-structure` (pure; ADR-0010): swings with labels, BOS/CHoCH, liquidity pools and sweeps, fair value gaps — complete bars only, every item stamped with when it became known                       | 13 (incl. no-lookahead property)            |
+| Backtesting        | `@astra/backtest` (pure; ADR-0016): M1 replay through the real gate, sizing, prop-firm rules, protection and journal; next-open pessimistic fills; resampler; TEMPLATE strategy; seeded SIMULATED bars          | 21 (incl. no-lookahead property) + DB + API |
+| Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                | 7 + DB + API                                |
+| Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`    | 12 + 3 (core)                               |
+| `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                           | 21 (real Postgres)                          |
+| `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                        | 10                                          |
+| `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                           | 25 (real Postgres, end to end)              |
+| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build            | 5 + browser walkthrough                     |
+| Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                  | compose validated                           |
+| n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                | JSON validated                              |
 
-**Total: 439 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 467 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -118,6 +119,22 @@ Remaining:
 - `GET /api/v1/journal`, `GET /api/v1/journal/summary` (overall and by strategy / instrument /
   exit reason); dashboard **Trade Journal** page; also in the demo.
 
+## Backtesting (done)
+
+- `runBacktest` replays M1 bars (stored recordings from one source, or seeded SIMULATED bars)
+  through the same gate (mode BACKTEST inside the simulator only), sizing, prop-firm rules,
+  tracking, position monitor, automatic protection and journal (ADR-0016). No lookahead: a replay
+  cut at any bar matches the full replay up to the cut (property test).
+- Fills: next bar's open, ask/bid + slippage; stop assumed first when a bar hits both; gapped stops
+  at the open; targets never better; expired approvals dropped; commission from the spec.
+- Every result states its label (SIMULATED → "engine test, not evidence of performance"),
+  assumptions and warnings, what the gate blocked and why, protective actions, the first
+  prop-firm breach, trades (journal entries) and a downsampled equity curve with max drawdown.
+- `POST/GET /api/v1/backtests` (runs stored append-only in `backtest_runs`, migration 0005; one
+  at a time, yields to the safety loop; never touches accounts, orders, kill switches or mode);
+  dashboard **Backtesting** page; also in the demo. A month of M1 bars replays in about 2 s.
+- The only strategy is a clearly-marked TEMPLATE (break of structure) to exercise the engine.
+
 ## Remaining (by phase)
 
 | Phase | Scope                                                                                                                                             |
@@ -127,7 +144,7 @@ Remaining:
 | 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
 | 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                    |
 | 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
-| 8     | Learning metrics, backtesting subsystem; extended paper run                                                                                       |
+| 8     | Learning metrics; extended paper run; backtests on real recorded / provider history                                                               |
 | 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                          |
 | 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                               |
 
@@ -147,6 +164,9 @@ Remaining:
    minimum) against your strategy.
 9. **Protection levels** (ADR-0013/0014, decided: both enabled) — review the thresholds in
    `config/astra.yaml` (`protection`, `monitors.positions`) against your firm and style.
+10. **Losing-streak rule** (`maxConsecutiveLosses`): after that many losses in a row, should
+    ASTRA stop for the rest of the trading day, or until you reset it? Today nothing resets it
+    except a win, so trading stays stopped (backtests show this; see known issue 21).
 
 ## Decisions made autonomously (summary)
 
@@ -194,10 +214,15 @@ authorization. Details in `docs/adr/`.
     until the next poll or push. Decision records keep the calendar each decision saw.
 20. The event-risk view uses the global blackout rule; strategy and firm rules can only widen it
     at decision time (the gate applies the merged rule).
+21. The consecutive-loss count never resets except by a win: once the limit is reached, new
+    trades stay blocked (fail-closed) with no reset path yet — awaiting the owner's rule (owner
+    input 10).
+22. Backtests know only M1 OHLC: the path inside a bar is unknown (stop assumed first), and there
+    is no historical news, AI or real calendar yet; queueing and partial fills are not modelled.
 
 ## Next implementation target
 
-Without owner input: the backtesting subsystem on stored bars (replaying the same gate, sizing,
-protection and journal — no lookahead), then the news-ingestion port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
+Without owner input: learning metrics over the journal and backtests (Phase 8), then the
+news-ingestion port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

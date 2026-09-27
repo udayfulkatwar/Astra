@@ -74,6 +74,11 @@ export interface DecisionInputs {
   readonly decisionId: string;
   readonly now: string;
   readonly mode: TradingMode;
+  /**
+   * Where the decision is made. BACKTEST_SIMULATOR (only with mode BACKTEST) is the offline
+   * replay; the real-time pipeline never sets it (absent = REALTIME) and never trades in BACKTEST.
+   */
+  readonly environment?: 'REALTIME' | 'BACKTEST_SIMULATOR' | undefined;
   readonly configHash: string;
   readonly policy: DecisionPolicy;
   readonly candidate: TradeCandidate;

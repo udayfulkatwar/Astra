@@ -6,10 +6,23 @@ export const systemMode: GateCheck = {
   layer: 'SYSTEM',
   mandatory: true,
   description: 'The global trading mode permits new trades.',
-  evaluate: (i) =>
-    modePolicy(i.mode).newTradesAllowed
+  evaluate: (i) => {
+    const simulator = i.environment === 'BACKTEST_SIMULATOR';
+    // The backtest simulator only ever decides in BACKTEST mode, and BACKTEST mode only ever
+    // "trades" inside the simulator (orders are never transmitted there).
+    if (simulator || i.mode === 'BACKTEST') {
+      return simulator && i.mode === 'BACKTEST'
+        ? pass('BACKTEST mode inside the backtest simulator (nothing is transmitted)')
+        : fail(
+            simulator
+              ? `the backtest simulator only decides in BACKTEST mode (not ${i.mode})`
+              : 'mode BACKTEST does not permit new trades outside the backtest simulator',
+          );
+    }
+    return modePolicy(i.mode).newTradesAllowed
       ? pass(`mode ${i.mode} permits new trades`)
-      : fail(`mode ${i.mode} does not permit new trades`),
+      : fail(`mode ${i.mode} does not permit new trades`);
+  },
 };
 
 export const systemKillSwitches: GateCheck = {

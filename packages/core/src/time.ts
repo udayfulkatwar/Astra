@@ -87,6 +87,38 @@ export interface TradingDayWindow {
  * DST is handled by Luxon: the reset stays at the same wall-clock time.
  */
 export function tradingDayWindow(instant: Date, reset: LocalTimeInZone): TradingDayWindow {
+  // Every instant of a window maps to that same window, so the last one is reused (replays call
+  // this once per bar); fresh Date objects are returned each time.
+  const ms = instant.getTime();
+  const hit = lastWindow;
+  if (
+    hit &&
+    hit.timeZone === reset.timeZone &&
+    hit.time === reset.time &&
+    ms >= hit.startMs &&
+    ms < hit.endMs
+  )
+    return { key: hit.key, start: new Date(hit.startMs), end: new Date(hit.endMs) };
+  const w = computeTradingDayWindow(instant, reset);
+  lastWindow = {
+    timeZone: reset.timeZone,
+    time: reset.time,
+    key: w.key,
+    startMs: w.start.getTime(),
+    endMs: w.end.getTime(),
+  };
+  return w;
+}
+
+let lastWindow: {
+  timeZone: string;
+  time: string;
+  key: string;
+  startMs: number;
+  endMs: number;
+} | null = null;
+
+function computeTradingDayWindow(instant: Date, reset: LocalTimeInZone): TradingDayWindow {
   const { hour, minute } = splitTime(reset.time);
   const local = DateTime.fromJSDate(instant, { zone: reset.timeZone });
   let start = local.set({ hour, minute, second: 0, millisecond: 0 });

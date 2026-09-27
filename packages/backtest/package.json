@@ -1,31 +1,29 @@
 {
-  "name": "@astra/db",
+  "name": "@astra/backtest",
   "version": "0.1.0",
   "private": true,
-  "description": "PostgreSQL schema (plain SQL migrations), migration runner and repositories.",
+  "description": "Backtest simulator: replays M1 bars through the real decision gate, sizing, protection and journal with next-open fills and pessimistic intrabar exits. Pure and isomorphic; no lookahead.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "migrate": "tsx src/cli-migrate.ts"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@astra/backtest": "workspace:*",
+    "@astra/calendar": "workspace:*",
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",
-    "@astra/execution": "workspace:*",
     "@astra/journal": "workspace:*",
     "@astra/market-data": "workspace:*",
+    "@astra/market-structure": "workspace:*",
     "@astra/prop-firm": "workspace:*",
+    "@astra/risk": "workspace:*",
     "@astra/safety": "workspace:*",
-    "postgres": "^3.4.9"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@astra/config": "workspace:*",
-    "@astra/risk": "workspace:*",
-    "tsx": "^4.23.0"
+    "@astra/config": "workspace:*"
   }
 }

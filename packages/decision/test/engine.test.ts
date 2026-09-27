@@ -130,6 +130,21 @@ describe('DecisionEngine — system layer', () => {
     expect(failing(d)).toContain('system.mode');
   });
 
+  it('BACKTEST passes the mode check only inside the backtest simulator, which needs BACKTEST', () => {
+    const mode = (i: DecisionInputs) => decide(i).checks.find((c) => c.checkId === 'system.mode')!;
+    expect(mode(makeInputs({ mode: 'BACKTEST', environment: 'BACKTEST_SIMULATOR' }))).toMatchObject(
+      {
+        verdict: 'PASS',
+      },
+    );
+    expect(mode(makeInputs({ mode: 'BACKTEST', environment: 'REALTIME' })).verdict).toBe('FAIL');
+    expect(mode(makeInputs({ mode: 'PAPER', environment: 'BACKTEST_SIMULATOR' }))).toMatchObject({
+      verdict: 'FAIL',
+      reasons: ['the backtest simulator only decides in BACKTEST mode (not PAPER)'],
+    });
+    expect(mode(makeInputs({ mode: 'PAPER' })).verdict).toBe('PASS');
+  });
+
   it('kill-switch state not loaded → NO TRADE', () => {
     const d = decide(
       makeInputs({

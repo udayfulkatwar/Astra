@@ -44,6 +44,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@astra/backtest':
+        specifier: workspace:*
+        version: link:../../packages/backtest
       '@astra/calendar':
         specifier: workspace:*
         version: link:../../packages/calendar
@@ -108,6 +111,9 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@astra/backtest':
+        specifier: workspace:*
+        version: link:../../packages/backtest
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.0)
@@ -173,6 +179,43 @@ importers:
         specifier: ^8.3.1
         version: 8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1)
 
+  packages/backtest:
+    dependencies:
+      '@astra/calendar':
+        specifier: workspace:*
+        version: link:../calendar
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@astra/decision':
+        specifier: workspace:*
+        version: link:../decision
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../journal
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../market-data
+      '@astra/market-structure':
+        specifier: workspace:*
+        version: link:../market-structure
+      '@astra/prop-firm':
+        specifier: workspace:*
+        version: link:../prop-firm
+      '@astra/risk':
+        specifier: workspace:*
+        version: link:../risk
+      '@astra/safety':
+        specifier: workspace:*
+        version: link:../safety
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@astra/config':
+        specifier: workspace:*
+        version: link:../config
+
   packages/calendar:
     dependencies:
       '@astra/core':
@@ -231,6 +274,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@astra/backtest':
+        specifier: workspace:*
+        version: link:../backtest
       '@astra/core':
         specifier: workspace:*
         version: link:../core
@@ -256,6 +302,12 @@ importers:
         specifier: ^3.4.9
         version: 3.4.9
     devDependencies:
+      '@astra/config':
+        specifier: workspace:*
+        version: link:../config
+      '@astra/risk':
+        specifier: workspace:*
+        version: link:../risk
       tsx:
         specifier: ^4.23.0
         version: 4.23.15

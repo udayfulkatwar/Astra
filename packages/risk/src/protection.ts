@@ -110,8 +110,30 @@ function lastWeekly(now: Date, at: WeeklyTime): Date {
 export class ProtectionEvaluator {
   /** accountId:positionId → first seen without a stop (epoch ms). */
   private readonly unprotectedSince = new Map<string, number>();
+  /** Last/next deadline per rule: both stay the same until `next` is reached. */
+  private readonly deadlines = new Map<string, { last: number; next: number }>();
 
   constructor(readonly policy: ProtectionPolicy) {}
+
+  private deadline(
+    now: Date,
+    at: LocalTimeInZone | WeeklyTime,
+    weekly: boolean,
+  ): { last: Date; next: Date } {
+    const key = JSON.stringify(at);
+    const ms = now.getTime();
+    let d = this.deadlines.get(key);
+    if (!d || ms < d.last || ms >= d.next) {
+      d = weekly
+        ? {
+            last: lastWeekly(now, at as WeeklyTime).getTime(),
+            next: nextWeeklyTime(now, at as WeeklyTime).getTime(),
+          }
+        : { last: lastDaily(now, at).getTime(), next: nextDailyTime(now, at).getTime() };
+      this.deadlines.set(key, d);
+    }
+    return { last: new Date(d.last), next: new Date(d.next) };
+  }
 
   evaluate(views: readonly AccountMonitorView[], ctx: ProtectionContext): ProtectiveAction[] {
     if (!this.policy.enabled) return [];
@@ -151,8 +173,7 @@ export class ProtectionEvaluator {
       const holding = ctx.holding(v.accountId);
       const buffer = this.policy.flattenMinutesBeforeFlat;
       if (holding?.flatBy) {
-        const next = nextDailyTime(ctx.now, holding.flatBy);
-        const last = lastDaily(ctx.now, holding.flatBy);
+        const { next, last } = this.deadline(ctx.now, holding.flatBy, false);
         const label = `${holding.flatBy.time} ${holding.flatBy.timeZone}`;
         if (minutesBetween(ctx.now, next) <= buffer) {
           all(
@@ -175,8 +196,7 @@ export class ProtectionEvaluator {
         }
       }
       if (holding?.weekend === 'PROHIBITED' && holding.weeklyClose) {
-        const next = nextWeeklyTime(ctx.now, holding.weeklyClose);
-        const last = lastWeekly(ctx.now, holding.weeklyClose);
+        const { next, last } = this.deadline(ctx.now, holding.weeklyClose, true);
         const label = `${holding.weeklyClose.day} ${holding.weeklyClose.time} ${holding.weeklyClose.timeZone}`;
         if (minutesBetween(ctx.now, next) <= buffer) {
           all(

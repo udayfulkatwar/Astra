@@ -56,11 +56,13 @@ export default tseslint.config(
     },
   },
   {
-    // Market and calendar packages also run in the browser: no Node built-ins.
+    // Packages that also run in the browser (the demo): no Node built-ins.
     files: [
       'packages/market-data/src/**/*.ts',
       'packages/market-structure/src/**/*.ts',
       'packages/calendar/src/**/*.ts',
+      'packages/journal/src/**/*.ts',
+      'packages/backtest/src/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -69,7 +71,7 @@ export default tseslint.config(
           patterns: [
             {
               group: ['node:*', 'fs', 'path', 'crypto', 'os', 'events', 'stream', 'util', 'url'],
-              message: 'market packages must stay isomorphic (Node and browser).',
+              message: 'this package must stay isomorphic (Node and browser).',
             },
           ],
         },

@@ -19,6 +19,7 @@ import type { AstraConfig } from '@astra/config';
 import {
   AccountRepository,
   AuditRepository,
+  BacktestRepository,
   ConfigVersionRepository,
   DecisionRepository,
   EventRepository,
@@ -39,6 +40,7 @@ import {
 } from '@astra/market-data';
 import type { Logger } from 'pino';
 import { AccountService } from './account-service';
+import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
 import { ExecutionService } from './execution-service';
@@ -85,6 +87,7 @@ export class AstraRuntime {
     paperState: PaperBrokerStateRepository;
     marketBars: MarketBarRepository;
     journal: JournalRepository;
+    backtests: BacktestRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
@@ -98,6 +101,7 @@ export class AstraRuntime {
   readonly calendar: CalendarService;
   readonly monitor: PositionMonitorService;
   readonly journal: JournalService;
+  readonly backtests: BacktestService;
   readonly protection: ProtectionService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
@@ -136,6 +140,7 @@ export class AstraRuntime {
       paperState: new PaperBrokerStateRepository(sql),
       marketBars: new MarketBarRepository(sql),
       journal: new JournalRepository(sql),
+      backtests: new BacktestRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
@@ -206,6 +211,14 @@ export class AstraRuntime {
       log,
     });
     this.market.onQuote((q) => this.journal.onQuote(q));
+    this.backtests = new BacktestService({
+      config,
+      clock,
+      bars: this.repos.marketBars,
+      runs: this.repos.backtests,
+      market: this.market,
+      events: this.events,
+    });
     this.accounts = new AccountService({
       config,
       repo: this.repos.accounts,

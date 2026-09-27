@@ -16,6 +16,12 @@ import type {
   StrategyDefinition,
   TradingMode,
 } from '@astra/core';
+import type {
+  BacktestRequestInput,
+  BacktestResult,
+  BacktestRun,
+  BacktestRunListItem,
+} from '@astra/backtest';
 import type { EventRiskView, InstrumentEventRisk } from '@astra/calendar';
 import type { JournalEntry, JournalStats, JournalSummary } from '@astra/journal';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
@@ -37,6 +43,10 @@ import type { KillSwitchState } from '@astra/safety';
 
 export type {
   AccountState,
+  BacktestRequestInput,
+  BacktestResult,
+  BacktestRun,
+  BacktestRunListItem,
   CalendarWindow,
   EventImpact,
   ComponentHealth,

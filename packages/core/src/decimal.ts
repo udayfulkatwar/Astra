@@ -51,7 +51,8 @@ export function pct(part: Decimal, whole: Decimal): Decimal | null {
 
 /** Converts to a JS number, rounded to `dp` decimal places (default 8) for JSON output. */
 export function toNum(value: Decimal, dp = 8): number {
-  return value.toDecimalPlaces(dp, D.ROUND_HALF_EVEN).toNumber();
+  // `+ 0` turns a negative zero (e.g. −0.001 rounded) into 0: it survives no JSON round trip.
+  return value.toDecimalPlaces(dp, D.ROUND_HALF_EVEN).toNumber() + 0;
 }
 
 /** Money rounding for display/reporting (2 dp). */

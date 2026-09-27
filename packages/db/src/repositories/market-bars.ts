@@ -75,22 +75,46 @@ export class MarketBarRepository implements BarStore {
         select * from market_bars where symbol = ${symbol} and timeframe = ${timeframe}
          order by open_time desc, source limit ${limit}
       ) newest order by open_time asc, source`;
-    return rows.map((r) =>
-      BarSchema.parse({
-        symbol: r.symbol,
-        timeframe: r.timeframe,
-        openTime: iso(r.open_time),
-        closeTime: iso(r.close_time),
-        open: Number(r.open),
-        high: Number(r.high),
-        low: Number(r.low),
-        close: Number(r.close),
-        volume: r.volume === null ? null : Number(r.volume),
-        tickCount: r.tick_count,
-        complete: true,
-        source: r.source,
-        sourceKind: r.source_kind,
-      }),
-    );
+    return rows.map(toBar);
   }
+
+  /**
+   * Bars of one symbol/timeframe lying entirely within [from, to), oldest → newest, at most
+   * `limit` (callers ask for limit + 1 to detect truncation); optionally from one source only.
+   */
+  async range(q: {
+    symbol: string;
+    timeframe: Timeframe;
+    from: string;
+    to: string;
+    limit: number;
+    source?: string | undefined;
+  }): Promise<Bar[]> {
+    const rows = await this.sql<BarRow[]>`
+      select * from market_bars
+       where symbol = ${q.symbol} and timeframe = ${q.timeframe}
+         and open_time >= ${q.from} and close_time <= ${q.to}
+         and (${q.source ?? null}::text is null or source = ${q.source ?? null})
+       order by open_time asc, source
+       limit ${q.limit}`;
+    return rows.map(toBar);
+  }
+}
+
+function toBar(r: BarRow): Bar {
+  return BarSchema.parse({
+    symbol: r.symbol,
+    timeframe: r.timeframe,
+    openTime: iso(r.open_time),
+    closeTime: iso(r.close_time),
+    open: Number(r.open),
+    high: Number(r.high),
+    low: Number(r.low),
+    close: Number(r.close),
+    volume: r.volume === null ? null : Number(r.volume),
+    tickCount: r.tick_count,
+    complete: true,
+    source: r.source,
+    sourceKind: r.source_kind,
+  });
 }

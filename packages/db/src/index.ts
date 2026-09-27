@@ -9,3 +9,4 @@ export * from './repositories/accounts';
 export * from './repositories/paper';
 export * from './repositories/market-bars';
 export * from './repositories/journal';
+export * from './repositories/backtests';

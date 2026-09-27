@@ -88,4 +88,34 @@ describe.skipIf(!available)('market bars repository', () => {
       minute(50).openTime,
     );
   });
+  it('returns bars within a time range, optionally from one source', async () => {
+    await repo.upsert([
+      minute(3),
+      minute(4),
+      minute(4, { source: 'other', sourceKind: 'HISTORICAL' }),
+    ]);
+    const range = await repo.range({
+      symbol: 'NQ',
+      timeframe: 'M1',
+      from: minute(1).openTime,
+      to: minute(4).closeTime,
+      limit: 100,
+    });
+    expect(range.map((b) => `${b.openTime.slice(11, 16)} ${b.source}`)).toEqual([
+      '14:01 feed',
+      '14:02 feed',
+      '14:03 feed',
+      '14:04 feed',
+      '14:04 other',
+    ]);
+    const one = await repo.range({
+      symbol: 'NQ',
+      timeframe: 'M1',
+      from: minute(1).openTime,
+      to: minute(4).openTime, // the 14:04 bar ends after `to`: excluded
+      limit: 2,
+      source: 'feed',
+    });
+    expect(one.map((b) => b.openTime)).toEqual([minute(1).openTime, minute(2).openTime]);
+  });
 });

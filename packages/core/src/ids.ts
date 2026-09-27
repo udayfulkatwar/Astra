@@ -24,6 +24,7 @@ export const ID_PREFIXES = {
   signal: 'sig',
   killSwitchEvent: 'ksw',
   snapshot: 'snap',
+  backtest: 'btr',
 } as const;
 export type IdKind = keyof typeof ID_PREFIXES;
 

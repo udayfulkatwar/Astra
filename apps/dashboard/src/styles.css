@@ -885,7 +885,8 @@ select:focus {
 }
 .segmented button:focus-visible,
 .linklike:focus-visible,
-.structure-chart:focus-visible {
+.structure-chart:focus-visible,
+.equity-chart:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -897,7 +898,8 @@ select:focus {
   font: inherit;
   cursor: pointer;
 }
-.table.structure tr.selected td {
+.table.structure tr.selected td,
+.table.runs tr.selected td {
   background: rgba(56, 189, 248, 0.06);
 }
 .tag {
@@ -1153,4 +1155,73 @@ select:focus {
 }
 .table.journal td {
   vertical-align: middle;
+}
+
+/* Backtesting */
+.table.runs tbody tr {
+  cursor: pointer;
+}
+.bt-label {
+  margin-bottom: 12px;
+}
+.bt-label ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.plain-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: var(--text);
+}
+.plain-list li + li {
+  margin-top: 4px;
+}
+.equity-chart {
+  display: block;
+  margin-top: 8px;
+  touch-action: pan-y;
+}
+.equity-chart .grid {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+.equity-chart .axis {
+  fill: var(--muted);
+  font: 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.equity-chart .label {
+  fill: var(--text);
+  font: 600 10px var(--sans);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.equity-chart .crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.eq-line {
+  stroke: var(--viz-profit);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.eq-band {
+  fill: var(--viz-candle);
+  fill-opacity: 0.22;
+}
+.eq-base {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.eq-dd {
+  fill: var(--viz-loss);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.eq-hover {
+  fill: var(--text);
+  stroke: var(--panel);
+  stroke-width: 2;
 }
