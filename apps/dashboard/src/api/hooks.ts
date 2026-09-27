@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { api, getToken } from './client';
+import { syncAstraClock } from '../lib/format';
 import type {
   AccountDetail,
   AccountView,
@@ -26,7 +27,11 @@ import type {
 export const useStatus = () =>
   useQuery({
     queryKey: ['status'],
-    queryFn: () => api<StatusBar>('/api/v1/system/status'),
+    queryFn: async () => {
+      const status = await api<StatusBar>('/api/v1/system/status');
+      syncAstraClock(status.now);
+      return status;
+    },
     refetchInterval: 3_000,
   });
 

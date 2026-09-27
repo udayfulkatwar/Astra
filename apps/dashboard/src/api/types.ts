@@ -17,6 +17,7 @@ import type {
 } from '@astra/core';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
+import type { MarketSnapshot, Timeframe } from '@astra/market-data';
 import type { AccountState, AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
 import type { AccountHealthAssessment, RiskPolicy } from '@astra/risk';
 import type { KillSwitchState } from '@astra/safety';
@@ -154,31 +155,5 @@ export interface ConfigSummary {
 
 export type { ExecutionResult, Observed, Quote };
 
-export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1';
-
-/** Market scanner snapshot (contract of GET /api/v1/market/scanner). */
-export interface MarketSnapshot {
-  symbol: string;
-  asOf: string;
-  quote: Observed<Quote>;
-  mid: number | null;
-  spreadTicks: number | null;
-  market: {
-    open: boolean;
-    nextClose: string | null;
-    nextOpen: string | null;
-    minutesToClose: number | null;
-  } | null;
-  activeSessions: string[];
-  today: { open: number; high: number; low: number; close: number } | null;
-  previousDay: { high: number; low: number; close: number } | null;
-  changeFromPrevClosePct: number | null;
-  sessions: { id: string; high: number; low: number }[];
-  atr: { H1: number | null; D1: number | null };
-  quality: {
-    status: 'OK' | 'STALE' | 'SUSPECT' | 'NO_DATA';
-    reason: string | null;
-    lastJumpAt: string | null;
-  };
-  barsAvailable: Record<Timeframe, number>;
-}
+/** Market scanner snapshot (GET /api/v1/market/scanner) and bar timeframes. */
+export type { MarketSnapshot, Timeframe };

@@ -20,6 +20,7 @@ import {
   type ComponentId,
   type Observed,
   type ObservedOk,
+  type InstrumentSpec,
   type Quote,
   type TradeCandidate,
   type TradingMode,
@@ -46,6 +47,7 @@ import {
   type AccountState,
   type AccountTracking,
 } from '@astra/prop-firm';
+import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
 import { classifyAccountHealth, type AccountHealthAssessment } from '@astra/risk';
 import {
   ComponentHealthRegistry,
@@ -77,6 +79,11 @@ export interface DemoDecisionRecord {
 
 const GENESIS = 'sha256:genesis';
 const TICK_MS = 250;
+/** Simulated past the demo pre-runs so the scanner has bars (15+ trading days for ATR(14) on D1). */
+const HISTORY_DAYS = 22;
+/** The most recent part of that history is simulated minute by minute, the rest every 5 minutes. */
+const HISTORY_DETAIL_MS = 2 * 86_400_000;
+const SIM_SOURCE = { id: 'simulation', kind: 'SIMULATED' } as const;
 
 async function sha256(text: string): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -123,10 +130,18 @@ export class DemoRuntime {
   readonly audit: AuditEntry[] = [];
   readonly closedTrades = new Map<string, ClosedTrade[]>();
   readonly accounts = new Map<string, AccountEntry>();
+  /** The real market-data engine (quality monitor, bars, snapshots) fed by the simulator. */
+  readonly market: MarketDataService;
+  /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
+  readonly tradedSymbols: readonly string[];
 
   private readonly engine = new DecisionEngine();
-  private readonly quotes = new Map<string, ObservedOk<Quote>>();
   private readonly prices = new Map<string, number>();
+  /** Cached scheduled market state per symbol: valid while `fromMs <= t < untilMs`. */
+  private readonly sessionCache = new Map<
+    string,
+    { open: boolean; fromMs: number; untilMs: number }
+  >();
   private readonly listeners = new Set<(e: SystemEvent) => void>();
   private auditQueue: Promise<void> = Promise.resolve();
   private eventSeq = 0;
@@ -136,7 +151,27 @@ export class DemoRuntime {
   constructor() {
     this.config = loadDemoConfig();
     const start = demoStart(this.config);
-    this.clock = new ManualClock(start);
+    const historyStart = new Date(start.getTime() - HISTORY_DAYS * 86_400_000);
+    this.clock = new ManualClock(historyStart);
+    const freshness = this.config.system.decision.freshness;
+    this.market = new MarketDataService({
+      clock: this.clock,
+      instruments: this.config.instruments,
+      sessions: this.config.system.sessions,
+      freshness: { maxAgeMs: freshness.quoteMaxAgeMs, maxFutureSkewMs: freshness.maxFutureSkewMs },
+      suspectCooldownMs: this.config.system.marketData?.suspectCooldownMs,
+      maxBarsPerSeries: this.config.system.marketData?.maxBarsPerSeries,
+      barCloseGraceMs: this.config.system.marketData?.barCloseGraceMs,
+      observingSince: historyStart,
+      onRejected: (source, reason) =>
+        this.emit('WARN', 'market-data', 'QUOTE_REJECTED', `${source}: ${reason}`),
+    });
+    const traded = new Set<string>();
+    for (const a of this.config.accounts.values())
+      if (a.status === 'ACTIVE') for (const sym of a.instruments) traded.add(sym);
+    this.tradedSymbols = [...traded].sort();
+    this.historyQuotes = this.simulateHistory(historyStart, start);
+    this.clock.set(start);
     this.killSwitches = new KillSwitchRegistry(this.clock);
     this.killSwitches.load([]);
     const staleness = this.config.system.health.staleAfterMs;
@@ -213,6 +248,12 @@ export class DemoRuntime {
       `ASTRA demo started in PAPER mode — simulated clock ${this.clock.now().toISOString().slice(0, 16)}Z, SIMULATED prices`,
     );
     for (const w of this.config.warnings) this.emit('WARN', 'config', 'CONFIG_WARNING', w);
+    this.emit(
+      'INFO',
+      'market-data',
+      'SIMULATED_HISTORY',
+      `demo pre-ran the price simulator over the past ${HISTORY_DAYS} simulated days (${this.historyQuotes} SIMULATED quotes) so the scanner has bars`,
+    );
     this.timers.push(
       window.setInterval(() => this.clock.advance(TICK_MS), TICK_MS),
       window.setInterval(
@@ -316,18 +357,36 @@ export class DemoRuntime {
     this.health.report('AUTOMATION', 'ONLINE', 'simulated n8n heartbeat (demo)');
   }
 
-  /** SIMULATED random-walk quotes — a simulator, not market data. */
+  /** SIMULATED random-walk quotes — a simulator, not market data — into the market-data engine. */
   private feed(): void {
+    for (const quote of this.simulateQuotes(
+      this.config.system.simulation?.quoteIntervalMs ?? 1_000,
+    ))
+      this.paper.onQuote(quote);
+    this.market.advance();
+    const h = this.market.feedHealth(this.tradedSymbols);
+    this.health.report('MARKET_DATA', h.status, `${h.detail} (SIMULATED demo feed)`);
+    this.health.report('CALENDAR', 'ONLINE', 'SIMULATED calendar window (demo, no events)');
+  }
+
+  /**
+   * One random-walk step for every simulated instrument whose market is open, ingested by the
+   * market-data engine. The step size scales with the square root of the interval, so the walk
+   * has the same volatility whether simulated per second or per minute.
+   */
+  private simulateQuotes(intervalMs: number): Quote[] {
     const sim = this.config.system.simulation;
-    if (!sim) return;
+    if (!sim) return [];
     const now = this.clock.now();
+    const scale = Math.sqrt(intervalMs / sim.quoteIntervalMs);
+    const sink = this.market.sink(SIM_SOURCE);
+    const out: Quote[] = [];
     for (const [symbol, s] of Object.entries(sim.instruments)) {
       const spec = this.config.instruments.get(symbol);
-      if (!spec) continue;
-      if (spec.tradingHours && !marketStatus(now, spec.tradingHours).open) continue; // closed markets do not quote
+      if (!spec || !this.scheduledOpen(symbol, spec, now)) continue; // closed markets do not quote
       const tick = spec.tickSize;
       const prev = this.prices.get(symbol) ?? s.startPrice;
-      const steps = Math.round((Math.random() * 2 - 1) * s.volatilityTicks);
+      const steps = Math.round((Math.random() * 2 - 1) * s.volatilityTicks * scale);
       const mid = Math.max(tick, Math.round((prev + steps * tick) / tick) * tick);
       this.prices.set(symbol, mid);
       const quote: Quote = {
@@ -336,26 +395,77 @@ export class DemoRuntime {
         ask: Number((mid + s.spreadTicks * tick).toFixed(10)),
         asOf: now.toISOString(),
       };
-      this.quotes.set(
-        symbol,
-        observed(quote, { source: 'simulation', sourceKind: 'SIMULATED', asOf: quote.asOf }),
-      );
-      this.paper.onQuote(quote);
+      sink(quote);
+      out.push(quote);
     }
-    if (this.quotes.size > 0)
-      this.health.report('MARKET_DATA', 'ONLINE', 'SIMULATED quotes flowing (demo)');
-    this.health.report('CALENDAR', 'ONLINE', 'SIMULATED calendar window (demo, no events)');
+    return out;
   }
 
-  latestQuote(symbol: string): Observed<Quote> {
-    return (
-      this.quotes.get(symbol) ??
-      notObserved('UNAVAILABLE', `no quote received for ${symbol}`, 'market-data')
+  /** Scheduled market state, cached until the next open/close (a time-zone calculation). */
+  private scheduledOpen(symbol: string, spec: InstrumentSpec, at: Date): boolean {
+    if (!spec.tradingHours) return true;
+    const t = at.getTime();
+    const cached = this.sessionCache.get(symbol);
+    if (cached && cached.fromMs <= t && t < cached.untilMs) return cached.open;
+    const status = marketStatus(at, spec.tradingHours);
+    const next = status.open ? status.nextClose : status.nextOpen;
+    this.sessionCache.set(symbol, {
+      open: status.open,
+      fromMs: t,
+      untilMs: next ? Date.parse(next) : Number.POSITIVE_INFINITY,
+    });
+    return status.open;
+  }
+
+  /**
+   * Pre-runs the simulator over simulated past time, so bars, previous-day levels, session ranges
+   * and ATR exist when the demo opens. Everything it produces is SIMULATED, like the live feed.
+   */
+  private simulateHistory(from: Date, to: Date): number {
+    const sim = this.config.system.simulation;
+    if (!sim) return 0;
+    let quotes = 0;
+    for (let t = from.getTime(); t < to.getTime();) {
+      const step = to.getTime() - t > HISTORY_DETAIL_MS ? 5 * 60_000 : 60_000;
+      this.clock.set(new Date(t));
+      quotes += this.simulateQuotes(step).length;
+      this.market.advance();
+      t += step;
+    }
+    return quotes;
+  }
+
+  /** Injects one bad price tick (a feed glitch) to show the quote-quality guard. */
+  injectBadTick(symbol: string): void {
+    const spec = this.config.instruments.get(symbol);
+    const last = this.market.latest(symbol);
+    if (!spec || last.status !== 'OK') {
+      this.emit('WARN', 'demo', 'BAD_TICK_SKIPPED', `no live ${symbol} quote to corrupt`);
+      return;
+    }
+    const jump = (spec.maxQuoteJumpTicks ?? 100) * 3 * spec.tickSize;
+    const bid = Number((last.value.bid + jump).toFixed(10));
+    const ask = Number((last.value.ask + jump).toFixed(10));
+    this.market.sink(SIM_SOURCE)({ symbol, bid, ask, asOf: this.clock.now().toISOString() });
+    const q = this.market.quoteQuality(symbol);
+    this.emit(
+      'WARN',
+      'market-data',
+      'ABNORMAL_JUMP',
+      `demo injected a bad ${symbol} tick: ${q.reason ?? 'quote rejected'}`,
     );
   }
 
+  latestQuote(symbol: string): Observed<Quote> {
+    return this.market.latest(symbol);
+  }
+
   allQuotes(): ObservedOk<Quote>[] {
-    return [...this.quotes.values()];
+    return this.market.all();
+  }
+
+  snapshots(): MarketSnapshot[] {
+    return this.market.snapshots();
   }
 
   calendar(): Observed<CalendarWindow> {
@@ -402,6 +512,7 @@ export class DemoRuntime {
   }
 
   private syncing = false;
+  private historyQuotes = 0;
 
   private async syncAccounts(): Promise<void> {
     if (this.syncing) return;
@@ -441,6 +552,8 @@ export class DemoRuntime {
       if (a.state === 'PENDING' && Date.parse(a.expiresAt) <= now)
         void this.store.transitionApproval(a.approvalId, 'EXPIRED');
     }
+    // The in-memory store answers as long as the page runs (the server probes its database here).
+    this.health.report('DATABASE', 'ONLINE', 'in-browser demo store (not persisted)');
     this.health.report('RISK_ENGINE', 'ONLINE', 'safety loop healthy (demo)');
   }
 

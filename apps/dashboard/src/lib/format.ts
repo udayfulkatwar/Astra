@@ -28,7 +28,23 @@ export function dateTime(iso: string | null | undefined): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 19)}Z · ${d.toLocaleTimeString()} local`;
 }
 
-export function ago(iso: string | null | undefined, now = Date.now()): string {
+/**
+ * Offset of the ASTRA clock (the server's, or the demo's simulated clock) from this browser's
+ * clock, so "5s ago" is measured on the same clock that stamped the data.
+ */
+let clockOffsetMs = 0;
+
+/** Called with every status response (`status.now`). */
+export function syncAstraClock(astraNowIso: string): void {
+  const t = Date.parse(astraNowIso);
+  if (Number.isFinite(t)) clockOffsetMs = t - Date.now();
+}
+
+export function astraNow(): number {
+  return Date.now() + clockOffsetMs;
+}
+
+export function ago(iso: string | null | undefined, now = astraNow()): string {
   if (!iso) return 'never';
   const s = Math.round((now - Date.parse(iso)) / 1000);
   if (s < 0) return 'in the future';

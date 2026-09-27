@@ -53,6 +53,16 @@ export default function DemoBanner() {
             Jump to market hours
           </button>
         )}
+        {status?.open && (
+          <button
+            type="button"
+            className="btn small"
+            title="Sends one abnormal MNQ price into the feed: the quality guard should block MNQ trades for about a minute"
+            onClick={() => rt.injectBadTick('MNQ')}
+          >
+            Inject bad MNQ tick
+          </button>
+        )}
       </span>
     </div>
   );

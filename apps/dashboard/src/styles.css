@@ -805,9 +805,19 @@ select:focus {
   white-space: nowrap;
   vertical-align: middle;
 }
+.table.scanner td.stack {
+  line-height: 1.35;
+}
+.table.scanner tr.has-note td {
+  border-bottom: none;
+}
+.table.scanner tr.scanner-note td {
+  white-space: normal;
+  padding-top: 0;
+}
 .range {
   position: relative;
-  width: 150px;
+  width: 110px;
   height: 22px;
 }
 .range-track {

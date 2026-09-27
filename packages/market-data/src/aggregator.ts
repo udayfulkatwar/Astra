@@ -13,7 +13,7 @@
  */
 import type { DataSourceKind, TradingHours } from '@astra/core';
 import type { Bar } from './bar';
-import { TIMEFRAMES, barWindow, type Timeframe } from './timeframe';
+import { TIMEFRAMES, barWindow, type BarWindow, type Timeframe } from './timeframe';
 
 export interface PriceTick {
   readonly symbol: string;
@@ -120,7 +120,13 @@ export class BarAggregator {
     const hours = this.opts.tradingHours(tick.symbol);
     const completed: Bar[] = [];
     for (const [tf, frame] of s.frames) {
-      const w = barWindow(tick.atMs, tf, hours);
+      // Fast path: a price inside the current bar's period (the common case) needs no window
+      // computation — the D1 window is a time-zone calculation, costly on every quote.
+      const open = frame.current;
+      const w: BarWindow =
+        open && tick.atMs >= open.openMs && tick.atMs < open.closeMs
+          ? open
+          : barWindow(tick.atMs, tf, hours);
       if (frame.current && w.openMs >= frame.current.closeMs) {
         const done = this.finish(s, tf, frame);
         if (done) completed.push(done);

@@ -3,11 +3,14 @@
  * spread, market status, sessions, day and previous-day levels, volatility — derived from real
  * bars only. Structure detection (BOS, CHoCH, liquidity) is Phase 5.
  */
+import { Fragment } from 'react';
 import { ApiError } from '../api/client';
 import { useQuotes, useScanner } from '../api/hooks';
 import type { MarketSnapshot } from '../api/types';
 import { Card, Empty, ErrorBox, Loading, NotBuilt, PageHeader, Pill } from '../components/ui';
 import { ago, num, pct } from '../lib/format';
+
+const COLUMNS = 11;
 
 const QUALITY_TONE: Record<MarketSnapshot['quality']['status'], string> = {
   OK: 'ONLINE',
@@ -65,67 +68,91 @@ function Scanner() {
             <th className="num">Spread</th>
             <th>Market</th>
             <th>Sessions</th>
-            <th className="num">Today O / H / L</th>
-            <th className="num">Prev day H / L</th>
+            <th className="num">Today</th>
+            <th className="num">Prev day</th>
             <th className="num">Chg</th>
             <th>Range (PDL → PDH)</th>
-            <th className="num">ATR H1 / D1</th>
+            <th className="num">ATR(14)</th>
             <th>Data</th>
           </tr>
         </thead>
         <tbody>
           {data.snapshots.map((s) => (
-            <tr key={s.symbol}>
-              <td className="strong">{s.symbol}</td>
-              <td className="num">{num(s.mid, 5)}</td>
-              <td className="num">{s.spreadTicks === null ? '—' : `${num(s.spreadTicks, 1)} t`}</td>
-              <td>
-                {s.market === null ? (
-                  <Pill status="UNKNOWN" label="HOURS UNKNOWN" />
-                ) : s.market.open ? (
-                  <>
-                    <Pill status="ONLINE" label="OPEN" />{' '}
+            <Fragment key={s.symbol}>
+              <tr className={s.quality.reason ? 'has-note' : undefined}>
+                <td className="strong">{s.symbol}</td>
+                <td className="num">{num(s.mid, 5)}</td>
+                <td className="num">
+                  {s.spreadTicks === null ? '—' : `${num(s.spreadTicks, 1)} t`}
+                </td>
+                <td>
+                  {s.market === null ? (
+                    <Pill status="UNKNOWN" label="HOURS UNKNOWN" />
+                  ) : s.market.open ? (
+                    <>
+                      <Pill status="ONLINE" label="OPEN" />
+                      <div className="muted small">
+                        {Math.floor(s.market.minutesToClose ?? 0)} min to close
+                      </div>
+                    </>
+                  ) : (
+                    <Pill status="DISABLED" label="CLOSED" />
+                  )}
+                </td>
+                <td className="small stack">
+                  {s.activeSessions.length ? (
+                    s.activeSessions.map((id) => <div key={id}>{id}</div>)
+                  ) : (
+                    <span className="muted">none</span>
+                  )}
+                </td>
+                <td className="num stack">
+                  {s.today ? (
+                    <>
+                      <div>O {num(s.today.open, 5)}</div>
+                      <div>H {num(s.today.high, 5)}</div>
+                      <div>L {num(s.today.low, 5)}</div>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className="num stack">
+                  {s.previousDay ? (
+                    <>
+                      <div>H {num(s.previousDay.high, 5)}</div>
+                      <div>L {num(s.previousDay.low, 5)}</div>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td
+                  className={`num ${s.changeFromPrevClosePct === null ? '' : s.changeFromPrevClosePct < 0 ? 'tone-text-bad' : 'tone-text-ok'}`}
+                >
+                  {s.changeFromPrevClosePct === null ? '—' : pct(s.changeFromPrevClosePct, 2)}
+                </td>
+                <td>
+                  <RangeBar s={s} />
+                </td>
+                <td className="num stack">
+                  <div>H1 {num(s.atr.H1, 2)}</div>
+                  <div>D1 {num(s.atr.D1, 2)}</div>
+                </td>
+                <td>
+                  <Pill status={QUALITY_TONE[s.quality.status]} label={s.quality.status} />
+                </td>
+              </tr>
+              {s.quality.reason && (
+                <tr className="scanner-note">
+                  <td colSpan={COLUMNS}>
                     <span className="muted small">
-                      {Math.floor(s.market.minutesToClose ?? 0)} min to close
+                      {s.symbol} data {s.quality.status}: {s.quality.reason}
                     </span>
-                  </>
-                ) : (
-                  <Pill status="DISABLED" label="CLOSED" />
-                )}
-              </td>
-              <td className="small">
-                {s.activeSessions.length ? (
-                  s.activeSessions.join(', ')
-                ) : (
-                  <span className="muted">none</span>
-                )}
-              </td>
-              <td className="num">
-                {s.today
-                  ? `${num(s.today.open, 5)} / ${num(s.today.high, 5)} / ${num(s.today.low, 5)}`
-                  : '—'}
-              </td>
-              <td className="num">
-                {s.previousDay
-                  ? `${num(s.previousDay.high, 5)} / ${num(s.previousDay.low, 5)}`
-                  : '—'}
-              </td>
-              <td
-                className={`num ${s.changeFromPrevClosePct === null ? '' : s.changeFromPrevClosePct < 0 ? 'tone-text-bad' : 'tone-text-ok'}`}
-              >
-                {s.changeFromPrevClosePct === null ? '—' : pct(s.changeFromPrevClosePct, 2)}
-              </td>
-              <td>
-                <RangeBar s={s} />
-              </td>
-              <td className="num">
-                {num(s.atr.H1, 5)} / {num(s.atr.D1, 5)}
-              </td>
-              <td>
-                <Pill status={QUALITY_TONE[s.quality.status]} label={s.quality.status} />
-                {s.quality.reason && <div className="muted small">{s.quality.reason}</div>}
-              </td>
-            </tr>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>

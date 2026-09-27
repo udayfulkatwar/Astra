@@ -22,15 +22,15 @@ quote-quality guard.
 | `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                    | 24                               |
 | `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                       | 83 (incl. property test)         |
 | `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt) | 22                               |
-| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                         | 56                               |
+| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                         | 57                               |
 | `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                           | 21 (real Postgres)               |
 | `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                        | 10                               |
 | `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                           | 25 (real Postgres, end to end)   |
-| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; honest placeholders                              | 5 + browser walkthrough          |
+| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build            | 5 + browser walkthrough          |
 | Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                  | compose validated                |
 | n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                | JSON validated                   |
 
-**Total: 355 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 357 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -49,6 +49,14 @@ Completed:
   DEGRADED / UNKNOWN); abnormal price jumps make quotes INVALID for a cooldown (default 60 s,
   `marketData` block in `config/astra.yaml`), so the `data.quote` gate blocks trades.
 - `GET /api/v1/market/scanner` and `GET /api/v1/market/bars`.
+- Dashboard **Market Scanner** (price, spread, market status, active sessions, today and
+  previous-day levels, change, range bar, ATR(14) H1/D1, data quality with the reason when not OK).
+- Bar aggregation fast path: a quote inside the current bar period skips the time-zone window
+  calculation (~22 µs per quote instead of ~150 µs).
+- **In-browser demo** (`pnpm --filter @astra/dashboard build:demo`): the real engines including
+  `@astra/market-data`. It pre-runs the SIMULATED price walk over 22 simulated days so bars,
+  levels and ATR exist on open, and has an "Inject bad MNQ tick" button that shows the quality
+  guard blocking MNQ trades for the cooldown.
 
 Remaining:
 
@@ -56,13 +64,12 @@ Remaining:
   `providerSymbols`, reconnect/backoff, honest health) — needs the owner's platform choice.
 - Provider history backfill (seed complete bars from the provider) so D1/H4 levels and session
   ranges are available right after a restart (today they return once a full period is observed).
-- Dashboard scanner UI (in progress separately).
 
 ## Remaining (by phase)
 
 | Phase | Scope                                                                                                                                                           |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars; dashboard market scanner                                        |
+| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                                  |
 | 4     | Economic-calendar provider adapter; news ingestion + classification; event-risk engine; sentiment; flip `decision.news.required`                                |
 | 5     | Strategy engine with typed rule schemas; market-structure detection (swings, BOS, CHoCH, liquidity); signal generation; owner's strategy                        |
 | 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                                  |

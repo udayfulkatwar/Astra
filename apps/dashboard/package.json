@@ -25,6 +25,7 @@
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",
     "@astra/execution": "workspace:*",
+    "@astra/market-data": "workspace:*",
     "@astra/prop-firm": "workspace:*",
     "@astra/risk": "workspace:*",
     "@astra/safety": "workspace:*",

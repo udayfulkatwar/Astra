@@ -71,6 +71,24 @@ describe('BarAggregator — rollover', () => {
     });
   });
 
+  it('a price at the exact period end opens the next bar, including a 25 h D1 on the DST change', () => {
+    const { a } = agg({ timeframes: ['M1', 'D1'] });
+    a.ingest(tick('2026-11-01T22:58:30Z', 100)); // Sun 17:58:30 EST, day opened Sat 18:00 EDT
+    a.ingest(tick('2026-11-01T22:59:59.999Z', 101)); // same bars (in-period fast path)
+    const r = a.ingest(tick('2026-11-01T23:00:00Z', 102)); // Sun 18:00 EST → next trading day
+    if (!r.accepted) throw new Error('expected acceptance');
+    expect(r.completed.map((b) => [b.timeframe, b.openTime, b.closeTime, b.close])).toEqual([
+      ['M1', '2026-11-01T22:59:00.000Z', '2026-11-01T23:00:00.000Z', 101],
+      ['D1', '2026-10-31T22:00:00.000Z', '2026-11-01T23:00:00.000Z', 101],
+    ]);
+    expect(a.bars('NQ', 'feed', 'D1', { includeCurrent: true }).at(-1)).toMatchObject({
+      openTime: '2026-11-01T23:00:00.000Z',
+      closeTime: '2026-11-02T23:00:00.000Z',
+      open: 102,
+      complete: false,
+    });
+  });
+
   it('never fills gaps: periods without prices have no bar', () => {
     const { a } = agg({ timeframes: ['M1', 'M5'] });
     a.ingest(tick('2026-09-28T14:00:10Z', 100));

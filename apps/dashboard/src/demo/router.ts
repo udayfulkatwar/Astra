@@ -9,6 +9,7 @@ import {
   type HealthStatus,
   type TradingMode,
 } from '@astra/core';
+import { TimeframeSchema } from '@astra/market-data';
 import { KILL_SWITCH_SCOPES, type KillSwitchScope } from '@astra/safety';
 import { ApiError } from '../api/client';
 import type { AccountView, DecisionSummary, StatusBar } from '../api/types';
@@ -187,6 +188,17 @@ export async function handleDemoRequest(
       };
     }
     if (path === '/api/v1/market/quotes') return { quotes: rt.allQuotes() };
+    if (path === '/api/v1/market/scanner') return { snapshots: rt.snapshots() };
+    if (path === '/api/v1/market/bars') {
+      const symbol = q.get('symbol') ?? '';
+      const timeframe = TimeframeSchema.safeParse(q.get('timeframe'));
+      const limit = Number(q.get('limit') ?? 300);
+      if (!timeframe.success || !Number.isInteger(limit) || limit < 1 || limit > 1_000)
+        throw new ApiError(400, 'VALIDATION', 'timeframe must be M1…D1 and limit 1–1000');
+      if (!rt.config.instruments.has(symbol))
+        throw new ApiError(404, 'NOT_FOUND', `instrument ${symbol} is not configured`);
+      return { bars: rt.market.bars(symbol, timeframe.data, limit) };
+    }
     if (path === '/api/v1/calendar/upcoming') return rt.calendar();
   }
 
