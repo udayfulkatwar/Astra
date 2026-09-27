@@ -1,0 +1,19 @@
+# Gold vs USD CFD. CONTRACT SIZE IS BROKER-SPECIFIC: this template assumes 100 oz per lot
+# (0.01 move = $1.00 per lot). Confirm with your broker/prop-firm platform before verifying.
+# Costs are conservative ASSUMPTIONS.
+symbol: XAUUSD
+displayName: Gold / US Dollar (CFD)
+assetClass: CFD_METAL
+quantityUnit: LOTS
+quoteCurrency: USD
+tickSize: 0.01
+tickValue: 1.00
+quantityStep: 0.01
+minQuantity: 0.01
+maxSpreadTicks: 60
+costs:
+  commissionPerUnitRoundTurn: 7.00
+  slippageAllowanceTicks: 20
+verification:
+  status: UNVERIFIED
+  note: Contract size assumed 100 oz/lot — broker-specific, must be confirmed.

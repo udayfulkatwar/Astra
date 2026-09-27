@@ -1,0 +1,26 @@
+{
+  "name": "@astra/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PostgreSQL schema (plain SQL migrations), migration runner and repositories.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "migrate": "tsx src/cli-migrate.ts"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/decision": "workspace:*",
+    "@astra/execution": "workspace:*",
+    "@astra/prop-firm": "workspace:*",
+    "@astra/safety": "workspace:*",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0"
+  }
+}

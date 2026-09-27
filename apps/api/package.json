@@ -1,0 +1,34 @@
+{
+  "name": "@astra/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ASTRA Core service: REST/SSE API, safety monitors, decision and execution orchestration.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/config": "workspace:*",
+    "@astra/core": "workspace:*",
+    "@astra/db": "workspace:*",
+    "@astra/decision": "workspace:*",
+    "@astra/execution": "workspace:*",
+    "@astra/prop-firm": "workspace:*",
+    "@astra/risk": "workspace:*",
+    "@astra/safety": "workspace:*",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "fastify": "^5.12.5",
+    "pino": "^10.3.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.0"
+  }
+}

@@ -1,0 +1,19 @@
+# E-mini Nasdaq-100 futures (CME). Tick size/value per CME contract specifications.
+# Costs are ASTRA's conservative ASSUMPTIONS for worst-case risk — set them to your actual
+# commission and observed slippage, then mark USER_VERIFIED.
+symbol: NQ
+displayName: E-mini Nasdaq-100 (CME)
+assetClass: FUTURES
+quantityUnit: CONTRACTS
+quoteCurrency: USD
+tickSize: 0.25
+tickValue: 5.00
+quantityStep: 1
+minQuantity: 1
+maxSpreadTicks: 4
+costs:
+  commissionPerUnitRoundTurn: 5.00
+  slippageAllowanceTicks: 2
+verification:
+  status: UNVERIFIED
+  note: Verify against CME specs and your broker's fee schedule.

@@ -1,0 +1,14 @@
+# Paper account for testing the pipeline end to end. No real money, no credentials.
+id: paper-demo
+name: Paper demo (template profile)
+firm: TEMPLATE (not a real firm)
+propFirmProfileId: template-static-50k
+riskPolicyId: template-conservative
+currency: USD
+status: ACTIVE
+broker:
+  adapterId: paper
+  accountRef: PAPER-DEMO-1
+strategies: [paper-pipeline-test]
+instruments: [NQ, MNQ, XAUUSD]
+liveTradingAuthorized: false

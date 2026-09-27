@@ -1,0 +1,17 @@
+# TEMPLATE — NOT THE OWNER'S STRATEGY.
+# Accepts externally submitted signals so the full decision pipeline can be exercised in PAPER.
+# It contains no entry logic. The owner's real strategy will be configured in Phase 5.
+# TEMPLATE strategies are refused in LIVE mode.
+id: paper-pipeline-test
+name: Paper pipeline test (template)
+version: 1
+ownership: TEMPLATE
+status: ACTIVE
+description: Pass-through for manually or n8n-submitted signals during paper testing.
+instruments: [NQ, MNQ, XAUUSD]
+timeframes: []
+direction: BOTH
+minRewardToRisk: 1.5
+signalTtlSeconds: 120
+requiresAiAnalysis: false
+rules: {}

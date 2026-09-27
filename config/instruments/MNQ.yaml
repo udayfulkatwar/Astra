@@ -1,0 +1,18 @@
+# Micro E-mini Nasdaq-100 futures (CME). Tick size/value per CME contract specifications.
+# Costs are conservative ASSUMPTIONS — replace with your actual values, then verify.
+symbol: MNQ
+displayName: Micro E-mini Nasdaq-100 (CME)
+assetClass: FUTURES
+quantityUnit: CONTRACTS
+quoteCurrency: USD
+tickSize: 0.25
+tickValue: 0.50
+quantityStep: 1
+minQuantity: 1
+maxSpreadTicks: 4
+costs:
+  commissionPerUnitRoundTurn: 1.50
+  slippageAllowanceTicks: 2
+verification:
+  status: UNVERIFIED
+  note: Verify against CME specs and your broker's fee schedule.

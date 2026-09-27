@@ -1,0 +1,48 @@
+# TEMPLATE — NOT A REAL FIRM'S RULES.
+# Example of an intraday-trailing drawdown profile (futures-style), for PAPER testing.
+# Replace every value with your firm's CURRENT published terms before verifying.
+id: template-trailing-50k
+name: Template — 50K intraday trailing drawdown
+firm: TEMPLATE (not a real firm)
+program: example-evaluation
+phase: EVALUATION
+version: 1
+currency: USD
+accountSize: 50000
+verification:
+  status: UNVERIFIED
+  note: Example values only. Verify against your prop firm's current rules.
+tradingDayReset:
+  timeZone: America/New_York
+  time: '17:00'
+dailyLoss: null
+maxDrawdown:
+  type: TRAILING_INTRADAY_EQUITY
+  limit: { kind: AMOUNT, value: 2500 }
+  measure: EQUITY
+  trailingStopsAt: { kind: INITIAL_BALANCE_PLUS, amount: 100 }
+positionLimits:
+  maxContracts: 10
+  maxLots: null
+  quantityWeights: { MNQ: 0.1 }
+  maxOpenPositions: null
+  perInstrumentMaxQuantity: {}
+  maxLeverage: null
+scaling: null
+consistency:
+  maxDayProfitSharePct: 30
+  enforcement: MONITOR
+news: null
+holding:
+  overnight: PROHIBITED
+  weekend: PROHIBITED
+  flatBy: { timeZone: America/New_York, time: '16:59' }
+  weeklyClose: null
+trading:
+  stopLossRequired: true
+  maxRiskPerTrade: null
+  hedgingAllowed: false
+objectives:
+  profitTarget: { kind: AMOUNT, value: 3000 }
+  minTradingDays: null
+payout: null

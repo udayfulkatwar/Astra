@@ -1,0 +1,32 @@
+# TEMPLATE — conservative starting point for YOUR internal risk policy.
+# These are ASTRA defaults, not your personal rules. Review every value, then set
+# ownership: USER (LIVE mode refuses TEMPLATE policies).
+id: template-conservative
+name: Template — conservative internal risk policy
+version: 1
+ownership: TEMPLATE
+perTrade:
+  riskPercentOfEquity: 0.25
+  maxRiskAmount: null
+  minRewardToRisk: 1.5
+buffers:
+  maxDailyBufferUsePct: 40
+  maxDrawdownBufferUsePct: 20
+  survivalBufferAmount: 150
+exposure:
+  maxOpenRiskPercentOfEquity: 1
+  maxOpenPositions: 2
+  maxPositionsPerInstrument: 1
+  allowPyramiding: false
+activity:
+  maxTradesPerDay: 3
+  maxConsecutiveLosses: 2
+health:
+  cautionUsagePct: 40
+  restrictedUsagePct: 70
+  breachRiskUsagePct: 85
+  cautionSizeMultiplier: 0.5
+timing:
+  noNewTradesMinutesBeforeFlat: 15
+targets:
+  stopTradingWhenProfitTargetReached: true

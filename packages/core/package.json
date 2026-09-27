@@ -1,0 +1,22 @@
+{
+  "name": "@astra/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ASTRA domain primitives: Observed<T>, trading modes, health, time, decimal math, DATA/SIGNAL/CONTEXT schemas.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0",
+    "luxon": "^3.7.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.5"
+  }
+}

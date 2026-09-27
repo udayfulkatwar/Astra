@@ -1,0 +1,19 @@
+{
+  "name": "@astra/execution",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Execution abstraction: broker adapter interface, paper broker, execution gateway with order safety.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/decision": "workspace:*",
+    "@astra/safety": "workspace:*"
+  }
+}

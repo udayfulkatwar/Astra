@@ -1,0 +1,19 @@
+{
+  "name": "@astra/risk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capital Preservation Engine: position sizing, internal risk policy limits, account health.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/prop-firm": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}
