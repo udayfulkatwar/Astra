@@ -14,6 +14,8 @@ import type {
   DecisionSummary,
   EventRiskView,
   ExecutionResult,
+  JournalEntry,
+  JournalSummary,
   KillSwitchState,
   MarketSnapshot,
   MarketStructure,
@@ -162,6 +164,24 @@ export const usePositionMonitor = () =>
     queryKey: ['position-monitor'],
     queryFn: () => api<PositionMonitor>('/api/v1/monitor/positions'),
     refetchInterval: 2_000,
+  });
+
+const journalQuery = (strategy: string | null) =>
+  strategy ? `strategyId=${encodeURIComponent(strategy)}` : '';
+
+export const useJournal = (strategy: string | null) =>
+  useQuery({
+    queryKey: ['journal', strategy],
+    queryFn: () =>
+      api<{ entries: JournalEntry[] }>(`/api/v1/journal?limit=100&${journalQuery(strategy)}`),
+    refetchInterval: 5_000,
+  });
+
+export const useJournalSummary = (strategy: string | null) =>
+  useQuery({
+    queryKey: ['journal-summary', strategy],
+    queryFn: () => api<JournalSummary>(`/api/v1/journal/summary?${journalQuery(strategy)}`),
+    refetchInterval: 5_000,
   });
 
 export const useOrders = () =>

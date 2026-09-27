@@ -7,6 +7,7 @@ import { AccountDetailPage, Accounts } from './pages/Accounts';
 import { Approvals, DecisionDetailPage } from './pages/Approvals';
 import { AiMonitor, Backtesting, CalendarPage, News } from './pages/Intelligence';
 import { MarketScanner } from './pages/MarketScanner';
+import { Journal } from './pages/Journal';
 import { Login } from './pages/Login';
 import { Activity, Audit, Automation, Health } from './pages/Operations';
 import { Overview } from './pages/Overview';
@@ -33,6 +34,7 @@ const routes = [
       { path: 'approvals/:id', element: <DecisionDetailPage /> },
       { path: 'accounts', element: <Accounts /> },
       { path: 'positions', element: <Positions /> },
+      { path: 'journal', element: <Journal /> },
       { path: 'accounts/:id', element: <AccountDetailPage /> },
       { path: 'risk', element: <RiskControls /> },
       { path: 'activity', element: <Activity /> },

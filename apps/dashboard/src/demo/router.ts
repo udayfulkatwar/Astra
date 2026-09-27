@@ -10,6 +10,7 @@ import {
   type TradingMode,
 } from '@astra/core';
 import { eventRiskView } from '@astra/calendar';
+import { journalSummary } from '@astra/journal';
 import { mergedBlackout } from '@astra/decision';
 import { TimeframeSchema } from '@astra/market-data';
 import { analyzeStructure } from '@astra/market-structure';
@@ -241,6 +242,16 @@ export async function handleDemoRequest(
         new Date(now + hours * 3_600_000),
       );
       return w.status === 'OK' ? w : { ...w, value: null };
+    }
+    if (path === '/api/v1/journal' || path === '/api/v1/journal/summary') {
+      const strategy = q.get('strategyId');
+      const account = q.get('accountId');
+      const entries = rt.journal.filter(
+        (e) => (!strategy || e.strategyId === strategy) && (!account || e.accountId === account),
+      );
+      return path === '/api/v1/journal'
+        ? { entries: entries.slice(0, Number(q.get('limit') ?? 100)) }
+        : journalSummary(entries);
     }
     if (path === '/api/v1/monitor/positions')
       return {

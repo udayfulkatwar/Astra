@@ -17,6 +17,7 @@ import type {
   TradingMode,
 } from '@astra/core';
 import type { EventRiskView, InstrumentEventRisk } from '@astra/calendar';
+import type { JournalEntry, JournalStats, JournalSummary } from '@astra/journal';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
@@ -191,3 +192,6 @@ export interface PositionMonitor {
   /** Automatic protection (ADR-0014); absent on older servers. */
   protection?: ProtectionStatus;
 }
+
+/** Trade journal (GET /api/v1/journal, /api/v1/journal/summary). */
+export type { JournalEntry, JournalStats, JournalSummary };

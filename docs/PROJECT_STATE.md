@@ -9,8 +9,9 @@ Phase 2 (market data) complete except the real provider adapter**, which needs t
 platform choice (see _Owner inputs_). **Phase 4 calendar groundwork done** (provider port,
 poller, validation, change events, event-risk view; a real provider needs the owner's choice);
 news is not started. **Phase 5 groundwork done:** market-structure detection (no lookahead).
-**Phase 8 started:** the position monitor (live positions, limit buffers, trailing path risk,
-alerts) is done; the trade journal and backtesting are next.
+**Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised) and the
+trade journal are done; the gate prices the trailing-drawdown path (owner decision). Backtesting
+and learning metrics are next.
 Paper trading runs end to end on simulated or ingested data, with bars, a market scanner,
 market structure, a quote-quality guard and event blackouts.
 
@@ -28,6 +29,7 @@ market structure, a quote-quality guard and event blackouts.
 | `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt) | 22                               |
 | Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                         | 57                               |
 | Market structure   | `@astra/market-structure` (pure; ADR-0010): swings with labels, BOS/CHoCH, liquidity pools and sweeps, fair value gaps — complete bars only, every item stamped with when it became known                       | 13 (incl. no-lookahead property) |
+| Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                | 7 + DB + API                     |
 | Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`    | 12 + 3 (core)                    |
 | `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                           | 21 (real Postgres)               |
 | `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                        | 10                               |
@@ -36,7 +38,7 @@ market structure, a quote-quality guard and event blackouts.
 | Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                  | compose validated                |
 | n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                | JSON validated                   |
 
-**Total: 403 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 439 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -97,6 +99,25 @@ Remaining:
 - Alerts are events (WARN/CRITICAL) raised once per crossing with hysteresis; missing data never
   clears one. It warns only — no automatic closing.
 
+## Owner decisions implemented (2026-09-27)
+
+- **The gate prices the trailing intraday-equity path** (ADR-0013): while the threshold is
+  unlocked a new trade must survive running to its target and reversing to its stop — rule
+  check, sizing cap `trailing-drawdown-path`, survival check, monitor share one implementation.
+- **ASTRA may close positions by itself** (ADR-0014, `protection` in `config/astra.yaml`):
+  hard limit 90 % used at the current mark → close all + ACCOUNT kill switch; no stop for 10 s →
+  close it; 2 min before the firm's flat time / weekly close (or held through) → close all.
+  Never under an EXECUTION kill switch, never in SHADOW; retried 3×, then a human; every action
+  audited and CRITICAL. Demo: "Simulate a big loss".
+
+## Trade journal (done)
+
+- One append-only entry per closed trade (ADR-0015), recorded by the account sync:
+  plan vs actual (entry/exit slippage), costs from the instrument's commission, net P&L, R,
+  MFE/MAE from observed quotes (PARTIAL when observation began late), exit reason, duration.
+- `GET /api/v1/journal`, `GET /api/v1/journal/summary` (overall and by strategy / instrument /
+  exit reason); dashboard **Trade Journal** page; also in the demo.
+
 ## Remaining (by phase)
 
 | Phase | Scope                                                                                                                                             |
@@ -106,7 +127,7 @@ Remaining:
 | 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
 | 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                    |
 | 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
-| 8     | Trade journal, learning metrics, backtesting subsystem; extended paper run                                                                        |
+| 8     | Learning metrics, backtesting subsystem; extended paper run                                                                                       |
 | 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                          |
 | 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                               |
 
@@ -124,9 +145,8 @@ Remaining:
    means every event blocks every instrument (safe but restrictive).
 8. **Review the structure definitions** (ADR-0010: swing strength, equal-level tolerance, FVG
    minimum) against your strategy.
-9. **Decisions on protection** (ADR-0012): should the gate size new trades against the trailing
-   path risk (stricter), and should ASTRA ever close positions automatically (e.g. before a
-   trailing breach)? Today it only warns.
+9. **Protection levels** (ADR-0013/0014, decided: both enabled) — review the thresholds in
+   `config/astra.yaml` (`protection`, `monitors.positions`) against your firm and style.
 
 ## Decisions made autonomously (summary)
 
@@ -144,9 +164,9 @@ authorization. Details in `docs/adr/`.
    adjusting to the installed n8n version.
 3. Day-start values are observed from the first snapshot after the reset unless the platform
    reports them; late observations use the conservative (higher) value.
-4. Intraday trailing drawdown: the gate's worst-case checks use the current threshold. The
-   position monitor now prices and alerts the run-up-then-reverse path (ADR-0012); using it in
-   the gate is an owner decision (stricter sizing).
+4. Intraday trailing drawdown: resolved — the gate, sizing and monitor price the
+   run-up-then-reverse path (ADR-0013). Fast gaps between two safety-loop cycles (2 s) can still
+   move past a protection level before the automatic close.
 5. "No holding through news" (a position opened before a restricted window) is not modelled.
 6. Cross-currency instruments are rejected (no FX conversion of tick values yet).
 7. Only MARKET entries are supported; LIMIT entries are rejected by the gate.
@@ -177,7 +197,7 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
-Without owner input: the trade journal (per-trade record from decision to close, with MAE/MFE
-and outcome vs plan), then the news-ingestion port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
+Without owner input: the backtesting subsystem on stored bars (replaying the same gate, sizing,
+protection and journal — no lookahead), then the news-ingestion port (Phase 4). With owner input: the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

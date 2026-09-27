@@ -62,6 +62,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../../packages/execution
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../../packages/journal
       '@astra/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
@@ -139,6 +142,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../../packages/execution
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../../packages/journal
       '@astra/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
@@ -234,6 +240,9 @@ importers:
       '@astra/execution':
         specifier: workspace:*
         version: link:../execution
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../journal
       '@astra/market-data':
         specifier: workspace:*
         version: link:../market-data
@@ -280,6 +289,12 @@ importers:
       '@astra/safety':
         specifier: workspace:*
         version: link:../safety
+
+  packages/journal:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/market-data:
     dependencies:

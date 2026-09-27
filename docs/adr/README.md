@@ -19,3 +19,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0012](0012-position-monitor.md)                 | Position monitor: observe and warn, trailing path risk        | Accepted |
 | [0013](0013-gate-prices-trailing-path.md)        | The gate prices the trailing intraday-equity path             | Accepted |
 | [0014](0014-automatic-protective-closing.md)     | Automatic protective closing                                  | Accepted |
+| [0015](0015-trade-journal.md)                    | Trade journal: append-only, plan vs actual                    | Accepted |

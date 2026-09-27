@@ -191,6 +191,12 @@ export class ExecutionRepository implements ExecutionStore {
     return rows.map(mapOrder);
   }
 
+  async orderByClientId(clientOrderId: string): Promise<OrderRecord | null> {
+    const rows = await this.sql<OrderRow[]>`
+      select * from orders where client_order_id = ${clientOrderId}`;
+    return rows[0] ? mapOrder(rows[0]) : null;
+  }
+
   async listOrders(params: { accountId?: string; limit?: number } = {}): Promise<OrderRecord[]> {
     const rows = await this.sql<OrderRow[]>`
       select * from orders where (${params.accountId ?? null}::text is null or account_id = ${params.accountId ?? null})

@@ -5,6 +5,7 @@ import { registerAccountRoutes } from './accounts';
 import { registerAutomationRoutes } from './automation';
 import { registerCalendarRoutes } from './calendar';
 import { registerDecisionRoutes } from './decisions';
+import { registerJournalRoutes } from './journal';
 import { registerMarketRoutes } from './market';
 import { registerMonitorRoutes } from './monitor';
 import { registerRecordRoutes } from './records';
@@ -25,4 +26,5 @@ export function registerRoutes(
   registerCalendarRoutes(app, runtime, auth);
   registerMarketRoutes(app, runtime, auth);
   registerMonitorRoutes(app, runtime, auth);
+  registerJournalRoutes(app, runtime, auth);
 }

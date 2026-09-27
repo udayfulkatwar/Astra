@@ -17,7 +17,7 @@ import {
   type Observed,
 } from '@astra/core';
 import type { AstraConfig } from '@astra/config';
-import type { AccountRepository } from '@astra/db';
+import type { AccountRepository, ClosedTradeRecord } from '@astra/db';
 import { PaperBrokerAdapter, type BrokerAdapter } from '@astra/execution';
 import {
   computeAccountState,
@@ -71,6 +71,8 @@ export class AccountService {
       killSwitches: KillSwitchService;
       log: Logger;
       providerTimeoutMs: number;
+      /** Called once per newly recorded closed trade (trade journal). Must not throw. */
+      onClosedTrade?: (accountId: string, trade: ClosedTradeRecord) => Promise<void>;
     },
   ) {
     for (const id of deps.config.accounts.keys()) {
@@ -263,7 +265,7 @@ export class AccountService {
     if (!(adapter instanceof PaperBrokerAdapter)) return;
     const closed = adapter.closedTrades(account.broker.accountRef);
     for (const t of closed.slice(entry.closedSynced)) {
-      const isNew = await this.deps.repo.recordClosedTrade({
+      const record: ClosedTradeRecord = {
         id: t.positionId,
         accountId: account.id,
         clientOrderId: t.clientOrderId,
@@ -276,7 +278,9 @@ export class AccountService {
         realizedPnl: t.realizedPnl,
         openedAt: t.openedAt,
         closedAt: t.closedAt,
-      });
+      };
+      const isNew = await this.deps.repo.recordClosedTrade(record);
+      if (isNew) await this.deps.onClosedTrade?.(account.id, record);
       if (isNew) {
         await this.deps.events.emit({
           level: 'INFO',

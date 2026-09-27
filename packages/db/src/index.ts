@@ -8,3 +8,4 @@ export * from './repositories/execution';
 export * from './repositories/accounts';
 export * from './repositories/paper';
 export * from './repositories/market-bars';
+export * from './repositories/journal';

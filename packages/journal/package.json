@@ -1,0 +1,17 @@
+{
+  "name": "@astra/journal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trade journal: per-trade record from decision to close (plan vs actual, excursions, R) and statistics. Pure and isomorphic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*"
+  }
+}

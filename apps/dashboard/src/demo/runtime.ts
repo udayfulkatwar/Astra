@@ -48,6 +48,7 @@ import {
   type AccountTracking,
 } from '@astra/prop-firm';
 import { CalendarService, SimulatedCalendarAdapter } from '@astra/calendar';
+import { ExcursionTracker, buildJournalEntry, type JournalEntry } from '@astra/journal';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
 import {
   DEFAULT_MONITOR_POLICY,
@@ -139,6 +140,9 @@ export class DemoRuntime {
   readonly store = new InMemoryExecutionStore();
   readonly gateway: ExecutionGateway;
   readonly decisions: DemoDecisionRecord[] = [];
+  /** Trade journal (newest first) and the excursion tracker feeding it. */
+  readonly journal: JournalEntry[] = [];
+  private readonly excursions = new ExcursionTracker();
   readonly events: SystemEvent[] = [];
   readonly audit: AuditEntry[] = [];
   readonly closedTrades = new Map<string, ClosedTrade[]>();
@@ -399,8 +403,10 @@ export class DemoRuntime {
   private feed(): void {
     for (const quote of this.simulateQuotes(
       this.config.system.simulation?.quoteIntervalMs ?? 1_000,
-    ))
+    )) {
       this.paper.onQuote(quote);
+      this.excursions.onQuote(quote);
+    }
     this.market.advance();
     const h = this.market.feedHealth(this.tradedSymbols);
     this.health.report('MARKET_DATA', h.status, `${h.detail} (SIMULATED demo feed)`);
@@ -585,6 +591,7 @@ export class DemoRuntime {
     try {
       await this.syncAll();
       this.runMonitor();
+      this.syncExcursions();
       await this.runProtection();
     } finally {
       this.syncing = false;
@@ -620,6 +627,71 @@ export class DemoRuntime {
         a.accountId,
       );
     }
+  }
+
+  // ------------------------------------------------------------------ trade journal
+
+  private syncExcursions(): void {
+    const open = this.monitorViews.flatMap((v) =>
+      v.positions.map((p) => ({
+        accountId: v.accountId,
+        positionId: p.positionId,
+        symbol: p.symbol,
+        direction: p.direction,
+        entryPrice: p.entryPrice,
+        openedAt: p.openedAt,
+      })),
+    );
+    const known = new Set(
+      this.monitorViews.filter((v) => v.status === 'OK').map((v) => v.accountId),
+    );
+    this.excursions.sync(open, this.clock.now());
+    this.excursions.prune(open, (accountId) => !known.has(accountId));
+  }
+
+  /** The core's JournalService logic: decision + order + close + excursions → one entry. */
+  private journalClosed(
+    accountId: string,
+    t: ReturnType<PaperBrokerAdapter['closedTrades']>[number],
+  ): void {
+    const order =
+      [...this.store.orders.values()].find((o) => o.clientOrderId === t.clientOrderId) ?? null;
+    const d = order
+      ? this.decisions.find((x) => x.decision.decisionId === order.decisionId)
+      : undefined;
+    const entry = buildJournalEntry({
+      trade: { ...t, accountId },
+      order: order
+        ? {
+            decisionId: order.decisionId,
+            strategyId: order.strategyId,
+            signalId: order.signalId,
+            mode: order.mode,
+            plannedEntry: order.plannedEntry,
+            stopLoss: order.stopLoss,
+            takeProfit: order.takeProfit,
+            quantity: order.quantity,
+          }
+        : null,
+      decision: d
+        ? {
+            decidedAt: d.decision.decidedAt,
+            configHash: d.decision.configHash,
+            plannedRisk: d.decision.sizing?.dollarRisk ?? null,
+          }
+        : null,
+      spec: this.config.instruments.get(t.symbol),
+      excursion: this.excursions.take(t.positionId),
+    });
+    this.journal.unshift(entry);
+    const r = entry.result;
+    this.emit(
+      'INFO',
+      'journal',
+      'TRADE_JOURNALED',
+      `${entry.symbol} ${entry.direction} ${entry.quantity}: ${r.outcome} ${r.netPnl ?? r.grossPnl}${r.rMultiple === null ? '' : ` (${r.rMultiple} R)`} — exit ${entry.exit.reason}`,
+      accountId,
+    );
   }
 
   // ------------------------------------------------------------------ automatic protection
@@ -836,6 +908,7 @@ export class DemoRuntime {
           `${t.symbol} ${t.direction} ${t.quantity} closed at ${t.exitPrice} (${t.exitReason}), P&L ${t.realizedPnl}`,
           account.id,
         );
+        this.journalClosed(account.id, t);
       }
       entry.closedSynced = closed.length;
 

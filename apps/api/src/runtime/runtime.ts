@@ -25,6 +25,7 @@ import {
   ExecutionRepository,
   HeartbeatRepository,
   KillSwitchRepository,
+  JournalRepository,
   MarketBarRepository,
   PaperBrokerStateRepository,
   SystemStateRepository,
@@ -45,6 +46,7 @@ import { HealthService } from './health-service';
 import { KillSwitchService } from './kill-switch-service';
 import { BarPersister } from './market-data';
 import { ModeService } from './mode-service';
+import { JournalService } from './journal-service';
 import { PositionMonitorService } from './position-monitor';
 import { ProtectionService } from './protection-service';
 import { createSimulation } from './simulation';
@@ -82,6 +84,7 @@ export class AstraRuntime {
     accounts: AccountRepository;
     paperState: PaperBrokerStateRepository;
     marketBars: MarketBarRepository;
+    journal: JournalRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
@@ -94,6 +97,7 @@ export class AstraRuntime {
   readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
   readonly monitor: PositionMonitorService;
+  readonly journal: JournalService;
   readonly protection: ProtectionService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
@@ -131,6 +135,7 @@ export class AstraRuntime {
       accounts: new AccountRepository(sql),
       paperState: new PaperBrokerStateRepository(sql),
       marketBars: new MarketBarRepository(sql),
+      journal: new JournalRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
@@ -191,6 +196,16 @@ export class AstraRuntime {
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
     });
     this.market.onQuote((q) => this.execution.paper().onQuote(q));
+    this.journal = new JournalService({
+      config,
+      clock,
+      repo: this.repos.journal,
+      orders: this.repos.execution,
+      decisions: this.repos.decisions,
+      events: this.events,
+      log,
+    });
+    this.market.onQuote((q) => this.journal.onQuote(q));
     this.accounts = new AccountService({
       config,
       repo: this.repos.accounts,
@@ -201,6 +216,7 @@ export class AstraRuntime {
       killSwitches: this.killSwitches,
       log,
       providerTimeoutMs: config.system.assembler.providerTimeoutMs,
+      onClosedTrade: (accountId, trade) => this.journal.recordClosed(accountId, trade),
     });
     this.monitor = new PositionMonitorService({
       config,
@@ -379,6 +395,7 @@ export class AstraRuntime {
       await this.health.probe();
       await this.accounts.syncAll();
       await this.monitor.evaluate();
+      this.journal.syncOpen(this.monitor.snapshot().accounts);
       await this.protection.run(this.monitor.snapshot().accounts);
       await this.killSwitches.autoClearDue();
       const expired = await this.repos.decisions.expireStaleApprovals(

@@ -1144,3 +1144,13 @@ select:focus {
   display: grid;
   gap: 3px;
 }
+
+/* Trade journal */
+.breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.table.journal td {
+  vertical-align: middle;
+}

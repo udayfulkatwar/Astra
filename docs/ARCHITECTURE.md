@@ -142,6 +142,7 @@ astra/
 │   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
+│   ├── journal/             Trade journal: excursions, plan-vs-actual entries, statistics (ADR-0015)
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
@@ -162,10 +163,11 @@ safety      → core
 market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
 calendar    → core   (pure and isomorphic)
+journal     → core   (pure and isomorphic)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
 config      → core, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)
-db          → core, decision, execution, market-data, prop-firm, safety   (implements their ports)
+db          → core, decision, execution, journal, market-data, prop-firm, safety   (implements their ports)
 apps/api    → everything (composition root)
 apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)
 ```
