@@ -6,6 +6,8 @@ import {
   type ComponentHealth,
   type DataSourceKind,
   type InstrumentSpec,
+  type SessionDefinition,
+  type TradingHours,
   type StrategyDefinition,
 } from '@astra/core';
 import { PropFirmRuleProfileSchema, type AccountTracking } from '@astra/prop-firm';
@@ -15,7 +17,36 @@ import { ManualClock } from '@astra/core';
 import type { DecisionPolicy } from '../src/policy';
 import type { DecisionInputs } from '../src/types';
 
-export const NOW = '2026-09-28T14:00:00.000Z';
+export const NOW = '2026-09-28T14:00:00.000Z'; // Monday 10:00 New York
+
+/** CME Globex-style schedule used by the test instrument (test data, not a verified spec). */
+export const GLOBEX: TradingHours = {
+  timeZone: 'America/New_York',
+  dayStart: '18:00',
+  weekly: (['SUN', 'MON', 'TUE', 'WED', 'THU'] as const).map((d, i) => ({
+    open: { day: d, time: '18:00' },
+    close: { day: (['MON', 'TUE', 'WED', 'THU', 'FRI'] as const)[i]!, time: '17:00' },
+  })),
+};
+
+export const SESSIONS: SessionDefinition[] = [
+  {
+    id: 'london',
+    name: 'London',
+    timeZone: 'Europe/London',
+    start: '08:00',
+    end: '16:30',
+    days: ['MON', 'TUE', 'WED', 'THU', 'FRI'],
+  },
+  {
+    id: 'ny-cash',
+    name: 'NY cash',
+    timeZone: 'America/New_York',
+    start: '09:30',
+    end: '16:00',
+    days: ['MON', 'TUE', 'WED', 'THU', 'FRI'],
+  },
+];
 const unverified = { status: 'UNVERIFIED' as const };
 
 export const NQ: InstrumentSpec = {
@@ -30,6 +61,7 @@ export const NQ: InstrumentSpec = {
   minQuantity: 1,
   maxSpreadTicks: 4,
   costs: { commissionPerUnitRoundTurn: 4, slippageAllowanceTicks: 1 },
+  tradingHours: GLOBEX,
   verification: unverified,
 };
 
@@ -138,6 +170,7 @@ export const policy: DecisionPolicy = {
     maxFutureSkewMs: 2_000,
   },
   maxEntryDeviationTicks: 8,
+  minMinutesBeforeMarketClose: 10,
   requiredComponents: ['DATABASE', 'MARKET_DATA', 'CALENDAR', 'EXECUTION', 'AUTOMATION'],
   allowDegradedComponents: false,
   eventBlackout: { impactLevels: ['HIGH'], minutesBefore: 15, minutesAfter: 15 },
@@ -212,6 +245,7 @@ export function makeInputs(
     riskPolicy,
     strategy,
     instrument: NQ,
+    sessions: SESSIONS,
     instruments: { NQ },
     quote: observed({ symbol: 'NQ', bid: 19_999.75, ask: 20_000, asOf: meta.asOf }, meta),
     accountSnapshot: observed(

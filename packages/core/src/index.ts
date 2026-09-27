@@ -4,6 +4,7 @@ export * from './modes';
 export * from './errors';
 export * from './ids';
 export * from './time';
+export * from './sessions';
 export * from './decimal';
 export * from './canonical';
 export * from './schemas';

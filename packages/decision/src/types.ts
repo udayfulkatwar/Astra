@@ -6,6 +6,7 @@ import type {
   AiAnalysis,
   CalendarWindow,
   ComponentHealth,
+  SessionDefinition,
   Direction,
   EntryType,
   HealthStatus,
@@ -82,6 +83,8 @@ export interface DecisionInputs {
   readonly strategy: StrategyDefinition | null;
   /** Spec of the candidate's instrument (null = unknown instrument). */
   readonly instrument: InstrumentSpec | null;
+  /** Named session definitions (for strategy session restrictions). */
+  readonly sessions: readonly SessionDefinition[];
   /** Specs for every instrument the account may hold (open-risk and position-limit math). */
   readonly instruments: Readonly<Record<string, InstrumentSpec>>;
   readonly quote: Observed<Quote>;

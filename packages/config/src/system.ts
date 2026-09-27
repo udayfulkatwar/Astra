@@ -1,5 +1,5 @@
 /** System configuration (config/astra.yaml): engineering parameters, not trading rules. */
-import { COMPONENT_IDS, type ComponentId } from '@astra/core';
+import { COMPONENT_IDS, SessionDefinitionSchema, type ComponentId } from '@astra/core';
 import { DecisionPolicySchema } from '@astra/decision';
 import { z } from 'zod';
 
@@ -13,6 +13,12 @@ const componentStaleness = z.object(
 export const SystemConfigSchema = z.object({
   version: z.literal(1),
   decision: DecisionPolicySchema,
+  /** Named trading sessions (spec §56); strategies reference them by id. */
+  sessions: z
+    .array(SessionDefinitionSchema)
+    .refine((list) => new Set(list.map((s) => s.id)).size === list.length, {
+      message: 'session ids must be unique',
+    }),
   health: z.object({
     /** A component whose last report is older than this (ms) is UNKNOWN. */
     staleAfterMs: componentStaleness,

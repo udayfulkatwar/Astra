@@ -9,7 +9,7 @@ import {
   propFirmRules,
   riskCapitalPreservation,
 } from './gates';
-import { marketEntry, marketSpread } from './market';
+import { marketEntry, marketSession, marketSpread } from './market';
 import { strategyEligibility, strategyLevels, strategySignal } from './strategy';
 import { systemComponentHealth, systemKillSwitches, systemMode } from './system';
 
@@ -24,6 +24,7 @@ export const STANDARD_CHECKS: readonly GateCheck[] = [
   dataQuote,
   dataAccount,
   dataSourceKinds,
+  marketSession,
   marketSpread,
   marketEntry,
   strategyEligibility,

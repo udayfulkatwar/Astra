@@ -1,5 +1,6 @@
 /** Instrument specifications (broker/exchange facts). Never invented: supplied via config. */
 import { z } from 'zod';
+import { TradingHoursSchema } from '../sessions';
 import {
   CurrencySchema,
   NonNegativeNumberSchema,
@@ -46,6 +47,15 @@ export const InstrumentSpecSchema = z
       commissionPerUnitRoundTurn: NonNegativeNumberSchema,
       slippageAllowanceTicks: NonNegativeNumberSchema,
     }),
+    /**
+     * Scheduled trading hours. Absent → market status UNKNOWN → no new trades (fail-closed).
+     * Broker/exchange specific: verify against your platform.
+     */
+    tradingHours: TradingHoursSchema.optional(),
+    /** Data-quality guard: a quote-to-quote move larger than this is treated as abnormal. */
+    maxQuoteJumpTicks: PositiveNumberSchema.optional(),
+    /** Symbol used by each market-data/broker adapter, keyed by adapter id (e.g. { mt5: "XAUUSD.r" }). */
+    providerSymbols: z.record(z.string(), z.string().min(1)).optional(),
     verification: VerificationSchema,
     notes: z.string().optional(),
   })

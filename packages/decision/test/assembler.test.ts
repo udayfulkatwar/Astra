@@ -28,6 +28,7 @@ const config = {
   riskPolicy: (id: string) => (id === riskPolicy.id ? riskPolicy : undefined),
   strategy: (id: string) => (id === strategy.id ? strategy : undefined),
   instrument: (s: string) => (s === 'NQ' ? NQ : undefined),
+  sessions: () => [],
 };
 const state: DecisionStatePorts = {
   mode: () => 'PAPER',

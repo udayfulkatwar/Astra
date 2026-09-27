@@ -14,6 +14,19 @@ maxSpreadTicks: 60
 costs:
   commissionPerUnitRoundTurn: 7.00
   slippageAllowanceTicks: 20
+# ASSUMED broker schedule (mirrors COMEX gold: Sun–Fri 18:00–17:00 ET, daily 17:00–18:00 break).
+# CFD trading hours are broker-specific — confirm with your platform before verifying.
+tradingHours:
+  timeZone: America/New_York
+  dayStart: '18:00'
+  weekly:
+    - { open: { day: SUN, time: '18:00' }, close: { day: MON, time: '17:00' } }
+    - { open: { day: MON, time: '18:00' }, close: { day: TUE, time: '17:00' } }
+    - { open: { day: TUE, time: '18:00' }, close: { day: WED, time: '17:00' } }
+    - { open: { day: WED, time: '18:00' }, close: { day: THU, time: '17:00' } }
+    - { open: { day: THU, time: '18:00' }, close: { day: FRI, time: '17:00' } }
+# Data-quality guard: a quote-to-quote move above 2000 ticks ($20) is treated as abnormal.
+maxQuoteJumpTicks: 2000
 verification:
   status: UNVERIFIED
   note: Contract size assumed 100 oz/lot — broker-specific, must be confirmed.

@@ -174,6 +174,10 @@ export function loadAstraConfig(configDir: string): AstraConfig {
     for (const sym of s.instruments) {
       if (!instruments.has(sym)) issues.push(`strategy ${s.id}: unknown instrument ${sym}`);
     }
+    for (const id of s.sessions ?? []) {
+      if (!system?.sessions.some((x) => x.id === id))
+        issues.push(`strategy ${s.id}: unknown session ${id}`);
+    }
     if (s.ownership === 'TEMPLATE')
       warnings.push(`strategy ${s.id} is a TEMPLATE (not the owner's strategy); blocked in LIVE`);
   }

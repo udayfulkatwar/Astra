@@ -13,6 +13,19 @@ maxSpreadTicks: 4
 costs:
   commissionPerUnitRoundTurn: 1.50
   slippageAllowanceTicks: 2
+# CME Globex equity-index schedule: Sun–Fri 18:00–17:00 ET with a daily 17:00–18:00 break.
+# Exchange holidays are not modelled (no fresh quotes → the data gate blocks trading).
+tradingHours:
+  timeZone: America/New_York
+  dayStart: '18:00'
+  weekly:
+    - { open: { day: SUN, time: '18:00' }, close: { day: MON, time: '17:00' } }
+    - { open: { day: MON, time: '18:00' }, close: { day: TUE, time: '17:00' } }
+    - { open: { day: TUE, time: '18:00' }, close: { day: WED, time: '17:00' } }
+    - { open: { day: WED, time: '18:00' }, close: { day: THU, time: '17:00' } }
+    - { open: { day: THU, time: '18:00' }, close: { day: FRI, time: '17:00' } }
+# Data-quality guard: a quote-to-quote move above this many ticks (50 points) is treated as abnormal.
+maxQuoteJumpTicks: 200
 verification:
   status: UNVERIFIED
   note: Verify against CME specs and your broker's fee schedule.

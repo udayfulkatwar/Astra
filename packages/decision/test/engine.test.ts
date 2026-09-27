@@ -504,3 +504,82 @@ describe('decideAndRecord — persistence gate (spec §54)', () => {
     expect(r.decision.reasons.join()).toMatch(/could not be persisted: db down/);
   });
 });
+
+describe('DecisionEngine — market session (Phase 2)', () => {
+  const at = (now: string) => {
+    const base = makeInputs({ now });
+    const detected = new Date(Date.parse(now) - 30_000).toISOString();
+    const asOf = new Date(Date.parse(now) - 1_000).toISOString();
+    const meta = { source: 'test', sourceKind: 'SIMULATED' as const, asOf };
+    return {
+      ...base,
+      candidate: { ...base.candidate, signal: { ...base.candidate.signal, detectedAt: detected } },
+      quote: observed({ symbol: 'NQ', bid: 19_999.75, ask: 20_000, asOf }, meta),
+      accountSnapshot: observed(
+        {
+          accountId: 'acct-a',
+          asOf,
+          currency: 'USD',
+          balance: 50_000,
+          equity: 50_000,
+          openPositions: [],
+          pendingOrders: 0,
+        },
+        meta,
+      ),
+      calendar: observed(
+        {
+          from: new Date(Date.parse(now) - 3_600_000).toISOString(),
+          to: new Date(Date.parse(now) + 3_600_000).toISOString(),
+          events: [],
+        },
+        meta,
+      ),
+    };
+  };
+  const session = (d: TradeDecision) => d.checks.find((c) => c.checkId === 'market.session')!;
+
+  it('passes while the market is open and reports active sessions', () => {
+    const d = decide(makeInputs());
+    expect(session(d).verdict).toBe('PASS');
+    expect(session(d).details).toMatchObject({
+      marketOpen: true,
+      activeSessions: ['london', 'ny-cash'],
+    });
+  });
+
+  it('rejects when the market is closed (daily break and weekend)', () => {
+    expect(session(decide(at('2026-09-28T21:30:00.000Z'))).verdict).toBe('FAIL'); // Mon 17:30 ET break
+    const weekend = decide(at('2026-10-03T15:00:00.000Z'));
+    expect(weekend.status).toBe('REJECTED');
+    expect(session(weekend).reasons[0]).toMatch(/closed \(next open 2026-10-04T22:00:00.000Z\)/);
+  });
+
+  it('rejects inside the pre-close buffer', () => {
+    const d = decide(at('2026-09-28T20:55:00.000Z')); // 16:55 ET, 5 min before the daily close
+    expect(session(d).verdict).toBe('FAIL');
+    expect(session(d).reasons[0]).toMatch(/closes in 5 min/);
+  });
+
+  it('is UNKNOWN (NO TRADE) when trading hours are not configured', () => {
+    const { tradingHours: _omit, ...noHours } = NQ;
+    const d = decide(makeInputs({ instrument: noHours, instruments: { NQ: noHours } }));
+    expect(session(d).verdict).toBe('UNKNOWN');
+    expect(d.status).toBe('REJECTED');
+  });
+
+  it('enforces strategy session restrictions', () => {
+    const londonOnly = decide(makeInputs({ strategy: { ...strategy, sessions: ['london'] } }));
+    expect(session(londonOnly).verdict).toBe('PASS');
+    // 18:00Z = 14:00 ET: NY cash open, London closed
+    const late = at('2026-09-28T18:00:00.000Z');
+    const d = decide({ ...late, strategy: { ...strategy, sessions: ['london'] } });
+    expect(session(d).verdict).toBe('FAIL');
+    expect(session(d).reasons[0]).toMatch(
+      /outside strategy sessions \(london\); active now: ny-cash/,
+    );
+    expect(
+      session(decide({ ...late, strategy: { ...strategy, sessions: ['nowhere'] } })).verdict,
+    ).toBe('UNKNOWN');
+  });
+});

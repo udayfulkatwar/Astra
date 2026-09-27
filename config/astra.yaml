@@ -14,6 +14,8 @@ decision:
     maxFutureSkewMs: 2000
   # Max distance between signal entry and executable price.
   maxEntryDeviationTicks: 8
+  # No new trades this close to an instrument's scheduled market close (daily break / weekend).
+  minMinutesBeforeMarketClose: 10
   # Components that must be healthy for ANY approval.
   requiredComponents: [DATABASE, MARKET_DATA, CALENDAR, EXECUTION, AUTOMATION]
   allowDegradedComponents: false
@@ -29,6 +31,52 @@ decision:
     blockLevels: [HIGH]
   ai:
     minConfidence: 0.6
+
+# Named trading sessions (spec §56). Conventional DEFAULT windows — adjust to your own definitions.
+# Strategies restrict themselves with `sessions: [...]`. Windows are local to each time zone (DST-safe);
+# `days` are the local days on which a session starts. Note: US/UK DST switch on different dates, so
+# the overlap window shifts by an hour for a few weeks a year.
+sessions:
+  - {
+      id: asia,
+      name: 'Asia (Tokyo)',
+      timeZone: Asia/Tokyo,
+      start: '09:00',
+      end: '15:00',
+      days: [MON, TUE, WED, THU, FRI],
+    }
+  - {
+      id: london,
+      name: London,
+      timeZone: Europe/London,
+      start: '08:00',
+      end: '16:30',
+      days: [MON, TUE, WED, THU, FRI],
+    }
+  - {
+      id: new-york,
+      name: New York,
+      timeZone: America/New_York,
+      start: '08:00',
+      end: '17:00',
+      days: [MON, TUE, WED, THU, FRI],
+    }
+  - {
+      id: ny-cash,
+      name: US cash equity session,
+      timeZone: America/New_York,
+      start: '09:30',
+      end: '16:00',
+      days: [MON, TUE, WED, THU, FRI],
+    }
+  - {
+      id: london-ny-overlap,
+      name: London / New York overlap,
+      timeZone: America/New_York,
+      start: '08:00',
+      end: '11:30',
+      days: [MON, TUE, WED, THU, FRI],
+    }
 
 health:
   # A component whose last report is older than this is UNKNOWN.

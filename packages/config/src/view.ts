@@ -11,5 +11,6 @@ export function decisionConfigView(config: AstraConfig): DecisionConfigView {
     riskPolicy: (id) => config.riskPolicies.get(id),
     strategy: (id) => config.strategies.get(id),
     instrument: (symbol) => config.instruments.get(symbol),
+    sessions: () => config.system.sessions,
   };
 }

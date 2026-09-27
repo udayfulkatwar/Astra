@@ -41,5 +41,7 @@ export const StrategyDefinitionSchema = z.object({
    * strategy engine defines typed rule schemas; never interpreted by the safety core.
    */
   rules: z.record(z.string(), z.unknown()).default({}),
+  /** Session ids (config astra.yaml `sessions`) in which the strategy may trade. Empty = any. */
+  sessions: z.array(SlugSchema).optional(),
 });
 export type StrategyDefinition = z.infer<typeof StrategyDefinitionSchema>;

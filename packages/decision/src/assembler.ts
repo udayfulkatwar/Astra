@@ -18,6 +18,7 @@ import {
   type NewsRiskAssessment,
   type Observed,
   type Quote,
+  type SessionDefinition,
   type StrategyDefinition,
   type TradeCandidate,
   type TradingMode,
@@ -63,6 +64,7 @@ export interface DecisionConfigView {
   riskPolicy(id: string): RiskPolicy | undefined;
   strategy(id: string): StrategyDefinition | undefined;
   instrument(symbol: string): InstrumentSpec | undefined;
+  sessions(): readonly SessionDefinition[];
 }
 
 export interface AssembleOptions {
@@ -143,6 +145,7 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
     riskPolicy,
     strategy,
     instrument,
+    sessions: config.sessions(),
     instruments,
     quote,
     accountSnapshot,

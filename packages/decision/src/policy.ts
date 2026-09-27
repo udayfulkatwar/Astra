@@ -15,6 +15,8 @@ export const DecisionPolicySchema = z.object({
   }),
   /** Max distance between the signal's entry and the executable price, in ticks. */
   maxEntryDeviationTicks: PositiveNumberSchema,
+  /** No new trades this many minutes before an instrument's scheduled market close. */
+  minMinutesBeforeMarketClose: z.number().int().nonnegative(),
   /** Components that must be healthy for any approval. */
   requiredComponents: z.array(ComponentIdSchema),
   /** Whether DEGRADED (not only ONLINE) is acceptable for required components. */
