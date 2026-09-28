@@ -17,7 +17,7 @@ information only the owner has (credentials, firm rules, platform, strategy, liv
 ## Architecture in one breath
 
 pnpm monorepo, TypeScript 6 strict. Domain packages (`core`, `prop-firm`, `risk`, `safety`,
-`decision`, `execution`) are pure and expose ports; `db` implements them; `apps/api` is the
+`decision`, `execution`, `ai`, …) are pure and expose ports; `db` implements them; `apps/api` is the
 composition root; `apps/dashboard` only type-imports domain packages. Money math uses decimal.js.
 All times UTC; local zones only via Luxon for rule evaluation.
 

@@ -65,6 +65,7 @@ export default tseslint.config(
       'packages/learning/src/**/*.ts',
       'packages/news/src/**/*.ts',
       'packages/backtest/src/**/*.ts',
+      'packages/ai/src/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': [

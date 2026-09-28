@@ -13,7 +13,12 @@ import type {
   ExecutionRepository,
   JournalRepository,
 } from '@astra/db';
-import { ExcursionTracker, buildJournalEntry, tradeContext } from '@astra/journal';
+import {
+  ExcursionTracker,
+  buildJournalEntry,
+  tradeContext,
+  type JournalEntry,
+} from '@astra/journal';
 import type { AccountMonitorView } from '@astra/risk';
 import type { Logger } from 'pino';
 import type { EventBus } from './event-bus';
@@ -31,6 +36,8 @@ export class JournalService {
       calendar: CalendarService;
       events: EventBus;
       log: Logger;
+      /** Called once per newly journaled trade (e.g. automatic AI review); must not reject. */
+      onJournaled?: (entry: JournalEntry) => Promise<void>;
     },
   ) {}
 
@@ -126,6 +133,8 @@ export class JournalService {
         accountId,
         data: { tradeId: entry.tradeId, outcome: r.outcome, rMultiple: r.rMultiple },
       });
+      // Not awaited: a slow follow-up (an AI call) never holds up account sync.
+      if (this.deps.onJournaled) void this.deps.onJournaled(entry);
     } catch (err) {
       this.deps.log.error({ err: errorMessage(err), trade: t.id }, 'trade journal entry failed');
       await this.deps.events.emit({

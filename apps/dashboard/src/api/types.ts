@@ -2,12 +2,15 @@
  * API response types. Domain types are imported type-only from the ASTRA packages, so the
  * contract is checked by the compiler while nothing from those packages enters the bundle.
  */
+import type { AiCallRecord, AiStatusView, AiTradeReview, AiUsageToday } from '@astra/ai';
 import type {
   AccountActivity,
   AccountDefinition,
   AccountSnapshot,
+  AiAnalysis,
   CalendarWindow,
   ComponentHealth,
+  DataSourceKind,
   EventImpact,
   HealthStatus,
   InstrumentSpec,
@@ -225,4 +228,21 @@ export interface NewsFeedResponse {
   feed: NewsFeedStatus & { health: { status: string; detail: string } };
   poller: NewsPollerStatus | null;
   items: ClassifiedNews[];
+}
+
+/** AI analysis layer (GET /api/v1/ai/status, /ai/analyses, /ai/reviews — ADR-0020). */
+export type { AiCallRecord, AiTradeReview, AiUsageToday };
+export type AiStatus = AiStatusView;
+export interface StoredAiAnalysis {
+  analysis: AiAnalysis;
+  signalKey: string;
+  callId: string;
+  source: string;
+  sourceKind: DataSourceKind;
+}
+export interface AiReviewResult {
+  review: AiTradeReview | null;
+  status: AiCallRecord['status'];
+  reason: string | null;
+  call: AiCallRecord;
 }

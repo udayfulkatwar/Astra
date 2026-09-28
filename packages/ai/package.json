@@ -1,0 +1,24 @@
+{
+  "name": "@astra/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI orchestrator: provider port, task router, schema-validated structured output, kill switch, daily budget, call log. AI output is CONTEXT only (can veto, never approve). Core is isomorphic; the Anthropic adapter lives in the ./anthropic subpath.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./anthropic": "./src/anthropic.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@astra/core": "workspace:*",
+    "@astra/journal": "workspace:*",
+    "@astra/market-data": "workspace:*",
+    "@astra/market-structure": "workspace:*",
+    "@astra/news": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

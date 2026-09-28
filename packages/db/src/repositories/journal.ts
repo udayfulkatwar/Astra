@@ -25,6 +25,12 @@ export class JournalRepository {
     return rows.length > 0;
   }
 
+  async get(tradeId: string): Promise<JournalEntry | null> {
+    const rows = await this.sql<{ entry: JournalEntry }[]>`
+      select entry from trade_journal where trade_id = ${tradeId}`;
+    return rows[0]?.entry ?? null;
+  }
+
   /** Newest first. */
   async list(q: JournalQuery = {}): Promise<JournalEntry[]> {
     const limit = Math.min(Math.max(q.limit ?? 200, 1), 5_000);

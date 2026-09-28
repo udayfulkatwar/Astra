@@ -23,6 +23,8 @@ export class HealthService {
       calendar: () => { status: HealthStatus; detail: string };
       /** NEWS from news-feed freshness (the gate's `newsMaxAgeMs`). */
       news: () => { status: HealthStatus; detail: string };
+      /** AI from the orchestrator: provider available, kill switch, budget, last call. */
+      ai: () => { status: HealthStatus; detail: string };
     },
   ) {
     const policies = Object.fromEntries(
@@ -58,6 +60,9 @@ export class HealthService {
 
     const news = this.deps.news();
     this.registry.report('NEWS', news.status, news.detail);
+
+    const ai = this.deps.ai();
+    this.registry.report('AI', ai.status, ai.detail);
 
     const adapters = this.deps.adapters();
     if (adapters.length === 0) {

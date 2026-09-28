@@ -8,6 +8,7 @@
  * Until that completes, the effective mode is HALTED and the kill-switch registry is unloaded,
  * so every decision is rejected. If the database is unavailable, initialization is retried.
  */
+import type { AiProvider } from '@astra/ai';
 import {
   CalendarPoller,
   CalendarService,
@@ -18,6 +19,7 @@ import { effectiveImpact, errorMessage, type Clock } from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import {
   AccountRepository,
+  AiRepository,
   AuditRepository,
   BacktestRepository,
   ConfigVersionRepository,
@@ -48,6 +50,7 @@ import {
 } from '@astra/news';
 import type { Logger } from 'pino';
 import { AccountService } from './account-service';
+import { AiService } from './ai-service';
 import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
@@ -74,6 +77,8 @@ export interface RuntimeOptions {
   /** Start the periodic safety loop (tests drive cycles manually). */
   readonly startLoops: boolean;
   readonly initRetryMs?: number;
+  /** Real AI providers, built by the entry point from environment keys (none: AI unavailable). */
+  readonly aiProviders?: ReadonlyMap<string, AiProvider>;
 }
 
 export class AstraRuntime {
@@ -97,6 +102,7 @@ export class AstraRuntime {
     journal: JournalRepository;
     backtests: BacktestRepository;
     news: NewsRepository;
+    ai: AiRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
@@ -109,6 +115,8 @@ export class AstraRuntime {
   readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
   readonly news: NewsService;
+  /** AI analysis layer (Phase 6): context for the gate, post-trade reviews. */
+  readonly ai: AiService;
   /** News provider poller (null: items arrive by push only). */
   readonly newsPoller: NewsPoller | null;
   readonly monitor: PositionMonitorService;
@@ -155,6 +163,7 @@ export class AstraRuntime {
       journal: new JournalRepository(sql),
       backtests: new BacktestRepository(sql),
       news: new NewsRepository(sql),
+      ai: new AiRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
@@ -172,6 +181,7 @@ export class AstraRuntime {
       marketData: () => this.market.feedHealth(this.tradedSymbols),
       calendar: () => this.calendar.health(),
       news: () => this.news.health(),
+      ai: () => this.ai.health(),
     });
     this.barPersister = new BarPersister(this.repos.marketBars, log);
     const freshness = config.system.decision.freshness;
@@ -242,6 +252,7 @@ export class AstraRuntime {
       calendar: this.calendar,
       events: this.events,
       log,
+      onJournaled: (entry) => this.ai.onJournaled(entry),
     });
     this.market.onQuote((q) => this.journal.onQuote(q));
     this.backtests = new BacktestService({
@@ -279,6 +290,22 @@ export class AstraRuntime {
       events: this.events,
       audit: this.repos.audit,
     });
+    this.ai = new AiService({
+      config,
+      clock,
+      repo: this.repos.ai,
+      journal: this.repos.journal,
+      decisions: this.repos.decisions,
+      market: this.market,
+      calendar: this.calendar,
+      news: this.news,
+      mode: this.mode,
+      killSwitches: this.killSwitches,
+      events: this.events,
+      log,
+      providers: opts.aiProviders ?? new Map(),
+      simulation: opts.simulation,
+    });
     this.decisions = new DecisionService({
       config,
       clock,
@@ -288,6 +315,7 @@ export class AstraRuntime {
       market: this.market,
       calendar: this.calendar,
       news: this.news,
+      ai: this.ai,
       accounts: this.accounts,
       decisions: this.repos.decisions,
       executionStore: this.repos.execution,
@@ -370,6 +398,7 @@ export class AstraRuntime {
     );
     await this.mode.load();
     await this.killSwitches.load();
+    await this.ai.load();
     await this.health.seedFromHeartbeats();
     await this.execution.restorePaperAccounts();
     await this.execution.reconcileAll();

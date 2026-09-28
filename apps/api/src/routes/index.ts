@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { TokenAuthenticator } from '../auth';
 import type { AstraRuntime } from '../runtime/runtime';
 import { registerAccountRoutes } from './accounts';
+import { registerAiRoutes } from './ai';
 import { registerAutomationRoutes } from './automation';
 import { registerBacktestRoutes } from './backtests';
 import { registerCalendarRoutes } from './calendar';
@@ -33,4 +34,5 @@ export function registerRoutes(
   registerJournalRoutes(app, runtime, auth);
   registerBacktestRoutes(app, runtime, auth);
   registerLearningRoutes(app, runtime, auth);
+  registerAiRoutes(app, runtime, auth);
 }

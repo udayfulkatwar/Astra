@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@astra/ai": "workspace:*",
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",
     "@astra/market-structure": "workspace:*",

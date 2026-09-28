@@ -3,6 +3,7 @@
  * routes and response shapes as the real ASTRA API.
  */
 import {
+  SignalSchema,
   TimeZoneSchema,
   TradeCandidateSchema,
   modePolicy,
@@ -54,7 +55,7 @@ function statusBar(rt: DemoRuntime): StatusBar {
     risk,
     news: { status: byId.NEWS!.status, detail: byId.NEWS!.detail },
     calendar: calendarStatus(rt, byId.CALENDAR!.status),
-    ai: { status: byId.AI!.status, detail: 'AI engine not implemented yet (Phase 6)' },
+    ai: { status: byId.AI!.status, detail: byId.AI!.detail },
     automation: { status: byId.AUTOMATION!.status, detail: byId.AUTOMATION!.detail },
     data: { status: byId.MARKET_DATA!.status, detail: byId.MARKET_DATA!.detail },
     killSwitchesActive: rt.killSwitches.active().length,
@@ -129,6 +130,11 @@ function reason(v: unknown): string {
   if (typeof v !== 'string' || v.trim().length < 3)
     throw new ApiError(400, 'VALIDATION', 'reason must be at least 3 characters');
   return v.trim();
+}
+
+function limitOf(q: URLSearchParams, fallback: number): number {
+  const n = Number(q.get('limit') ?? fallback);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, 200) : fallback;
 }
 
 export async function handleDemoRequest(
@@ -275,6 +281,27 @@ export async function handleDemoRequest(
         }),
       };
     }
+    if (path === '/api/v1/ai/status') return rt.aiStatus();
+    if (path === '/api/v1/ai/calls') return { calls: rt.ai.recentCalls() };
+    if (path === '/api/v1/ai/analyses') {
+      return {
+        analyses: rt.aiAnalyses.slice(0, limitOf(q, 50)).map(({ brief: _brief, ...a }) => a),
+      };
+    }
+    if (path.startsWith('/api/v1/ai/analyses/')) {
+      const id = decodeURIComponent(path.slice('/api/v1/ai/analyses/'.length));
+      const a = rt.aiAnalyses.find((x) => x.analysis.analysisId === id);
+      if (!a) throw new ApiError(404, 'NOT_FOUND', `analysis ${id} not found`);
+      return a;
+    }
+    if (path === '/api/v1/ai/reviews') {
+      const tradeId = q.get('tradeId');
+      return {
+        reviews: tradeId
+          ? rt.aiReviews.filter((r) => r.tradeId === tradeId)
+          : rt.aiReviews.slice(0, limitOf(q, 50)),
+      };
+    }
     if (path === '/api/v1/news/context') {
       const now = rt.clock.now();
       const symbols = [...rt.config.instruments.keys()];
@@ -346,6 +373,23 @@ export async function handleDemoRequest(
       } catch (err) {
         throw new ApiError(400, 'VALIDATION', err instanceof Error ? err.message : String(err));
       }
+    }
+    if (path === '/api/v1/ai/reviews') {
+      const { tradeId } = body<{ tradeId?: string }>(requestBody);
+      if (!tradeId) throw new ApiError(400, 'VALIDATION', 'tradeId required');
+      const r = await rt.reviewTrade(tradeId);
+      if (!r) throw new ApiError(404, 'NOT_FOUND', `trade ${tradeId} is not in the journal`);
+      return r;
+    }
+    if (path === '/api/v1/ai/analyses') {
+      const parsed = SignalSchema.safeParse(body<{ signal?: unknown }>(requestBody).signal);
+      if (!parsed.success)
+        throw new ApiError(
+          400,
+          'VALIDATION',
+          parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+        );
+      return { analysis: await rt.analyzeSignal(parsed.data) };
     }
     if (path === '/api/v1/decisions/evaluate') {
       const b = body<{ candidate?: unknown; autoExecute?: boolean }>(requestBody);

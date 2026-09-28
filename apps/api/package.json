@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@astra/ai": "workspace:*",
     "@astra/backtest": "workspace:*",
     "@astra/calendar": "workspace:*",
     "@astra/config": "workspace:*",

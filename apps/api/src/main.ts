@@ -4,7 +4,9 @@
  */
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { loadAstraConfig } from '@astra/config';
+import type { AiProvider } from '@astra/ai';
+import { AnthropicProvider } from '@astra/ai/anthropic';
+import { loadAstraConfig, type AstraConfig } from '@astra/config';
 import { systemClock } from '@astra/core';
 import { createDb } from '@astra/db';
 import { buildApp } from './app';
@@ -18,6 +20,34 @@ function findConfigDir(start: string): string {
     if (existsSync(join(dir, 'config', 'astra.yaml'))) return join(dir, 'config');
     if (dirname(dir) === dir) throw new Error('config/astra.yaml not found; set ASTRA_CONFIG_DIR');
   }
+}
+
+/**
+ * AI providers whose key is present in the environment variable NAMED in config. The key goes
+ * straight to the SDK client; it is never logged, stored or sent anywhere else.
+ */
+function aiProviders(config: AstraConfig, log: ReturnType<typeof createLogger>) {
+  const providers = new Map<string, AiProvider>();
+  const anthropic = config.system.ai?.providers.anthropic;
+  if (anthropic) {
+    const key = process.env[anthropic.apiKeyEnv];
+    if (key) {
+      providers.set(
+        'anthropic',
+        new AnthropicProvider({
+          apiKey: key,
+          maxRetries: anthropic.maxRetries,
+          serverSideFallbacks: anthropic.serverSideFallbacks,
+        }),
+      );
+    } else {
+      log.warn(
+        { envVar: anthropic.apiKeyEnv },
+        'AI provider anthropic: API key env var not set — AI analysis unavailable',
+      );
+    }
+  }
+  return providers;
 }
 
 async function main(): Promise<void> {
@@ -52,6 +82,7 @@ async function main(): Promise<void> {
     liveTradingAuthorized: env.ASTRA_LIVE_TRADING_AUTHORIZED,
     simulation: env.ASTRA_SIMULATION,
     startLoops: true,
+    aiProviders: aiProviders(config, log),
   });
   const app = await buildApp({
     runtime,

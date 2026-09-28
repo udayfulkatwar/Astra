@@ -3,6 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api, getToken } from './client';
 import { syncAstraClock } from '../lib/format';
 import type {
+  AiReviewResult,
+  AiStatus,
+  StoredAiAnalysis,
+  AiTradeReview,
   AccountDetail,
   BacktestRequestInput,
   BacktestResult,
@@ -238,6 +242,40 @@ export const useLearning = (q: LearningQuery) =>
     placeholderData: keepPreviousData,
     refetchInterval: q.source === 'journal' ? 15_000 : false,
   });
+
+export const useAiStatus = () =>
+  useQuery({
+    queryKey: ['ai-status'],
+    queryFn: () => api<AiStatus>('/api/v1/ai/status'),
+    refetchInterval: 5_000,
+  });
+
+export const useAiAnalyses = () =>
+  useQuery({
+    queryKey: ['ai-analyses'],
+    queryFn: () => api<{ analyses: StoredAiAnalysis[] }>('/api/v1/ai/analyses?limit=30'),
+    refetchInterval: 5_000,
+  });
+
+export const useAiReviews = () =>
+  useQuery({
+    queryKey: ['ai-reviews'],
+    queryFn: () => api<{ reviews: AiTradeReview[] }>('/api/v1/ai/reviews?limit=30'),
+    refetchInterval: 10_000,
+  });
+
+export function useAiReview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tradeId: string) =>
+      api<AiReviewResult>('/api/v1/ai/reviews', { method: 'POST', body: { tradeId } }),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['ai-reviews'] }),
+        qc.invalidateQueries({ queryKey: ['ai-status'] }),
+      ]),
+  });
+}
 
 export const useBacktests = () =>
   useQuery({

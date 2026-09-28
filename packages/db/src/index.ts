@@ -11,3 +11,4 @@ export * from './repositories/market-bars';
 export * from './repositories/journal';
 export * from './repositories/backtests';
 export * from './repositories/news';
+export * from './repositories/ai';

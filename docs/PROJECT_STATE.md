@@ -10,6 +10,9 @@ platform choice (see _Owner inputs_). **Phase 4 done except real providers:** ec
 calendar (provider port, poller, validation, change events, event-risk view) and **news
 intelligence** (provider port, rules classifier, news risk in the gate, provider sentiment) —
 real calendar and news providers need the owner's choice. **Phase 5 groundwork done:** market-structure detection (no lookahead).
+**Phase 6 done except the owner's key and budget:** the AI analysis layer (orchestrator,
+budgets, call log, Claude adapter with refusal fallback, a veto-only gate input, post-trade
+reviews) — real model calls need an Anthropic API key in the environment.
 **Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised), the
 trade journal, **backtesting** and **learning metrics** are done; the gate prices the
 trailing-drawdown path and the losing-streak limit is daily (owner decisions). An extended paper
@@ -34,6 +37,7 @@ market structure, a quote-quality guard and event blackouts.
 | Learning metrics   | `@astra/learning` (pure; ADR-0018): performance by 11 dimensions with 95 % ranges and small-sample flags, R drawdown, streaks, execution quality, observations (never applied); per-trade context in the journal                             | 5 + 3 (context) + API                       |
 | Backtesting        | `@astra/backtest` (pure; ADR-0016): M1 replay through the real gate, sizing, prop-firm rules, protection and journal; next-open pessimistic fills; resampler; TEMPLATE strategy; seeded SIMULATED bars                                       | 21 (incl. no-lookahead property) + DB + API |
 | Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                                             | 7 + DB + API                                |
+| AI analysis layer  | `@astra/ai` (isomorphic core; ADR-0020): provider port, config routing, orchestrator (kill switch, worst-case daily budget, timeout, schema validation, call log), TRADE_ANALYSIS + POST_TRADE_REVIEW, SIMULATED stand-in, Claude adapter    | 16 + DB + API                               |
 | News intelligence  | `@astra/news` (pure; ADR-0019): provider port + poller, per-item validation, de-duplication, rules classifier (13 categories, impact, instruments), news risk per instrument, provider sentiment summary, SIMULATED feed; `news_items` table | 11 + DB + API                               |
 | Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`                                 | 12 + 3 (core)                               |
 | `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                                                        | 21 (real Postgres)                          |
@@ -43,7 +47,7 @@ market structure, a quote-quality guard and event blackouts.
 | Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                                               | compose validated                           |
 | n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                                             | JSON validated                              |
 
-**Total: 493 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 517 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -89,6 +93,28 @@ Remaining:
 - `POST /api/v1/news/items` (n8n push, MANUAL), `GET /api/v1/news`, `GET /api/v1/news/context`;
   items stored and restored after a restart; HIGH-impact items raise warnings. Dashboard **News
   Intelligence** page; demo "Breaking news" button; backtests take an explicit news choice.
+
+## AI analysis layer (done, ADR-0020)
+
+- AI is CONTEXT: it can veto a trade, never approve one, and never sets size, limits or risk.
+  A strategy opts in with `requiresAiAnalysis: true`; then the deterministic checks run first,
+  the model is asked only when they all pass, and the gate decides on freshly assembled data
+  plus the stored analysis (CONFLICTS, confidence < 0.6 or event risk HIGH → no trade).
+- The brief holds only observed data (signal, structure, recent bars, news, calendar), each
+  section with its status — never balances or sizes. Malformed/truncated output → INVALID, never
+  repaired; refusals and blocked calls → UNAVAILABLE; timeouts → TIMEOUT.
+- Deterministic cost control: daily call and cost limits (DEFAULTS: 200 calls, $5), each call
+  checked at its worst-case cost; AI kill switch; every call (sent or blocked) logged with
+  tokens, cost and latency in `ai_model_calls`; analyses keep the exact brief the model saw.
+- Claude adapter: `claude-opus-5`, structured output, prompt-cached instructions, **server-side
+  refusal fallback on by default** (`fallbacks: "default"`), `refusal` / `max_tokens` handled.
+  The key is read only from the env var named in config (`ANTHROPIC_API_KEY`).
+- Post-trade reviews: GOOD/POOR process × WIN/LOSS outcome (outcome from the journal); suggested
+  changes stored as PROPOSED for a human, never applied. On demand, or automatic when
+  `ai.postTradeReview.auto` is set (off).
+- In simulation mode (and the demo) a clearly-labelled SIMULATED stand-in (fixed rules, not an
+  AI model) runs the same path; SHADOW/LIVE refuse its output. Template strategy
+  `paper-ai-test` exercises the veto. Dashboard **AI Model Monitor** page.
 
 ## Phase 4 / 5 groundwork (done without owner input)
 
@@ -173,9 +199,9 @@ Remaining:
 | 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                    |
 | 4     | Real economic-calendar and news provider adapters (owner's choice); news-driven strategies and §57 actions (reduce size / close / halt)           |
 | 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
-| 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                    |
+| 6     | Done (ADR-0020). Owner: API key + budget; optional second provider adapter; AI news classification / sentiment if wanted                          |
 | 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
-| 8     | Extended paper run; backtests on real recorded / provider history; AI post-trade review (with Phase 6)                                            |
+| 8     | Extended paper run; backtests on real recorded / provider history                                                                                 |
 | 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                          |
 | 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                               |
 
@@ -188,13 +214,17 @@ Remaining:
 3. **Instruments** you actually trade, and your broker's contract specs for CFDs (contract size).
 4. **Your strategy rules** (entries, confirmation, stops, targets, management) — Phase 5.
 5. **Your personal risk limits** — review `config/risk-policies/template-conservative.yaml`.
-6. **Data/AI providers and budget** — market data, economic calendar, news, AI API keys (Phase 2/4/6).
-7. **Which currencies' events matter per instrument** (`eventCurrencies`, e.g. NQ → USD) — unset
+6. **Data/AI providers and budget** — market data, economic calendar, news (Phase 2/4); for AI,
+   an Anthropic API key set as `ANTHROPIC_API_KEY` in the server environment, and your daily AI
+   budget (`ai.budget` in `config/astra.yaml`, DEFAULTS $5 / 200 calls). Verify `ai.prices`.
+7. **Which of your strategies should require AI analysis** (`requiresAiAnalysis`) — AI can only
+   veto; with it required, no key / no budget / a bad answer means no trade.
+8. **Which currencies' events matter per instrument** (`eventCurrencies`, e.g. NQ → USD) — unset
    means every event blocks every instrument (safe but restrictive).
-8. **Review the structure definitions** (ADR-0010: swing strength, equal-level tolerance, FVG
+9. **Review the structure definitions** (ADR-0010: swing strength, equal-level tolerance, FVG
    minimum) against your strategy.
-9. **Protection levels** (ADR-0013/0014, decided: both enabled) — review the thresholds in
-   `config/astra.yaml` (`protection`, `monitors.positions`) against your firm and style.
+10. **Protection levels** (ADR-0013/0014, decided: both enabled) — review the thresholds in
+    `config/astra.yaml` (`protection`, `monitors.positions`) against your firm and style.
 
 ## Decisions made autonomously (summary)
 
@@ -251,10 +281,15 @@ authorization. Details in `docs/adr/`.
     only rounds up, so errors lean towards blocking. Paper trading without simulation now needs a
     news source (provider, or n8n pushing at least every 15 minutes).
 24. `news_items` has no retention policy yet (the in-memory window is 48 h).
+25. AI: the budget reservation estimates input tokens as characters / 3 (pessimistic); list
+    prices in `ai.prices` are unverified DEFAULTS. A timed-out call is charged at its worst case.
+    The Claude adapter is tested offline (injected fetch) — no real model call has been made from
+    this environment. `ai_model_calls` has no retention policy yet.
+26. The AI brief uses the signal's timeframe, or M5 when the signal gives none.
 
 ## Next implementation target
 
-Without owner input: the AI orchestrator contracts and provider-agnostic adapters (Phase 6:
-structured analysis, call log, budgets), then n8n workflows for news/calendar ingestion (Phase 7). With owner input: the real market-data and calendar adapters for the chosen
+Without owner input: n8n workflows for news/calendar ingestion, cycles and notifications
+(Phase 7). With owner input: a first real AI analysis run with your API key and budget; the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

@@ -9,6 +9,6 @@ status: ACTIVE
 broker:
   adapterId: paper
   accountRef: PAPER-DEMO-1
-strategies: [paper-pipeline-test]
+strategies: [paper-pipeline-test, paper-ai-test]
 instruments: [NQ, MNQ, XAUUSD]
 liveTradingAuthorized: false

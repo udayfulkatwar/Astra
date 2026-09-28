@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import type { AiProvider } from '@astra/ai';
 import { loadAstraConfig } from '@astra/config';
 import { ManualClock } from '@astra/core';
 import { createDb, type Sql } from '@astra/db';
@@ -48,6 +49,7 @@ async function boot(
     liveTradingAuthorized: opts.liveTradingAuthorized ?? false,
     simulation: opts.simulation ?? false,
     startLoops: false,
+    aiProviders: opts.aiProviders,
   });
   await runtime.start();
   const app = await buildApp({
@@ -65,6 +67,8 @@ export interface HarnessOptions {
   liveTradingAuthorized?: boolean;
   /** Start the SIMULATED market-data adapter (paper testing feed). */
   simulation?: boolean;
+  /** AI providers as the entry point would build them from environment keys (default: none). */
+  aiProviders?: ReadonlyMap<string, AiProvider>;
 }
 
 export async function createHarness(opts: HarnessOptions = {}): Promise<Harness> {

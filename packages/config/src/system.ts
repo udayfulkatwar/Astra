@@ -1,4 +1,5 @@
 /** System configuration (config/astra.yaml): engineering parameters, not trading rules. */
+import { AiSettingsSchema } from '@astra/ai';
 import { COMPONENT_IDS, SessionDefinitionSchema, type ComponentId } from '@astra/core';
 import { DecisionPolicySchema } from '@astra/decision';
 import { StructureParamsSchema } from '@astra/market-structure';
@@ -113,6 +114,11 @@ export const SystemConfigSchema = z.object({
    * Omitted → the @astra/market-structure defaults. DEFAULTS to review with the strategy (Phase 5).
    */
   structure: StructureParamsSchema.optional(),
+  /**
+   * AI analysis layer (ADR-0020). Omitted → AI unavailable: strategies that require AI analysis
+   * are rejected. Provider keys are read from the environment variable NAMED here.
+   */
+  ai: AiSettingsSchema.optional(),
   /**
    * SIMULATED feeds for paper testing (only when ASTRA_SIMULATION=true). Start prices are
    * simulation seeds, NOT market data; SIMULATED data is refused in SHADOW and LIVE.

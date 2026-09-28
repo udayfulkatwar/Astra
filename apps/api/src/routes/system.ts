@@ -60,7 +60,7 @@ export function statusBar(runtime: AstraRuntime) {
       highImpactNext4h: highImpact,
       source: upcoming.status === 'OK' ? upcoming.sourceKind : null,
     },
-    ai: { status: byId.AI!.status, detail: 'AI engine not implemented yet (Phase 6)' },
+    ai: { status: byId.AI!.status, detail: byId.AI!.detail },
     automation: { status: byId.AUTOMATION!.status, detail: byId.AUTOMATION!.detail },
     data: { status: byId.MARKET_DATA!.status, detail: byId.MARKET_DATA!.detail },
     killSwitchesActive: runtime.killSwitches.list().filter((s) => s.active).length,

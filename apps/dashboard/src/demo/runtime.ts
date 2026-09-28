@@ -5,6 +5,21 @@
  * simulated n8n heartbeat and a simulated clock. Nothing here is presented as real market data.
  */
 import {
+  AiOrchestrator,
+  POST_TRADE_REVIEW,
+  SimulatedAiProvider,
+  TRADE_ANALYSIS,
+  aiSignalKey,
+  aiStatusView,
+  buildTradeAnalysisBrief,
+  standInHealth,
+  standInSettings,
+  toAiAnalysis,
+  toTradeReview,
+  type AiStatusView,
+  type AiTradeReview,
+} from '@astra/ai';
+import {
   COMPONENT_IDS,
   ManualClock,
   canonicalJson,
@@ -16,12 +31,14 @@ import {
   type AccountActivity,
   type AccountDefinition,
   type AccountSnapshot,
+  type AiAnalysis,
   type CalendarWindow,
   type ComponentId,
   type Observed,
   type ObservedOk,
   type InstrumentSpec,
   type Quote,
+  type Signal,
   type TradeCandidate,
   type TradingMode,
 } from '@astra/core';
@@ -54,7 +71,8 @@ import {
   tradeContext,
   type JournalEntry,
 } from '@astra/journal';
-import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
+import { MarketDataService, TimeframeSchema, type MarketSnapshot } from '@astra/market-data';
+import { analyzeStructure } from '@astra/market-structure';
 import { DEFAULT_NEWS_RISK_RULE, NewsService, SimulatedNewsAdapter } from '@astra/news';
 import {
   DEFAULT_MONITOR_POLICY,
@@ -90,6 +108,15 @@ interface AccountEntry {
   error: string | null;
   syncedAt: string | null;
   closedSynced: number;
+}
+
+export interface DemoAiAnalysis {
+  readonly analysis: AiAnalysis;
+  readonly signalKey: string;
+  readonly callId: string;
+  readonly source: string;
+  readonly sourceKind: 'SIMULATED';
+  readonly brief: unknown;
 }
 
 export interface DemoDecisionRecord {
@@ -164,6 +191,14 @@ export class DemoRuntime {
   private newsPolledAt: number | null = null;
   /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
   readonly tradedSymbols: readonly string[];
+  /**
+   * AI layer: the real orchestrator routed to the SIMULATED stand-in (fixed rules, not an AI
+   * model — the demo has no API key and never calls a model). Analyses/reviews newest first.
+   */
+  readonly ai: AiOrchestrator;
+  readonly aiAnalyses: DemoAiAnalysis[] = [];
+  readonly aiReviews: AiTradeReview[] = [];
+  private readonly aiAttempts = new Map<string, Observed<AiAnalysis>>();
 
   private readonly engine = new DecisionEngine();
   private readonly prices = new Map<string, number>();
@@ -246,6 +281,15 @@ export class DemoRuntime {
     this.clock.set(start);
     this.killSwitches = new KillSwitchRegistry(this.clock);
     this.killSwitches.load([]);
+    const aiConfig = this.config.system.ai;
+    if (!aiConfig) throw new Error('config/astra.yaml has no ai: block');
+    this.ai = new AiOrchestrator({
+      clock: this.clock,
+      settings: standInSettings(aiConfig),
+      providers: new Map([['simulated', new SimulatedAiProvider()]]),
+      killSwitchActive: () => this.aiKillSwitchActive(),
+      newCallId: () => newId('aiCall'),
+    });
     const staleness = this.config.system.health.staleAfterMs;
     this.health = new ComponentHealthRegistry(
       this.clock,
@@ -452,6 +496,144 @@ export class DemoRuntime {
     this.health.report('CALENDAR', cal.status, `${cal.detail} (SIMULATED demo schedule)`);
     const news = this.news.health();
     this.health.report('NEWS', news.status, `${news.detail} (SIMULATED demo feed)`);
+    const ai = this.aiHealth();
+    this.health.report('AI', ai.status, ai.detail);
+  }
+
+  // ------------------------------------------------------------------ AI layer (ADR-0020)
+
+  aiKillSwitchActive(): boolean {
+    return this.killSwitches.evaluate({ requiresAi: true }).blocking.some((s) => s.scope === 'AI');
+  }
+
+  aiHealth() {
+    return standInHealth(this.ai.health());
+  }
+
+  aiStatus(): AiStatusView {
+    return aiStatusView(this.ai, {
+      configured: true,
+      standIn: true,
+      killSwitchActive: this.aiKillSwitchActive(),
+      health: this.aiHealth(),
+      gate: {
+        minConfidence: this.config.system.decision.ai.minConfidence,
+        maxAgeMs: this.config.system.decision.freshness.aiAnalysisMaxAgeMs,
+      },
+    });
+  }
+
+  /** The gate's port: the latest attempt for exactly this signal. */
+  aiAnalysisFor(signal: Signal): Observed<AiAnalysis> {
+    return (
+      this.aiAttempts.get(aiSignalKey(signal)) ??
+      notObserved('UNAVAILABLE', 'no AI analysis for this signal', 'ai')
+    );
+  }
+
+  async analyzeSignal(signal: Signal): Promise<Observed<AiAnalysis>> {
+    const key = aiSignalKey(signal);
+    const tf = TimeframeSchema.safeParse(signal.timeframe);
+    const timeframe = tf.success ? tf.data : 'M5';
+    const instrument = this.config.instruments.get(signal.symbol);
+    const bars = this.market.bars(signal.symbol, timeframe);
+    const limits = this.config.system.ai?.tradeAnalysis ?? { recentBars: 30, maxHeadlines: 10 };
+    const brief = buildTradeAnalysisBrief({
+      now: this.clock.now(),
+      mode: this.mode.mode,
+      signal,
+      bars,
+      structure: instrument
+        ? analyzeStructure({
+            symbol: signal.symbol,
+            timeframe,
+            bars,
+            tickSize: instrument.tickSize,
+            params: this.config.system.structure,
+          })
+        : null,
+      newsRisk: this.news.risk(signal.symbol),
+      sentiment: this.news.sentiment(signal.symbol),
+      headlines: this.news.list({ symbol: signal.symbol, limit: limits.maxHeadlines }),
+      calendar: this.calendar(),
+      limits,
+    });
+    const { result, call } = await this.ai.run(TRADE_ANALYSIS, brief, signal.id);
+    let out: Observed<AiAnalysis>;
+    if (result.status === 'OK') {
+      const analysis = toAiAnalysis(result.value, {
+        analysisId: newId('aiAnalysis'),
+        signalId: signal.id,
+        model: call.servedModel ?? call.model,
+        producedAt: result.asOf,
+      });
+      this.aiAnalyses.unshift({
+        analysis,
+        signalKey: key,
+        callId: call.callId,
+        source: result.source,
+        sourceKind: 'SIMULATED',
+        brief,
+      });
+      if (this.aiAnalyses.length > 200) this.aiAnalyses.pop();
+      out = { ...result, value: analysis };
+    } else {
+      out = result;
+    }
+    this.aiAttempts.set(key, out);
+    this.emit(
+      out.status === 'OK' ? 'INFO' : 'WARN',
+      'ai',
+      `AI_ANALYSIS_${call.status}`,
+      out.status === 'OK'
+        ? `${signal.symbol} ${signal.direction} ${signal.id}: AI ${out.value.verdict} (confidence ${out.value.confidence}, event risk ${out.value.eventRisk}, ${out.value.model} — SIMULATED stand-in)`
+        : `${signal.symbol} ${signal.direction} ${signal.id}: no usable AI analysis — ${out.status}: ${out.reason}`,
+    );
+    return out;
+  }
+
+  async reviewTrade(tradeId: string) {
+    const trade = this.journal.find((e) => e.tradeId === tradeId);
+    if (!trade) return null;
+    const record = this.decisions.find((d) => d.decision.decisionId === trade.decisionId);
+    const ai = record?.inputs.aiAnalysis;
+    const { result, call } = await this.ai.run(
+      POST_TRADE_REVIEW,
+      {
+        briefVersion: 1,
+        trade,
+        gate: record
+          ? {
+              status: record.decision.status,
+              checks: record.decision.checks.map((c) => ({
+                checkId: c.checkId,
+                verdict: c.verdict,
+                reasons: c.reasons,
+              })),
+            }
+          : null,
+        analysis: ai?.status === 'OK' ? ai.value : null,
+      },
+      tradeId,
+    );
+    if (result.status !== 'OK') {
+      return { review: null, status: call.status, reason: result.reason, call };
+    }
+    const review = toTradeReview(result.value, trade, {
+      reviewId: newId('aiReview'),
+      model: call.servedModel ?? call.model,
+      provider: call.provider,
+      sourceKind: result.sourceKind,
+      producedAt: result.asOf,
+    });
+    this.aiReviews.unshift(review);
+    this.emit(
+      'INFO',
+      'ai',
+      'AI_REVIEW_OK',
+      `trade ${tradeId} (${trade.symbol}): ${review.classification.replace('_', ' ').toLowerCase()} — SIMULATED stand-in`,
+    );
+    return { review, status: call.status, reason: null, call };
   }
 
   /**
@@ -1162,8 +1344,38 @@ export class DemoRuntime {
     candidate: TradeCandidate,
     autoExecute: boolean,
   ): Promise<{ decision: TradeDecision; persisted: boolean; execution: ExecutionResult | null }> {
+    const inputs = this.config.strategies.get(candidate.signal.strategyId)?.requiresAiAnalysis
+      ? await this.withAiAnalysis(candidate)
+      : await this.assemble(candidate);
+    return this.decideAndPublish(inputs, autoExecute);
+  }
+
+  /** As the server: deterministic checks first; the AI only when they would all pass. */
+  private async withAiAnalysis(candidate: TradeCandidate): Promise<DecisionInputs> {
+    const pre = await this.assemble(
+      candidate,
+      notObserved('UNAVAILABLE', 'AI analysis pending', 'ai'),
+    );
+    const blocking = this.engine
+      .evaluate(pre)
+      .checks.filter((c) => c.mandatory && c.verdict !== 'PASS' && c.checkId !== 'ai.analysis');
+    if (blocking.length > 0) {
+      return {
+        ...pre,
+        aiAnalysis: notObserved(
+          'UNAVAILABLE',
+          'not requested: other checks already reject this candidate',
+          'ai',
+        ),
+      };
+    }
+    await this.analyzeSignal(candidate.signal);
+    return this.assemble(candidate);
+  }
+
+  private assemble(candidate: TradeCandidate, ai?: Observed<AiAnalysis>): Promise<DecisionInputs> {
     const { config } = this;
-    const inputs = await assembleDecisionInputs({
+    return assembleDecisionInputs({
       candidate,
       config: {
         configHash: config.hash,
@@ -1208,10 +1420,7 @@ export class DemoRuntime {
         },
         calendar: () => Promise.resolve(this.calendar()),
         newsRisk: (symbol) => Promise.resolve(this.news.risk(symbol)),
-        aiAnalysis: () =>
-          Promise.resolve(
-            notObserved('UNAVAILABLE', 'AI engine not implemented yet (Phase 6)', 'ai'),
-          ),
+        aiAnalysis: (c) => Promise.resolve(ai ?? this.aiAnalysisFor(c.signal)),
         duplicates: (accountId, signalId, symbol) => {
           const prior = this.decisions.find(
             (d) =>
@@ -1249,7 +1458,12 @@ export class DemoRuntime {
       clock: this.clock,
       timeoutMs: config.system.assembler.providerTimeoutMs,
     });
+  }
 
+  private async decideAndPublish(
+    inputs: DecisionInputs,
+    autoExecute: boolean,
+  ): Promise<{ decision: TradeDecision; persisted: boolean; execution: ExecutionResult | null }> {
     const recorder: DecisionRecorder = {
       record: async (d, i) => {
         // Mirrors the database's unique index: one approval per (account, signal).

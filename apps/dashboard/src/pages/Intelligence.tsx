@@ -1,8 +1,8 @@
-/** Calendar, market scanner, news and AI monitor. Unbuilt engines say so explicitly. */
+/** Economic calendar and event risk. */
 import { ApiError } from '../api/client';
 import { useCalendar, useCalendarRisk } from '../api/hooks';
 import type { EventImpact, InstrumentEventRisk } from '../api/types';
-import { Card, Empty, ErrorBox, Loading, NotBuilt, PageHeader, Pill } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader, Pill } from '../components/ui';
 import { ago, utcTime } from '../lib/format';
 
 /** "12:30Z" today, "09-29 12:30Z" on another day (UTC). */
@@ -199,25 +199,6 @@ export function CalendarPage() {
             </table>
           </div>
         )}
-      </Card>
-    </div>
-  );
-}
-
-export function AiMonitor() {
-  return (
-    <div className="page">
-      <PageHeader title="AI Model Monitor" />
-      <Card>
-        <NotBuilt
-          phase="Phase 6"
-          what="The AI orchestrator (ChatGPT / Claude routing, structured analysis, cost tracking)"
-        >
-          <p className="muted">
-            AI is CONTEXT only: it can veto a trade, never approve one. Strategies that require AI
-            analysis are rejected while it is unavailable.
-          </p>
-        </NotBuilt>
       </Card>
     </div>
   );

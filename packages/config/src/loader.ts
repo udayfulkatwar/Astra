@@ -212,6 +212,15 @@ export function loadAstraConfig(configDir: string): AstraConfig {
   for (const sym of Object.keys(system?.news?.instrumentKeywords ?? {}))
     if (!instruments.has(sym))
       issues.push(`astra.yaml news.instrumentKeywords: unknown instrument ${sym}`);
+  const ai = system?.ai;
+  if (ai) {
+    for (const [task, route] of Object.entries(ai.routes)) {
+      if (!ai.prices[route.model])
+        issues.push(`astra.yaml ai.routes.${task}: no price for model ${route.model} in ai.prices`);
+      if (route.provider === 'anthropic' && !ai.providers.anthropic)
+        issues.push(`astra.yaml ai.routes.${task}: provider anthropic is not configured`);
+    }
+  }
 
   if (issues.length > 0 || !system)
     throw new ConfigError(issues.length > 0 ? issues : ['astra.yaml missing']);

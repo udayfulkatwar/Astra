@@ -13,6 +13,7 @@
     "migrate": "tsx src/cli-migrate.ts"
   },
   "dependencies": {
+    "@astra/ai": "workspace:*",
     "@astra/backtest": "workspace:*",
     "@astra/core": "workspace:*",
     "@astra/decision": "workspace:*",

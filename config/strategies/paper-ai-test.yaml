@@ -1,0 +1,18 @@
+# TEMPLATE — NOT THE OWNER'S STRATEGY.
+# Same pass-through as paper-pipeline-test, but it REQUIRES AI analysis: every signal is analysed
+# first (Phase 6, ADR-0020), and the gate rejects it when the analysis is missing, stale, invalid,
+# conflicts, has low confidence or rates event risk HIGH. It exercises the AI veto in PAPER.
+# TEMPLATE strategies are refused in LIVE mode.
+id: paper-ai-test
+name: Paper AI-veto test (template)
+version: 1
+ownership: TEMPLATE
+status: ACTIVE
+description: Pass-through for submitted signals that must also pass AI analysis (context veto only).
+instruments: [NQ, MNQ, XAUUSD]
+timeframes: []
+direction: BOTH
+minRewardToRisk: 1.5
+signalTtlSeconds: 120
+requiresAiAnalysis: true
+rules: {}

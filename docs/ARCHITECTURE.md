@@ -107,22 +107,22 @@ SimulationAdapter (sourceKind SIMULATED, paper only) ────┘
 
 ## 2. Technology stack
 
-| Concern      | Choice                                                 | Why                                                                    |
-| ------------ | ------------------------------------------------------ | ---------------------------------------------------------------------- |
-| Language     | TypeScript 6 (strict) on Node.js 22 LTS                | one typed language across backend, frontend, contracts                 |
-| Monorepo     | pnpm workspaces, internal source packages              | enforced module boundaries without per-package builds                  |
-| API          | Fastify 5                                              | fast, schema-first, first-class pino logging, `inject()` for tests     |
-| Validation   | Zod 4                                                  | runtime validation of every boundary (config, API, AI output, DB rows) |
-| Money math   | decimal.js                                             | no binary-float drift in risk/position-size calculations (ADR-0004)    |
-| Time zones   | Luxon                                                  | DST-correct prop-firm day resets and trading sessions; UTC internally  |
-| Database     | PostgreSQL 16, `postgres` driver, plain SQL migrations | transparent, auditable schema; checksum-verified migrations (ADR-0002) |
-| Logging      | pino (JSON) with secret redaction                      | structured, cheap, container-friendly                                  |
-| Frontend     | React 19 + Vite + TanStack Query + React Router        | fast dev loop, cache-aware polling of the API                          |
-| Automation   | n8n (self-hosted)                                      | orchestration/notifications; never decision authority (ADR-0005)       |
-| Tests        | Vitest + fast-check (property tests) + real Postgres   | risk math is proven by invariants, not examples only                   |
-| Packaging    | Docker + docker compose                                | identical local and cloud topology (ADR-0007)                          |
-| CI           | GitHub Actions                                         | lint, typecheck, unit + DB integration tests on every push             |
-| AI (Phase 6) | provider abstraction (Anthropic, OpenAI, mock)         | models are replaceable components                                      |
+| Concern      | Choice                                                       | Why                                                                    |
+| ------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Language     | TypeScript 6 (strict) on Node.js 22 LTS                      | one typed language across backend, frontend, contracts                 |
+| Monorepo     | pnpm workspaces, internal source packages                    | enforced module boundaries without per-package builds                  |
+| API          | Fastify 5                                                    | fast, schema-first, first-class pino logging, `inject()` for tests     |
+| Validation   | Zod 4                                                        | runtime validation of every boundary (config, API, AI output, DB rows) |
+| Money math   | decimal.js                                                   | no binary-float drift in risk/position-size calculations (ADR-0004)    |
+| Time zones   | Luxon                                                        | DST-correct prop-firm day resets and trading sessions; UTC internally  |
+| Database     | PostgreSQL 16, `postgres` driver, plain SQL migrations       | transparent, auditable schema; checksum-verified migrations (ADR-0002) |
+| Logging      | pino (JSON) with secret redaction                            | structured, cheap, container-friendly                                  |
+| Frontend     | React 19 + Vite + TanStack Query + React Router              | fast dev loop, cache-aware polling of the API                          |
+| Automation   | n8n (self-hosted)                                            | orchestration/notifications; never decision authority (ADR-0005)       |
+| Tests        | Vitest + fast-check (property tests) + real Postgres         | risk math is proven by invariants, not examples only                   |
+| Packaging    | Docker + docker compose                                      | identical local and cloud topology (ADR-0007)                          |
+| CI           | GitHub Actions                                               | lint, typecheck, unit + DB integration tests on every push             |
+| AI (Phase 6) | `AiProvider` port; Anthropic SDK adapter; SIMULATED stand-in | models are replaceable components (ADR-0020)                           |
 
 ---
 
@@ -143,6 +143,7 @@ astra/
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
 │   ├── news/                News provider port + poller, rules classifier, news risk, sentiment (ADR-0019)
+│   ├── ai/                  AI orchestrator: provider port, routing, budgets, call log, tasks; Claude adapter (ADR-0020)
 │   ├── journal/             Trade journal: excursions, plan-vs-actual entries, statistics (ADR-0015)
 │   ├── learning/            Learning metrics over journal entries, observations only (ADR-0018)
 │   ├── backtest/            M1 replay through the real gate, protection and journal (ADR-0016)
@@ -167,14 +168,16 @@ market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
 calendar    → core   (pure and isomorphic)
 news        → core   (pure and isomorphic; CONTEXT only)
+ai          → core, journal, market-data, market-structure, news   (isomorphic core; CONTEXT only;
+              the Anthropic SDK only in the `@astra/ai/anthropic` subpath, used by apps/api)
 journal     → core   (pure and isomorphic)
 learning    → core, journal   (pure and isomorphic; descriptive only, no write path)
 backtest    → core, calendar, decision, journal, market-data, market-structure, prop-firm, risk, safety
               (pure and isomorphic; composes the real engines; no lookahead)
 decision    → core, prop-firm, risk, safety
 execution   → core, decision (approval types), safety
-config      → core, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)
-db          → core, backtest, decision, execution, journal, market-data, prop-firm, safety   (implements their ports)
+config      → core, ai, prop-firm, risk, decision, market-structure   (composes their schemas; loads YAML)
+db          → core, ai, backtest, decision, execution, journal, market-data, prop-firm, safety   (implements their ports)
 apps/api    → everything (composition root)
 apps/dashboard → type-only imports of domain packages (nothing enters the browser bundle)
 ```
@@ -240,6 +243,14 @@ two instances migrating concurrently.
 | ------------ | ----------------------------------------------------------------------- | ----------- |
 | `news_items` | accepted news items with their classification (classifier version kept) | insert-only |
 
+### Phase-6 tables
+
+| Table            | Purpose                                                                                     | Mutability  |
+| ---------------- | ------------------------------------------------------------------------------------------- | ----------- |
+| `ai_model_calls` | every AI call, sent or blocked: task, model served, status, tokens, cost, latency, fallback | append-only |
+| `ai_analyses`    | trade analyses per exact signal, with the brief the model saw                               | append-only |
+| `ai_reviews`     | post-trade reviews (process × outcome, lessons, PROPOSED changes — never applied)           | append-only |
+
 ### Phase-8 tables
 
 | Table           | Purpose                                                                            | Mutability  |
@@ -282,30 +293,33 @@ rules in force.
 
 ### Endpoints (Phases 1–2)
 
-| Method   | Path                                                                        | Role                                         |
-| -------- | --------------------------------------------------------------------------- | -------------------------------------------- |
-| GET      | `/healthz` (liveness) · `/readyz` (readiness)                               | none                                         |
-| GET      | `/api/v1/system/status` — the core status bar                               | viewer                                       |
-| GET      | `/api/v1/system/health` — per-component health                              | viewer                                       |
-| GET/POST | `/api/v1/system/mode`                                                       | viewer / operator                            |
-| GET      | `/api/v1/accounts`, `/api/v1/accounts/:id`                                  | viewer                                       |
-| POST     | `/api/v1/accounts/:id/snapshots`                                            | automation                                   |
-| GET      | `/api/v1/config/summary` (profiles, instruments, strategies; never secrets) | viewer                                       |
-| GET      | `/api/v1/kill-switches` · POST `/activate` · POST `/deactivate`             | viewer / operator                            |
-| POST     | `/api/v1/decisions/evaluate`                                                | automation                                   |
-| GET      | `/api/v1/decisions`, `/api/v1/decisions/:id`                                | viewer                                       |
-| POST     | `/api/v1/executions` (by approval id)                                       | operator (automation later, per mode policy) |
-| GET      | `/api/v1/audit`, `/api/v1/events`, `/api/v1/stream` (SSE)                   | viewer                                       |
-| POST     | `/api/v1/automation/heartbeat`, `/api/v1/automation/errors`                 | automation                                   |
-| GET/POST | `/api/v1/market/quotes` (latest quotes / ingestion)                         | viewer / automation                          |
-| GET      | `/api/v1/market/scanner` (market snapshots)                                 | viewer                                       |
-| GET      | `/api/v1/market/bars?symbol=&timeframe=&limit=`                             | viewer                                       |
-| GET      | `/api/v1/journal`, `/api/v1/journal/summary`                                | viewer                                       |
-| POST     | `/api/v1/backtests` (replay; never trades)                                  | operator                                     |
-| GET      | `/api/v1/backtests`, `/api/v1/backtests/:id`                                | viewer                                       |
-| GET      | `/api/v1/learning` (journal or a backtest run)                              | viewer                                       |
-| POST     | `/api/v1/news/items` (push; MANUAL)                                         | automation                                   |
-| GET      | `/api/v1/news`, `/api/v1/news/context`                                      | viewer                                       |
+| Method   | Path                                                                                       | Role                                         |
+| -------- | ------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| GET      | `/healthz` (liveness) · `/readyz` (readiness)                                              | none                                         |
+| GET      | `/api/v1/system/status` — the core status bar                                              | viewer                                       |
+| GET      | `/api/v1/system/health` — per-component health                                             | viewer                                       |
+| GET/POST | `/api/v1/system/mode`                                                                      | viewer / operator                            |
+| GET      | `/api/v1/accounts`, `/api/v1/accounts/:id`                                                 | viewer                                       |
+| POST     | `/api/v1/accounts/:id/snapshots`                                                           | automation                                   |
+| GET      | `/api/v1/config/summary` (profiles, instruments, strategies; never secrets)                | viewer                                       |
+| GET      | `/api/v1/kill-switches` · POST `/activate` · POST `/deactivate`                            | viewer / operator                            |
+| POST     | `/api/v1/decisions/evaluate`                                                               | automation                                   |
+| GET      | `/api/v1/decisions`, `/api/v1/decisions/:id`                                               | viewer                                       |
+| POST     | `/api/v1/executions` (by approval id)                                                      | operator (automation later, per mode policy) |
+| GET      | `/api/v1/audit`, `/api/v1/events`, `/api/v1/stream` (SSE)                                  | viewer                                       |
+| POST     | `/api/v1/automation/heartbeat`, `/api/v1/automation/errors`                                | automation                                   |
+| GET/POST | `/api/v1/market/quotes` (latest quotes / ingestion)                                        | viewer / automation                          |
+| GET      | `/api/v1/market/scanner` (market snapshots)                                                | viewer                                       |
+| GET      | `/api/v1/market/bars?symbol=&timeframe=&limit=`                                            | viewer                                       |
+| GET      | `/api/v1/journal`, `/api/v1/journal/summary`                                               | viewer                                       |
+| POST     | `/api/v1/backtests` (replay; never trades)                                                 | operator                                     |
+| GET      | `/api/v1/backtests`, `/api/v1/backtests/:id`                                               | viewer                                       |
+| GET      | `/api/v1/learning` (journal or a backtest run)                                             | viewer                                       |
+| POST     | `/api/v1/news/items` (push; MANUAL)                                                        | automation                                   |
+| GET      | `/api/v1/news`, `/api/v1/news/context`                                                     | viewer                                       |
+| GET      | `/api/v1/ai/status`, `/api/v1/ai/calls`, `/api/v1/ai/analyses[/:id]`, `/api/v1/ai/reviews` | viewer                                       |
+| POST     | `/api/v1/ai/analyses` (analyse a signal now)                                               | automation                                   |
+| POST     | `/api/v1/ai/reviews` (post-trade review of a journaled trade)                              | operator                                     |
 
 ---
 
@@ -328,7 +342,7 @@ rules in force.
 
 ---
 
-## 8. AI architecture (Phase 6; contracts defined now)
+## 8. AI architecture (Phase 6; built — ADR-0020)
 
 ```text
 caller (engine / n8n) → AI Orchestrator → router(task → model) → provider adapter → model
@@ -347,6 +361,12 @@ caller (engine / n8n) → AI Orchestrator → router(task → model) → provide
   exceeded. Deterministic code is preferred whenever it can solve the problem (cost + safety).
 - AI suggestions for configuration changes (e.g., from post-trade analysis) become _proposals_
   that require human review; ASTRA never auto-applies AI suggestions to live risk parameters.
+- **As built (ADR-0020):** tasks TRADE_ANALYSIS and POST_TRADE_REVIEW; the budget checks each
+  call's worst-case cost before sending; the Claude adapter uses structured output and the
+  server-side refusal fallback; for an AI-required strategy the deterministic checks run first and
+  the model is asked only when they all pass, then the gate decides on re-assembled data plus the
+  stored analysis. In simulation mode a SIMULATED stand-in (fixed rules, not an AI model) can run
+  the same path; SHADOW/LIVE refuse its output.
 
 ---
 

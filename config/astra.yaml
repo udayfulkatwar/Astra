@@ -172,6 +172,58 @@ structure:
   fvgMinTicks: 1 # smallest fair value gap reported
   maxItems: 20
 
+# AI analysis layer (Phase 6, ADR-0020). AI output is CONTEXT: it can veto a trade, never approve
+# one, and never sets size, limits or risk. A strategy opts in with `requiresAiAnalysis: true`;
+# then no valid, fresh, non-conflicting analysis means NO TRADE. Keys are read from the
+# environment variable NAMED here — never put a key in this file.
+ai:
+  enabled: true
+  providers:
+    anthropic:
+      apiKeyEnv: ANTHROPIC_API_KEY
+      maxRetries: 1
+      # A request the model declines is re-run server-side on Anthropic's recommended fallback
+      # model (fallbacks: "default"). A final refusal is logged as REFUSED → no trade.
+      serverSideFallbacks: true
+  # With ASTRA_SIMULATION=true, use the SIMULATED stand-in (fixed rules, not an AI model, no cost)
+  # instead of the routes below. Set false to try the real model on simulated data.
+  standInWhenSimulating: true
+  routes:
+    TRADE_ANALYSIS:
+      provider: anthropic
+      model: claude-opus-5
+      effort: medium
+      maxOutputTokens: 8000
+      timeoutMs: 60000 # the signal's TTL still applies; a late answer means no trade
+    POST_TRADE_REVIEW:
+      provider: anthropic
+      model: claude-opus-5
+      effort: medium
+      maxOutputTokens: 8000
+      timeoutMs: 120000
+  # DEFAULTS — set your own. A call is refused when its worst-case cost would pass the daily
+  # limit (UTC day); AI health turns DEGRADED at 80%.
+  budget:
+    dailyCostUsd: 5
+    dailyCalls: 200
+    degradeAt: 0.8
+  # USD per million tokens: Anthropic list prices as of 2026-06 — VERIFY against your contract.
+  # claude-opus-4-8 is listed because a declined request can be served by it as the fallback.
+  prices:
+    claude-opus-5:
+      { inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 }
+    claude-opus-4-8:
+      { inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 }
+    claude-sonnet-5:
+      { inputPerMTok: 2, outputPerMTok: 10, cacheReadPerMTok: 0.2, cacheWritePerMTok: 2.5 }
+    claude-haiku-4-5:
+      { inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25 }
+  tradeAnalysis:
+    recentBars: 30 # complete bars of the signal's timeframe in the brief
+    maxHeadlines: 10
+  postTradeReview:
+    auto: false # true: review every newly journaled trade (one call per trade)
+
 # SIMULATED feeds for paper testing — used only when ASTRA_SIMULATION=true.
 # Start prices are simulation seeds, NOT market data. SHADOW and LIVE refuse SIMULATED data.
 simulation:
