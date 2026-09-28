@@ -349,3 +349,85 @@ describe('ExecutionGateway — protective close (ADR-0014)', () => {
     expect(onUnknown).toHaveBeenCalledWith('acct-a', 'b', expect.stringMatching(/outcome unknown/));
   });
 });
+
+describe('ExecutionGateway — LIMIT entries', () => {
+  const limitPlan = (entry: number, expiresAt = '2026-09-28T15:00:00.000Z') => ({
+    symbol: 'NQ',
+    direction: 'LONG' as const,
+    entryType: 'LIMIT' as const,
+    entry,
+    stop: 19_980,
+    target: 20_030,
+    quantity: 1,
+    expiresAt,
+  });
+
+  it('a resting LIMIT is a confirmed WORKING order; it fills when the market reaches it', async () => {
+    const { gateway, store, broker, clock, onUnknown } = setup();
+    store.addApproval(approval({ orderPlan: limitPlan(19_995) }));
+    const r = await gateway.execute('apr_1');
+    expect(r.outcome).toBe('CONFIRMED');
+    expect(r.reasons[0]).toMatch(/^WORKING: LIMIT 1 @ 19995 until/);
+    expect(r.brokerState?.status).toBe('ACCEPTED');
+    expect(onUnknown).not.toHaveBeenCalled();
+    const order = store.orders.get(clientOrderIdFor('apr_1'))!;
+    expect(order).toMatchObject({ status: 'ACCEPTED', expiresAt: '2026-09-28T15:00:00.000Z' });
+
+    // Exposure counts before the fill: the snapshot details the resting order.
+    const snap = await broker.getAccountSnapshot('PAPER-A', 'acct-a');
+    expect(snap.pendingOrders).toBe(1);
+    expect(snap.workingOrders?.[0]).toMatchObject({ limitPrice: 19_995, stopPrice: 19_980 });
+
+    // A second approval for the symbol is refused while the order rests.
+    store.addApproval(approval({ approvalId: 'apr_2', orderPlan: limitPlan(19_990) }));
+    expect((await gateway.execute('apr_2')).reasons[0]).toMatch(/still working/);
+
+    clock.advance(60_000);
+    broker.onQuote({
+      symbol: 'NQ',
+      bid: 19_994.5,
+      ask: 19_994.75,
+      asOf: clock.now().toISOString(),
+    });
+    const refreshed = await gateway.refresh(order);
+    expect(refreshed).toMatchObject({ changed: true, state: { status: 'FILLED' } });
+    expect(store.orders.get(order.clientOrderId)).toMatchObject({
+      status: 'FILLED',
+      averageFillPrice: 19_995, // at the limit, never better
+    });
+    const after = await broker.getAccountSnapshot('PAPER-A', 'acct-a');
+    expect(after.openPositions[0]).toMatchObject({ entryPrice: 19_995, stopPrice: 19_980 });
+    expect(after.workingOrders).toEqual([]);
+  });
+
+  it('expires unfilled at its expiry, and can be cancelled while it rests', async () => {
+    const { gateway, store, clock } = setup();
+    store.addApproval(approval({ orderPlan: limitPlan(19_990, '2026-09-28T14:10:00.000Z') }));
+    await gateway.execute('apr_1');
+    const order = store.orders.get(clientOrderIdFor('apr_1'))!;
+    clock.advance(11 * 60_000);
+    expect((await gateway.refresh(order)).state?.status).toBe('EXPIRED');
+
+    store.addApproval(
+      approval({
+        approvalId: 'apr_2',
+        expiresAt: '2026-09-28T14:12:00.000Z',
+        orderPlan: limitPlan(19_990),
+      }),
+    );
+    expect((await gateway.execute('apr_2')).brokerState?.status).toBe('ACCEPTED');
+    const c = await gateway.cancelWorking({
+      accountId: 'acct-a',
+      clientOrderId: clientOrderIdFor('apr_2'),
+      reason: 'kill switch activated',
+    });
+    expect(c.outcome).toBe('CANCELLED');
+    expect(store.orders.get(clientOrderIdFor('apr_2'))?.status).toBe('CANCELLED');
+  });
+
+  it('refuses a LIMIT plan without a future expiry', async () => {
+    const { gateway, store } = setup();
+    store.addApproval(approval({ orderPlan: limitPlan(19_995, '2026-09-28T13:59:00.000Z') }));
+    expect((await gateway.execute('apr_1')).reasons[0]).toMatch(/already be expired/);
+  });
+});

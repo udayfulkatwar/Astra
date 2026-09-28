@@ -3,7 +3,13 @@
  * open orders are reconciled with the broker before new trades are allowed) and persistence of
  * paper-broker state.
  */
-import { errorMessage, type AccountDefinition, type Clock, type InstrumentSpec } from '@astra/core';
+import {
+  AstraError,
+  errorMessage,
+  type AccountDefinition,
+  type Clock,
+  type InstrumentSpec,
+} from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import type { ExecutionRepository, PaperBrokerStateRepository } from '@astra/db';
 import type { ExecutionReadiness } from '@astra/decision';
@@ -11,7 +17,9 @@ import {
   ExecutionGateway,
   PaperBrokerAdapter,
   isTerminal,
+  isWorking,
   type BrokerAdapter,
+  type CancelResult,
   type ExecutionResult,
 } from '@astra/execution';
 import type { Logger } from 'pino';
@@ -114,7 +122,8 @@ export class ExecutionService {
     for (const o of working) {
       try {
         const state = await adapter.getOrder(account.broker.accountRef, o.clientOrderId);
-        if (state && isTerminal(state.status)) {
+        // A resting LIMIT the broker still holds is a known state (the safety loop tracks it).
+        if (state && (isTerminal(state.status) || isWorking(state))) {
           await this.deps.store.updateOrder(o.clientOrderId, state);
           await this.deps.store.appendOrderEvent({
             clientOrderId: o.clientOrderId,
@@ -168,6 +177,26 @@ export class ExecutionService {
       message: `${order ? `${order.direction} ${order.quantity} ${order.symbol}` : `approval ${approvalId}`}: ${result.outcome} — ${result.reasons.join('; ')}`,
       accountId: order?.accountId ?? null,
       data: { approvalId, actor, clientOrderId: order?.clientOrderId ?? null },
+    });
+    return result;
+  }
+
+  /** Operator cancel of a resting LIMIT entry (risk-reducing; audited as an order event). */
+  async cancel(clientOrderId: string, actor: string): Promise<CancelResult> {
+    const order = await this.deps.store.orderByClientId(clientOrderId);
+    if (!order) throw new AstraError('NOT_FOUND', `order ${clientOrderId} not found`);
+    const result = await this.gateway.cancelWorking({
+      accountId: order.accountId,
+      clientOrderId,
+      reason: `cancelled by ${actor}`,
+    });
+    await this.deps.events.emit({
+      level: result.outcome === 'CANCELLED' || result.outcome === 'ALREADY_FINAL' ? 'INFO' : 'WARN',
+      component: 'execution',
+      type: `ORDER_CANCEL_${result.outcome}`,
+      message: `${order.direction} ${order.entryType} ${order.quantity} ${order.symbol}: cancel ${result.outcome} — ${result.reason}`,
+      accountId: order.accountId,
+      data: { clientOrderId, actor },
     });
     return result;
   }

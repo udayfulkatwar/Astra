@@ -12,6 +12,7 @@ import {
   decMax,
   directionSign,
   effectiveImpact,
+  exposurePositions,
   eventAffects,
   minutesBetween,
   nextDailyTime,
@@ -61,6 +62,11 @@ export interface PropFirmEvaluationInput {
   /** Economic calendar; required when the profile restricts news trading. */
   readonly calendar: Observed<CalendarWindow>;
   readonly now: Date;
+  /**
+   * Latest time the entry can happen (a resting LIMIT order fills until it expires). News and
+   * flat-time rules then cover the whole window. Default: now.
+   */
+  readonly entryUntil?: Date;
   /** Refuse new trades this many minutes before a mandatory flat time / weekly close. */
   readonly flatBufferMinutes: number;
 }
@@ -111,7 +117,7 @@ function weightedOpenTotals(
   lookup: InstrumentLookup,
 ): WeightedTotals {
   const totals: WeightedTotals = { contracts: ZERO, lots: ZERO, all: ZERO, unknownSymbols: [] };
-  for (const p of snapshot.openPositions) {
+  for (const p of exposurePositions(snapshot)) {
     const spec = lookup(p.symbol);
     if (!spec) {
       totals.unknownSymbols.push(p.symbol);
@@ -171,7 +177,7 @@ export function firmQuantityHeadroom(params: {
   }
   const perInstrument = pl.perInstrumentMaxQuantity[spec.symbol];
   if (perInstrument !== undefined) {
-    const openQty = snapshot.openPositions
+    const openQty = exposurePositions(snapshot)
       .filter((p) => p.symbol === spec.symbol)
       .reduce((s, p) => s.plus(p.quantity), ZERO);
     limits.push({ rule: 'per-instrument-max', qty: dec(perInstrument).minus(openQty) });
@@ -197,13 +203,14 @@ function checkNews(
   symbol: string,
   calendar: Observed<CalendarWindow>,
   now: Date,
+  until: Date,
 ): RuleCheck {
   const id = 'news-restriction';
   if (calendar.status !== 'OK') {
     return unknown(id, `economic calendar ${calendar.status}: ${calendar.reason}`);
   }
   const needFrom = now.getTime() - rule.minutesAfter * 60_000;
-  const needTo = now.getTime() + rule.minutesBefore * 60_000;
+  const needTo = Math.max(now.getTime(), until.getTime()) + rule.minutesBefore * 60_000;
   const w = calendar.value;
   if (Date.parse(w.from) > needFrom || Date.parse(w.to) < needTo) {
     return unknown(id, 'economic calendar does not cover the restricted window', {
@@ -241,6 +248,7 @@ function checkNews(
 /** The spec's canTrade(account, proposedTrade). */
 export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmVerdict {
   const { profile, account, state, snapshot, proposal, now } = input;
+  const entryEnd = input.entryUntil && input.entryUntil > now ? input.entryUntil : now;
   const checks: RuleCheck[] = [];
   const spec = input.instruments(proposal.symbol);
 
@@ -300,7 +308,7 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
     const trailing = trailingExposure(
       profile.maxDrawdown,
       state,
-      snapshot.openPositions,
+      exposurePositions(snapshot),
       input.instruments,
     );
     if (trailing?.applies) {
@@ -410,7 +418,7 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
 
   const pl = profile.positionLimits;
   if (pl.maxOpenPositions !== null) {
-    const after = snapshot.openPositions.length + 1;
+    const after = exposurePositions(snapshot).length + 1;
     checks.push(
       after <= pl.maxOpenPositions
         ? pass('max-open-positions', `${after}/${pl.maxOpenPositions} positions after trade`)
@@ -419,7 +427,7 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
   }
 
   if (!profile.trading.hedgingAllowed) {
-    const opposite = snapshot.openPositions.some(
+    const opposite = exposurePositions(snapshot).some(
       (p) => p.symbol === proposal.symbol && p.direction !== proposal.direction,
     );
     checks.push(
@@ -432,7 +440,7 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
   if (pl.maxLeverage !== null && spec) {
     let notional = ZERO;
     let complete = true;
-    for (const p of snapshot.openPositions) {
+    for (const p of exposurePositions(snapshot)) {
       const s = input.instruments(p.symbol);
       if (!s) {
         complete = false;
@@ -458,13 +466,13 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
 
   // News restriction.
   if (profile.news) {
-    checks.push(checkNews(profile.news, proposal.symbol, input.calendar, now));
+    checks.push(checkNews(profile.news, proposal.symbol, input.calendar, now, entryEnd));
   }
 
   // Holding rules: mandatory flat time and weekend close.
   const h = profile.holding;
   if (h.flatBy) {
-    const until = minutesBetween(now, nextDailyTime(now, h.flatBy));
+    const until = minutesBetween(entryEnd, nextDailyTime(now, h.flatBy));
     checks.push(
       until > input.flatBufferMinutes
         ? pass('flat-by', `${Math.floor(until)} min until mandatory flat time`)
@@ -475,7 +483,7 @@ export function evaluatePropFirmRules(input: PropFirmEvaluationInput): PropFirmV
     );
   }
   if (h.weekend === 'PROHIBITED' && h.weeklyClose) {
-    const until = minutesBetween(now, nextWeeklyTime(now, h.weeklyClose));
+    const until = minutesBetween(entryEnd, nextWeeklyTime(now, h.weeklyClose));
     checks.push(
       until > input.flatBufferMinutes
         ? pass('weekend-holding', `${Math.floor(until)} min until weekly close`)

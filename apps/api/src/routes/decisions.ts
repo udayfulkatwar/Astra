@@ -53,6 +53,12 @@ export function registerDecisionRoutes(
     return runtime.execution.execute(approvalId, req.principal!.id);
   });
 
+  app.post<{ Params: { clientOrderId: string } }>(
+    '/api/v1/orders/:clientOrderId/cancel',
+    operator,
+    async (req) => runtime.execution.cancel(req.params.clientOrderId, req.principal!.id),
+  );
+
   app.get('/api/v1/orders', read, async (req) => {
     const q = z
       .object({

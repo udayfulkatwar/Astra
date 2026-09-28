@@ -17,6 +17,8 @@ import {
   type Dec,
   type InstrumentSpec,
   type OpenPosition,
+  exposurePositions,
+  undetailedPendingOrders,
 } from '@astra/core';
 import type {
   DailyLossRule,
@@ -166,7 +168,17 @@ function computeOpenRisk(
   snapshot: AccountSnapshot,
   lookup: InstrumentLookup,
 ): { state: OpenRiskState; amount: Dec } {
-  const positions = snapshot.openPositions.map((p) => positionRiskToStop(p, lookup(p.symbol)));
+  // Working entry orders count as if filled at their limit (they can fill without asking).
+  const positions = exposurePositions(snapshot).map((p) => positionRiskToStop(p, lookup(p.symbol)));
+  const undetailed = undetailedPendingOrders(snapshot);
+  if (undetailed > 0) {
+    positions.push({
+      positionId: 'pending-orders',
+      symbol: '*',
+      riskToStop: null,
+      unknownReason: `${undetailed} pending order(s) reported without details`,
+    });
+  }
   const complete = positions.every((p) => p.riskToStop !== null);
   const amount = positions.reduce((sum, p) => sum.plus(p.riskToStop ?? 0), ZERO);
   return { state: { amount: toNum(amount), complete, positions }, amount };

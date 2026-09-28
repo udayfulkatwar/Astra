@@ -179,3 +179,66 @@ describe('PaperBrokerAdapter — FX quoted in another currency', () => {
     expect(s.rejectReason).toMatch(/no fresh GBP→USD rate/);
   });
 });
+
+describe('PaperBrokerAdapter — LIMIT entries', () => {
+  const limitOrder = { ...order, entryType: 'LIMIT' as const, quantity: 1, stopLoss: 19_980 };
+
+  it('fills a marketable limit at once at the market; a resting one only at its limit', async () => {
+    const { b, clock } = broker();
+    const now = await b.submitOrder({
+      ...limitOrder,
+      clientOrderId: 'm1',
+      limitPrice: 20_001,
+      expiresAt: '2026-09-28T15:00:00Z',
+    });
+    expect(now).toMatchObject({ status: 'FILLED', averageFillPrice: 20_000 });
+
+    const rest = await b.submitOrder({
+      ...limitOrder,
+      clientOrderId: 'r1',
+      limitPrice: 19_995,
+      expiresAt: '2026-09-28T15:00:00Z',
+    });
+    expect(rest.status).toBe('ACCEPTED');
+    b.onQuote({ symbol: 'NQ', bid: 19_997, ask: 19_997.25, asOf: clock.now().toISOString() });
+    expect((await b.getOrder('A', 'r1'))?.status).toBe('ACCEPTED');
+    b.onQuote({ symbol: 'NQ', bid: 19_990, ask: 19_990.25, asOf: clock.now().toISOString() });
+    expect(await b.getOrder('A', 'r1')).toMatchObject({
+      status: 'FILLED',
+      averageFillPrice: 19_995,
+    });
+  });
+
+  it('expires on time, survives export/import while resting, and rejects bad limits', async () => {
+    const { b, clock } = broker();
+    await b.submitOrder({
+      ...limitOrder,
+      clientOrderId: 'r2',
+      limitPrice: 19_990,
+      expiresAt: '2026-09-28T14:05:00Z',
+    });
+    const copy = new PaperBrokerAdapter({ clock, instruments: () => NQ });
+    copy.importAccount('A', b.exportAccount('A'));
+    expect((await copy.getAccountSnapshot('A', 'x')).workingOrders).toHaveLength(1);
+    clock.advance(5 * 60_000);
+    expect((await copy.getOrder('A', 'r2'))?.status).toBe('EXPIRED');
+    expect((await copy.getAccountSnapshot('A', 'x')).pendingOrders).toBe(0);
+
+    const offGrid = await b.submitOrder({
+      ...limitOrder,
+      clientOrderId: 'bad',
+      limitPrice: 19_990.1,
+      expiresAt: '2026-09-28T15:00:00Z',
+    });
+    expect(offGrid).toMatchObject({
+      status: 'REJECTED',
+      rejectReason: expect.stringMatching(/tick/),
+    });
+    const noExpiry = await b.submitOrder({
+      ...limitOrder,
+      clientOrderId: 'bad2',
+      limitPrice: 19_990,
+    });
+    expect(noExpiry.rejectReason).toMatch(/expiry/);
+  });
+});

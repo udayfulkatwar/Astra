@@ -91,10 +91,12 @@ export function assessBlackout(
   symbol: string,
   now: Date,
   rule: BlackoutRule,
+  /** Latest entry time (a resting LIMIT order may fill until it expires); default: now. */
+  until: Date = now,
 ): BlackoutAssessment {
   const t = now.getTime();
   const fromMs = t - rule.minutesAfter * 60_000;
-  const toMs = t + rule.minutesBefore * 60_000;
+  const toMs = Math.max(t, until.getTime()) + rule.minutesBefore * 60_000;
   const from = new Date(fromMs).toISOString();
   const to = new Date(toMs).toISOString();
   if (Date.parse(window.from) > fromMs || Date.parse(window.to) < toMs) {

@@ -56,6 +56,7 @@ import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
 import { marketValuation } from './valuation';
+import { WorkingOrderService } from './working-orders';
 import { ExecutionService } from './execution-service';
 import { HealthService } from './health-service';
 import { KillSwitchService } from './kill-switch-service';
@@ -129,6 +130,8 @@ export class AstraRuntime {
   readonly journal: JournalService;
   readonly backtests: BacktestService;
   readonly protection: ProtectionService;
+  /** Resting LIMIT entries: broker state sync and cancellation when conditions change. */
+  readonly workingOrders: WorkingOrderService;
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
@@ -290,6 +293,18 @@ export class AstraRuntime {
       accounts: this.accounts,
       market: this.market,
       events: this.events,
+    });
+    this.workingOrders = new WorkingOrderService({
+      config,
+      clock,
+      store: this.repos.execution,
+      gateway: this.execution.gateway,
+      mode: this.mode,
+      killSwitches: this.killSwitches,
+      calendar: this.calendar,
+      news: this.news,
+      events: this.events,
+      log,
     });
     this.protection = new ProtectionService({
       config,
@@ -548,6 +563,8 @@ export class AstraRuntime {
       // Bar persistence never delays the safety checks below (flush logs, never rejects).
       void this.barPersister.flush();
       await this.health.probe();
+      // Fills of resting LIMIT orders first, so the account sync sees the new positions.
+      await this.workingOrders.run();
       await this.accounts.syncAll();
       await this.monitor.evaluate();
       this.journal.syncOpen(this.monitor.snapshot().accounts);

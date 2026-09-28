@@ -61,6 +61,23 @@ export const OpenPositionSchema = z.object({
 });
 export type OpenPosition = z.infer<typeof OpenPositionSchema>;
 
+/** An entry order resting at the broker (a LIMIT not yet filled): exposure that may still open. */
+export const WorkingOrderSchema = z.object({
+  clientOrderId: z.string().min(1),
+  symbol: SymbolSchema,
+  direction: DirectionSchema,
+  /** Unfilled quantity. */
+  quantity: PositiveNumberSchema,
+  limitPrice: PositiveNumberSchema,
+  /** The bracket the position will carry once filled. */
+  stopPrice: PositiveNumberSchema,
+  targetPrice: PositiveNumberSchema,
+  placedAt: IsoDateTimeSchema,
+  expiresAt: IsoDateTimeSchema,
+  strategyId: SlugSchema.optional(),
+});
+export type WorkingOrder = z.infer<typeof WorkingOrderSchema>;
+
 /**
  * Account DATA as reported by the platform at `asOf`. Values the firm itself reports (e.g. its
  * own drawdown threshold) are optional; when present, ASTRA uses the more conservative of the
@@ -75,7 +92,13 @@ export const AccountSnapshotSchema = z.object({
   /** Balance + floating P&L. */
   equity: FiniteNumberSchema,
   openPositions: z.array(OpenPositionSchema),
+  /** Every order not yet final at the broker (entries and anything else). */
   pendingOrders: z.number().int().nonnegative(),
+  /**
+   * Details of the pending entry orders. Risk rules count each as if filled at its limit; pending
+   * orders without details make open risk UNKNOWN (fail-closed).
+   */
+  workingOrders: z.array(WorkingOrderSchema).optional(),
   reported: z
     .object({
       drawdownThreshold: FiniteNumberSchema.optional(),
@@ -96,3 +119,28 @@ export const AccountActivitySchema = z.object({
   consecutiveLosses: z.number().int().nonnegative(),
 });
 export type AccountActivity = z.infer<typeof AccountActivitySchema>;
+
+/**
+ * Positions plus working entry orders as would-be positions (filled at their limit, flat P&L):
+ * the exposure every limit — open risk, position counts, hedging, firm quantity caps — must count.
+ */
+export function exposurePositions(snapshot: AccountSnapshot): OpenPosition[] {
+  const working = (snapshot.workingOrders ?? []).map((o): OpenPosition => ({
+    positionId: `working:${o.clientOrderId}`,
+    symbol: o.symbol,
+    direction: o.direction,
+    quantity: o.quantity,
+    entryPrice: o.limitPrice,
+    currentPrice: o.limitPrice,
+    stopPrice: o.stopPrice,
+    targetPrice: o.targetPrice,
+    unrealizedPnl: 0,
+    openedAt: o.placedAt,
+    ...(o.strategyId ? { strategyId: o.strategyId } : {}),
+  }));
+  return [...snapshot.openPositions, ...working];
+}
+
+/** Pending orders the broker reported without details (their exposure is unknown). */
+export const undetailedPendingOrders = (snapshot: AccountSnapshot): number =>
+  Math.max(0, snapshot.pendingOrders - (snapshot.workingOrders?.length ?? 0));

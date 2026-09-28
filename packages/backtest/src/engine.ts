@@ -116,8 +116,11 @@ export interface DecisionLogEntry {
   readonly status: 'APPROVED' | 'REJECTED';
   readonly quantity: number | null;
   readonly reasons: string[];
-  /** APPROVED only: FILLED, EXPIRED (not filled before the approval expired) or PENDING at end. */
-  readonly fill: 'FILLED' | 'EXPIRED' | 'PENDING' | null;
+  /**
+   * APPROVED only: FILLED, EXPIRED (not placed before the approval expired), MISSED (a LIMIT that
+   * expired unfilled) or PENDING at end.
+   */
+  readonly fill: 'FILLED' | 'EXPIRED' | 'MISSED' | 'PENDING' | null;
 }
 
 export interface BacktestProtectiveAction {
@@ -175,6 +178,8 @@ export interface BacktestResult {
     readonly rejected: number;
     readonly filled: number;
     readonly expired: number;
+    /** LIMIT entries that expired unfilled (missed entries are no trade). */
+    readonly missed?: number;
     /** Setups the strategy saw but did not propose (e.g. stop too tight), by reason. */
     readonly skipped: { reason: string; count: number }[];
     /** Mandatory checks that blocked, by check id (a decision can be blocked by several). */
@@ -310,7 +315,7 @@ export async function runBacktest(params: {
   const excursions = new Map<string, { best: number; worst: number; from: string; bars: number }>();
   const log: DecisionLogEntry[] = [];
   let logged = 0;
-  const counts = { signals: 0, approved: 0, rejected: 0, filled: 0, expired: 0 };
+  const counts = { signals: 0, approved: 0, rejected: 0, filled: 0, expired: 0, missed: 0 };
   const skipped = new Map<string, number>();
   const blockedBy = new Map<string, { count: number; example: string }>();
   const protective: BacktestProtectiveAction[] = [];
@@ -348,6 +353,11 @@ export async function runBacktest(params: {
       counts.expired++;
       const rec = orders.get(o.clientOrderId);
       if (rec) setLog(rec.log, 'EXPIRED');
+    }
+    for (const o of out.missed) {
+      counts.missed++;
+      const rec = orders.get(o.clientOrderId);
+      if (rec) setLog(rec.log, 'MISSED');
     }
     for (const p of out.opened) {
       counts.filled++;
@@ -569,9 +579,12 @@ export async function runBacktest(params: {
           clientOrderId,
           direction: d.orderPlan.direction,
           quantity: d.orderPlan.quantity,
+          entry: d.orderPlan.entry,
           stop: d.orderPlan.stop,
           target: d.orderPlan.target,
           expiresAt: d.approval.expiresAt,
+          entryType: d.orderPlan.entryType,
+          ...(d.orderPlan.expiresAt ? { workingUntil: d.orderPlan.expiresAt } : {}),
         });
       } else {
         counts.rejected++;

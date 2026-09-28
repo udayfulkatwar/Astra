@@ -16,6 +16,7 @@ import {
   type NewsRiskAssessment,
   type Observed,
   type Quote,
+  exposurePositions,
 } from '@astra/core';
 import {
   computeAccountState,
@@ -68,7 +69,10 @@ export interface FreshInputs {
 
 export interface Derivations {
   readonly fresh: FreshInputs;
-  /** Executable entry: ask for LONG, bid for SHORT (MARKET entries). */
+  /**
+   * Planned entry: MARKET — the executable price (ask for LONG, bid for SHORT); LIMIT — the limit
+   * price (a fill is at the limit or better, so risk is sized from it).
+   */
   readonly effectiveEntry: Derived<number>;
   readonly tracking: Derived<AccountTracking>;
   readonly activity: Derived<AccountActivity>;
@@ -110,10 +114,12 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
 
   const signal = inputs.candidate.signal;
   const lookup = (symbol: string) => inputs.instruments[symbol];
+  const entryUntil = entryWindowEnd(signal);
 
   const effectiveEntry: Derived<number> = guard('entry', () => {
     const q = fromObserved('quote', fresh.quote);
     if (!q.ok) return q;
+    if (signal.entryType === 'LIMIT') return ok(signal.entry);
     return ok(signal.direction === 'LONG' ? q.value.ask : q.value.bid);
   });
 
@@ -176,7 +182,7 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
       trailingExposure(
         inputs.profile.maxDrawdown,
         accountState.value,
-        snapshot.value.openPositions,
+        exposurePositions(snapshot.value),
         lookup,
       ),
     );
@@ -247,6 +253,7 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
         instruments: lookup,
         calendar: fresh.calendar,
         now,
+        ...(entryUntil ? { entryUntil } : {}),
         flatBufferMinutes: inputs.riskPolicy.timing.noNewTradesMinutesBeforeFlat,
       }),
     );
@@ -297,4 +304,12 @@ export function deriveAll(inputs: DecisionInputs): Derivations {
     propFirm,
     risk,
   };
+}
+
+/** A resting LIMIT entry can fill until it expires: time-based rules must cover that window. */
+export function entryWindowEnd(signal: {
+  entryType: string;
+  expiresAt?: string | undefined;
+}): Date | undefined {
+  return signal.entryType === 'LIMIT' && signal.expiresAt ? new Date(signal.expiresAt) : undefined;
 }

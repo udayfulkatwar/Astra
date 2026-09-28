@@ -1,5 +1,6 @@
 /** CALENDAR, NEWS and AI layers — CONTEXT can restrict a trade, never approve one. */
 import { assessBlackout, describeNotOk, type EventImpact } from '@astra/core';
+import { entryWindowEnd } from '../derive';
 import { fail, pass, unknown, type GateCheck } from './check';
 
 /** Most restrictive merge of the global default blackout and the strategy blackout. */
@@ -25,7 +26,13 @@ export const calendarEventBlackout: GateCheck = {
     const c = d.fresh.calendar;
     if (c.status !== 'OK') return unknown(describeNotOk('economic calendar', c));
     const rule = mergedBlackout(i.policy.eventBlackout, i.strategy?.eventBlackout);
-    const a = assessBlackout(c.value, i.candidate.signal.symbol, new Date(i.now), rule);
+    const a = assessBlackout(
+      c.value,
+      i.candidate.signal.symbol,
+      new Date(i.now),
+      rule,
+      entryWindowEnd(i.candidate.signal),
+    );
     if (a.state === 'UNCOVERED') {
       return unknown('economic calendar does not cover the blackout window', {
         coverage: { from: c.value.from, to: c.value.to },
@@ -40,9 +47,13 @@ export const calendarEventBlackout: GateCheck = {
         { blackout: rule, events: a.blocking.map((e) => e.id) },
       );
     }
-    return pass(`no restricted events within −${rule.minutesAfter}/+${rule.minutesBefore} min`, {
-      blackout: rule,
-    });
+    const until = entryWindowEnd(i.candidate.signal);
+    return pass(
+      until
+        ? `no restricted events from −${rule.minutesAfter} min to ${rule.minutesBefore} min after the order expires`
+        : `no restricted events within −${rule.minutesAfter}/+${rule.minutesBefore} min`,
+      { blackout: rule },
+    );
   },
 };
 

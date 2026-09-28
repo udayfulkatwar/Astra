@@ -10,6 +10,7 @@ import {
   type AccountSnapshot,
   type Direction,
   type StrategyDefinition,
+  exposurePositions,
 } from '@astra/core';
 import { trailingConsumption, type AccountState, type TrailingExposure } from '@astra/prop-firm';
 import type { AccountHealthAssessment } from './health';
@@ -130,7 +131,8 @@ export function evaluateRiskPolicy(input: RiskPolicyInput): RiskVerdict {
     `consecutive losses ${activity.consecutiveLosses} reached limit ${policy.activity.maxConsecutiveLosses}`,
   );
 
-  const open = snapshot.openPositions;
+  // Working entry orders count like positions: they can fill without another decision.
+  const open = exposurePositions(snapshot);
   add(
     'open-positions',
     open.length + 1 <= policy.exposure.maxOpenPositions,

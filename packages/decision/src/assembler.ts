@@ -31,6 +31,7 @@ import {
 import type { AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
 import type { RiskPolicy } from '@astra/risk';
 import type { KillSwitchContext, KillSwitchEvaluation } from '@astra/safety';
+import { entryWindowEnd } from './derive';
 import type { DecisionPolicy } from './policy';
 import type { DecisionInputs, DuplicateCheckData, ExecutionReadiness } from './types';
 
@@ -119,7 +120,9 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
   );
   const now = clock.now();
   const calFrom = new Date(now.getTime() - minutesAfter * 60_000);
-  const calTo = new Date(now.getTime() + minutesBefore * 60_000);
+  // A resting LIMIT entry can fill until it expires: the calendar must cover that window too.
+  const entryEnd = Math.max(now.getTime(), entryWindowEnd(signal)?.getTime() ?? 0);
+  const calTo = new Date(entryEnd + minutesBefore * 60_000);
 
   const acct = candidate.accountId;
   const obs = <T>(source: string, fn: (s: AbortSignal) => Promise<Observed<T>>) =>

@@ -16,6 +16,9 @@ decision:
   maxEntryDeviationTicks: 8
   # No new trades this close to an instrument's scheduled market close (daily break / weekend).
   minMinutesBeforeMarketClose: 10
+  # Longest a LIMIT entry may rest at the broker before it is cancelled (every gate check must
+  # hold for that whole window: news, calendar, market close, firm flat time).
+  maxWorkingOrderMinutes: 240
   # Components that must be healthy for ANY approval.
   requiredComponents: [DATABASE, MARKET_DATA, CALENDAR, EXECUTION, AUTOMATION]
   allowDegradedComponents: false

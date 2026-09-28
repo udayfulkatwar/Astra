@@ -5,6 +5,10 @@
  * safety chain (rejections, transport errors, unconfirmed orders, partial fills).
  *
  * Commission is charged in full (round turn) at entry — conservative for paper results.
+ *
+ * LIMIT entries rest until the market reaches the limit (LONG: ask ≤ limit; SHORT: bid ≥ limit)
+ * and then fill AT the limit (never better), or expire at `expiresAt`. A limit that is already
+ * marketable when submitted fills at once at the market (ask / bid ≤ limit for LONG).
  */
 import {
   AstraError,
@@ -66,10 +70,17 @@ export interface PaperFailureInjection {
   failNextClose?: boolean;
 }
 
+/** A resting LIMIT entry (its broker state is ACCEPTED until it fills, expires or is cancelled). */
+export interface PaperWorkingOrder {
+  readonly request: OrderRequest;
+  readonly placedAt: string;
+}
+
 interface PaperAccount {
   balance: ReturnType<typeof dec>;
   positions: Map<string, OpenPosition & { clientOrderId: string }>;
   orders: Map<string, BrokerOrderState>;
+  working: Map<string, PaperWorkingOrder>;
   closed: PaperClosedTrade[];
   currency: string;
   /** Close results by clientCloseId (idempotency; not persisted). */
@@ -93,12 +104,14 @@ export interface PaperAccountState {
   readonly positions: readonly (OpenPosition & { clientOrderId: string })[];
   readonly orders: readonly BrokerOrderState[];
   readonly closed: readonly PaperClosedTrade[];
+  /** Resting LIMIT entries (absent in state saved before LIMIT support). */
+  readonly working?: readonly PaperWorkingOrder[];
 }
 
 export class PaperBrokerAdapter implements BrokerAdapter {
   readonly id: string;
   readonly kind = 'PAPER' as const;
-  readonly supportedEntryTypes: readonly EntryType[] = ['MARKET'];
+  readonly supportedEntryTypes: readonly EntryType[] = ['MARKET', 'LIMIT'];
 
   private readonly accounts = new Map<string, PaperAccount>();
   private readonly quotes = new Map<string, Quote>();
@@ -114,6 +127,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       balance: dec(startingBalance),
       positions: new Map(),
       orders: new Map(),
+      working: new Map(),
       closed: [],
       currency,
       closes: new Map(),
@@ -136,6 +150,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       positions: [...a.positions.values()],
       orders: [...a.orders.values()],
       closed: [...a.closed],
+      working: [...a.working.values()],
     };
   }
 
@@ -145,6 +160,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       currency: state.currency,
       positions: new Map(state.positions.map((p) => [p.positionId, { ...p }])),
       orders: new Map(state.orders.map((o) => [o.clientOrderId, o])),
+      working: new Map((state.working ?? []).map((w) => [w.request.clientOrderId, w])),
       closed: [...state.closed],
       closes: new Map(),
     });
@@ -160,10 +176,23 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     );
   }
 
-  /** Feeds a quote: updates marks and triggers stops/targets. */
+  /** Feeds a quote: fills or expires resting LIMIT entries, then triggers stops/targets. */
   onQuote(quote: Quote): void {
     this.quotes.set(quote.symbol, quote);
     for (const [ref, acct] of this.accounts) {
+      // Entries first: a position just filled is exposed to this same quote (pessimistic).
+      this.expireDue(ref);
+      for (const w of [...acct.working.values()]) {
+        const r = w.request;
+        if (r.symbol !== quote.symbol || r.limitPrice === undefined) continue;
+        const reached =
+          r.direction === 'LONG' ? quote.ask <= r.limitPrice : quote.bid >= r.limitPrice;
+        if (!reached) continue;
+        acct.working.delete(r.clientOrderId);
+        const base = acct.orders.get(r.clientOrderId)!;
+        acct.orders.set(r.clientOrderId, this.fill(r, base, r.limitPrice));
+        this.changed(ref);
+      }
       for (const pos of [...acct.positions.values()]) {
         if (pos.symbol !== quote.symbol) continue;
         const exitSide = pos.direction === 'LONG' ? quote.bid : quote.ask;
@@ -222,7 +251,16 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
     let state: BrokerOrderState = base;
     if (!this.failures.neverConfirm) {
-      state = this.fill(req, base);
+      const q = this.quotes.get(req.symbol)!;
+      const marketable =
+        req.entryType !== 'LIMIT' ||
+        (req.direction === 'LONG' ? q.ask <= req.limitPrice! : q.bid >= req.limitPrice!);
+      if (marketable) {
+        state = this.fill(req, base);
+      } else {
+        state = { ...base, status: 'ACCEPTED' };
+        acct.working.set(req.clientOrderId, { request: req, placedAt: base.updatedAt });
+      }
     }
     acct.orders.set(req.clientOrderId, state);
     this.changed(req.accountRef);
@@ -235,15 +273,38 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   getOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState | null> {
+    this.expireDue(accountRef);
     return Promise.resolve(this.account(accountRef).orders.get(clientOrderId) ?? null);
+  }
+
+  /** Resting LIMIT entries past their expiry become EXPIRED (checked on every access). */
+  private expireDue(accountRef: string): void {
+    const acct = this.account(accountRef);
+    const now = this.opts.clock.now();
+    for (const w of [...acct.working.values()]) {
+      const at = w.request.expiresAt;
+      if (at === undefined || now.getTime() < Date.parse(at)) continue;
+      acct.working.delete(w.request.clientOrderId);
+      const o = acct.orders.get(w.request.clientOrderId)!;
+      acct.orders.set(w.request.clientOrderId, {
+        ...o,
+        status: 'EXPIRED',
+        rejectReason: `limit not reached by ${at}`,
+        updatedAt: now.toISOString(),
+      });
+      this.changed(accountRef);
+    }
   }
 
   cancelOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState> {
     const acct = this.account(accountRef);
     const o = acct.orders.get(clientOrderId);
     if (!o) return Promise.reject(new AstraError('NOT_FOUND', `order ${clientOrderId} not found`));
-    if (o.status === 'FILLED' || o.status === 'REJECTED' || o.status === 'CANCELLED')
-      return Promise.resolve(o);
+    this.expireDue(accountRef);
+    const current = acct.orders.get(clientOrderId)!;
+    if (['FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED'].includes(current.status))
+      return Promise.resolve(current);
+    acct.working.delete(clientOrderId);
     const cancelled: BrokerOrderState = {
       ...o,
       status: o.filledQuantity > 0 ? 'FILLED' : 'CANCELLED',
@@ -256,6 +317,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   listOpenOrders(accountRef: string): Promise<BrokerOrderState[]> {
+    this.expireDue(accountRef);
     return Promise.resolve(
       [...this.account(accountRef).orders.values()].filter((o) =>
         ['SUBMITTED', 'ACCEPTED', 'PARTIALLY_FILLED', 'PENDING_SUBMIT'].includes(o.status),
@@ -264,6 +326,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   getAccountSnapshot(accountRef: string, accountId: string): Promise<AccountSnapshot> {
+    this.expireDue(accountRef);
     const acct = this.account(accountRef);
     let floating = ZERO;
     const positions: OpenPosition[] = [];
@@ -292,6 +355,17 @@ export class PaperBrokerAdapter implements BrokerAdapter {
       equity: money(acct.balance.plus(floating)),
       openPositions: positions,
       pendingOrders: pending,
+      workingOrders: [...acct.working.values()].map(({ request: r, placedAt }) => ({
+        clientOrderId: r.clientOrderId,
+        symbol: r.symbol,
+        direction: r.direction,
+        quantity: r.quantity,
+        limitPrice: r.limitPrice!,
+        stopPrice: r.stopLoss,
+        targetPrice: r.takeProfit,
+        placedAt,
+        expiresAt: r.expiresAt!,
+      })),
     });
   }
 
@@ -351,8 +425,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   private validate(req: OrderRequest): string | null {
-    if (req.entryType !== 'MARKET')
-      return `entry type ${req.entryType} not supported by paper broker`;
+    if (!this.supportedEntryTypes.includes(req.entryType))
+      return `entry type ${String(req.entryType)} not supported by paper broker`;
     const spec = this.opts.instruments(req.symbol);
     if (!spec) return `unknown instrument ${req.symbol}`;
     if (!this.quotes.has(req.symbol)) return `no market for ${req.symbol}`;
@@ -365,7 +439,21 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     if (req.quantity < spec.minQuantity) return 'quantity below minimum';
     const sign = directionSign(req.direction);
     const q = this.quotes.get(req.symbol)!;
-    const px = req.direction === 'LONG' ? q.ask : q.bid;
+    const market = req.direction === 'LONG' ? q.ask : q.bid;
+    if (req.entryType === 'LIMIT') {
+      if (req.limitPrice === undefined || !(req.limitPrice > 0))
+        return 'LIMIT order without a price';
+      if (!req.expiresAt || !(Date.parse(req.expiresAt) > this.opts.clock.now().getTime()))
+        return 'LIMIT order without a future expiry';
+      if (!dec(req.limitPrice).div(spec.tickSize).isInteger())
+        return 'limit price is not on the tick grid';
+    }
+    // Brackets are checked against where the position will open (the limit, or the market).
+    const px =
+      req.entryType === 'LIMIT' &&
+      (req.direction === 'LONG' ? market > req.limitPrice! : market < req.limitPrice!)
+        ? req.limitPrice!
+        : market;
     if (dec(px).minus(req.stopLoss).mul(sign).lte(0))
       return 'stop loss on the wrong side of the market';
     if (dec(req.takeProfit).minus(px).mul(sign).lte(0))
@@ -373,14 +461,15 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     return null;
   }
 
-  private fill(req: OrderRequest, base: BrokerOrderState): BrokerOrderState {
+  /** Fills at the market (plus slippage), or at `atPrice` for a resting LIMIT that was reached. */
+  private fill(req: OrderRequest, base: BrokerOrderState, atPrice?: number): BrokerOrderState {
     const acct = this.account(req.accountRef);
     const spec = this.spec(req.symbol);
     const q = this.quotes.get(req.symbol)!;
     const slip = dec(this.opts.fillSlippageTicks ?? 0)
       .mul(spec.tickSize)
       .mul(directionSign(req.direction));
-    const price = toNum(dec(req.direction === 'LONG' ? q.ask : q.bid).plus(slip));
+    const price = atPrice ?? toNum(dec(req.direction === 'LONG' ? q.ask : q.bid).plus(slip));
 
     let qty = dec(req.quantity);
     const ratio = this.failures.partialFillRatio;

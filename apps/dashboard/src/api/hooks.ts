@@ -342,6 +342,18 @@ export function useKillSwitchAction() {
   });
 }
 
+export function useCancelOrder() {
+  const invalidate = useInvalidateAll();
+  return useMutation({
+    mutationFn: (clientOrderId: string) =>
+      api<{ outcome: string; reason: string }>(
+        `/api/v1/orders/${encodeURIComponent(clientOrderId)}/cancel`,
+        { method: 'POST' },
+      ),
+    onSettled: invalidate,
+  });
+}
+
 export function useExecute() {
   const invalidate = useInvalidateAll();
   return useMutation({

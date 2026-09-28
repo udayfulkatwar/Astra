@@ -20,6 +20,7 @@ import type { KillSwitchContext, KillSwitchEvaluation } from '@astra/safety';
 import { KeyedMutex } from './mutex';
 import {
   isTerminal,
+  isWorking,
   type BrokerAdapter,
   type BrokerOrderState,
   type ExecutionStore,
@@ -42,6 +43,15 @@ export interface ProtectiveCloseResult {
   readonly reason: string;
   readonly exitPrice: number | null;
   readonly realizedPnl: number | null;
+}
+
+export type CancelOutcome =
+  'CANCELLED' | 'FILLED' | 'ALREADY_FINAL' | 'SKIPPED' | 'REJECTED' | 'UNKNOWN';
+
+export interface CancelResult {
+  readonly outcome: CancelOutcome;
+  readonly reason: string;
+  readonly state: BrokerOrderState | null;
 }
 
 export interface ExecutionGatewayDeps {
@@ -105,6 +115,11 @@ export class ExecutionGateway {
     if (!policy.newTradesAllowed) return rejected(`mode ${mode} does not permit new trades`);
 
     const plan = approval.orderPlan;
+    if (plan.entryType === 'LIMIT') {
+      if (!plan.expiresAt) return rejected('LIMIT order plan has no expiry');
+      if (now.getTime() >= Date.parse(plan.expiresAt))
+        return rejected(`LIMIT order would already be expired (${plan.expiresAt})`);
+    }
     const ks = this.deps.killSwitches({
       accountId: approval.accountId,
       strategyId: approval.strategyId,
@@ -138,6 +153,7 @@ export class ExecutionGateway {
       filledQuantity: 0,
       averageFillPrice: null,
       rejectReason: null,
+      expiresAt: plan.expiresAt ?? null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     });
@@ -224,6 +240,9 @@ export class ExecutionGateway {
           direction: plan.direction,
           quantity: plan.quantity,
           entryType: plan.entryType,
+          ...(plan.entryType === 'LIMIT'
+            ? { limitPrice: plan.entry, ...(plan.expiresAt ? { expiresAt: plan.expiresAt } : {}) }
+            : {}),
           stopLoss: plan.stop,
           takeProfit: plan.target,
         });
@@ -245,7 +264,12 @@ export class ExecutionGateway {
         });
       }
 
-      const confirmed = await this.confirm(adapter, account.broker.accountRef, order.clientOrderId);
+      const confirmed = await this.confirm(
+        adapter,
+        account.broker.accountRef,
+        order.clientOrderId,
+        plan.entryType === 'LIMIT',
+      );
       if (confirmed === null) {
         const reason = submitError
           ? `submission error (${submitError}) and order state could not be confirmed`
@@ -293,12 +317,106 @@ export class ExecutionGateway {
       return {
         outcome: 'CONFIRMED',
         reasons: [
-          `${confirmed.status} ${confirmed.filledQuantity}/${plan.quantity} @ ${confirmed.averageFillPrice}`,
+          isWorking(confirmed)
+            ? `WORKING: LIMIT ${plan.quantity} @ ${plan.entry} until ${plan.expiresAt}`
+            : `${confirmed.status} ${confirmed.filledQuantity}/${plan.quantity} @ ${confirmed.averageFillPrice}`,
         ],
         order,
         brokerState: confirmed,
       };
     });
+  }
+
+  /**
+   * Cancels a resting entry order (risk-reducing: it removes exposure that could still open).
+   * Same rules as a protective close: not blocked by mode or trading kill switches, never sent
+   * while an EXECUTION kill switch is active or in SHADOW; an unknown outcome halts execution.
+   * If the order filled first, the result says so — the position then stays under protection.
+   */
+  async cancelWorking(req: {
+    accountId: string;
+    clientOrderId: string;
+    reason: string;
+  }): Promise<CancelResult> {
+    const result = (outcome: CancelOutcome, reason: string, state: BrokerOrderState | null) => ({
+      outcome,
+      reason,
+      state,
+    });
+    const account = this.deps.account(req.accountId);
+    if (!account) return result('REJECTED', `account ${req.accountId} not found`, null);
+    const mode = this.deps.mode();
+    if (mode === 'SHADOW' || mode === 'BACKTEST')
+      return result('SKIPPED', `mode ${mode} never transmits orders`, null);
+    const ks = this.deps.killSwitches({ accountId: req.accountId });
+    if (!ks.loaded) return result('SKIPPED', ks.reasons.join('; '), null);
+    const execution = ks.blocking.filter((s) => s.scope === 'EXECUTION');
+    if (execution.length > 0) {
+      return result(
+        'SKIPPED',
+        `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
+        null,
+      );
+    }
+    const adapter = this.deps.adapter(account.broker.adapterId);
+    if (!adapter)
+      return result('REJECTED', `adapter ${account.broker.adapterId} not registered`, null);
+    const { store, clock } = this.deps;
+    return this.locks.run(req.accountId, async () => {
+      let state: BrokerOrderState;
+      try {
+        state = await adapter.cancelOrder(account.broker.accountRef, req.clientOrderId);
+      } catch (err) {
+        const reason = `cancel of ${req.clientOrderId} outcome unknown: ${errorMessage(err)}`;
+        await this.deps.onExecutionUnknown(req.accountId, req.clientOrderId, reason);
+        return result('UNKNOWN', reason, null);
+      }
+      await store.updateOrder(req.clientOrderId, state);
+      await store.appendOrderEvent({
+        clientOrderId: req.clientOrderId,
+        at: clock.now().toISOString(),
+        type: 'CANCEL_REQUESTED',
+        detail: { reason: req.reason, result: { ...state } },
+      });
+      if (state.status === 'CANCELLED') return result('CANCELLED', req.reason, state);
+      if (state.status === 'FILLED') return result('FILLED', 'the order filled first', state);
+      if (isTerminal(state.status))
+        return result('ALREADY_FINAL', `order is ${state.status}`, state);
+      return result('REJECTED', `broker left the order ${state.status}`, state);
+    });
+  }
+
+  /**
+   * Reads an order's current state from its broker and records any change (fill, expiry,
+   * cancellation of a resting order). Returns the state, or null when the broker cannot say.
+   */
+  async refresh(
+    order: OrderRecord,
+  ): Promise<{ state: BrokerOrderState | null; changed: boolean; error?: string }> {
+    const account = this.deps.account(order.accountId);
+    const adapter = order.adapterId ? this.deps.adapter(order.adapterId) : undefined;
+    if (!account || !adapter) return { state: null, changed: false, error: 'no adapter' };
+    let state: BrokerOrderState | null;
+    try {
+      state = await adapter.getOrder(account.broker.accountRef, order.clientOrderId);
+    } catch (err) {
+      return { state: null, changed: false, error: errorMessage(err) };
+    }
+    if (!state) return { state: null, changed: false, error: 'order not found at the broker' };
+    const changed =
+      state.status !== order.status ||
+      state.filledQuantity !== order.filledQuantity ||
+      state.averageFillPrice !== order.averageFillPrice;
+    if (changed) {
+      await this.deps.store.updateOrder(order.clientOrderId, state);
+      await this.deps.store.appendOrderEvent({
+        clientOrderId: order.clientOrderId,
+        at: this.deps.clock.now().toISOString(),
+        type: 'STATE_CHANGED',
+        detail: { from: order.status, ...state },
+      });
+    }
+    return { state, changed };
   }
 
   /**
@@ -360,13 +478,15 @@ export class ExecutionGateway {
   }
 
   /**
-   * Polls the broker until the order reaches a terminal state. A partial fill still working at
+   * Polls the broker until the order reaches a terminal (or, for LIMIT, resting) state. A partial fill still working at
    * the deadline has its remainder cancelled. Returns null when the state cannot be confirmed.
    */
   private async confirm(
     adapter: BrokerAdapter,
     accountRef: string,
     clientOrderId: string,
+    /** LIMIT: a resting order the broker accepted is a confirmed state. */
+    acceptWorking: boolean,
   ): Promise<BrokerOrderState | null> {
     const deadline = this.deps.clock.now().getTime() + this.deps.confirmation.timeoutMs;
     let last: BrokerOrderState | null = null;
@@ -376,7 +496,7 @@ export class ExecutionGateway {
       } catch {
         last = null;
       }
-      if (last && isTerminal(last.status)) return last;
+      if (last && (isTerminal(last.status) || (acceptWorking && isWorking(last)))) return last;
       if (this.deps.clock.now().getTime() >= deadline) break;
       await this.sleep(this.deps.confirmation.pollIntervalMs);
     }

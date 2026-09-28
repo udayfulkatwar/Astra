@@ -17,6 +17,11 @@ export const DecisionPolicySchema = z.object({
   maxEntryDeviationTicks: PositiveNumberSchema,
   /** No new trades this many minutes before an instrument's scheduled market close. */
   minMinutesBeforeMarketClose: z.number().int().nonnegative(),
+  /**
+   * Longest a LIMIT entry may rest at the broker (its `expiresAt`), in minutes. Everything the gate
+   * checked must hold for that whole window. Absent: 240.
+   */
+  maxWorkingOrderMinutes: z.number().int().positive().max(1440).optional(),
   /** Components that must be healthy for any approval. */
   requiredComponents: z.array(ComponentIdSchema),
   /** Whether DEGRADED (not only ONLINE) is acceptable for required components. */

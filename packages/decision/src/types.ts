@@ -112,11 +112,13 @@ export interface ApprovedOrderPlan {
   readonly symbol: string;
   readonly direction: Direction;
   readonly entryType: EntryType;
-  /** Executable price at decision time (ask for LONG, bid for SHORT). */
+  /** MARKET: executable price at decision time (ask for LONG, bid for SHORT). LIMIT: the limit. */
   readonly entry: number;
   readonly stop: number;
   readonly target: number;
   readonly quantity: number;
+  /** LIMIT: when the unfilled order is cancelled at the broker. */
+  readonly expiresAt?: string;
 }
 
 export interface DecisionExplanation {

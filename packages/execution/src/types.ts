@@ -36,9 +36,19 @@ export interface OrderRequest {
   readonly direction: Direction;
   readonly quantity: number;
   readonly entryType: EntryType;
+  /** LIMIT: fill at this price or better. */
+  readonly limitPrice?: number;
+  /** LIMIT: the broker cancels the order if it is not filled by then. */
+  readonly expiresAt?: string;
   readonly stopLoss: number;
   readonly takeProfit: number;
 }
+
+/**
+ * A LIMIT order the broker has accepted and is holding (status ACCEPTED): a known, confirmed
+ * state — it fills, expires or is cancelled later.
+ */
+export const isWorking = (s: { status: OrderStatus }): boolean => s.status === 'ACCEPTED';
 
 export interface BrokerOrderState {
   readonly clientOrderId: string;
@@ -130,6 +140,8 @@ export interface OrderRecord {
   readonly filledQuantity: number;
   readonly averageFillPrice: number | null;
   readonly rejectReason: string | null;
+  /** LIMIT: when the unfilled order is cancelled. null for MARKET. */
+  readonly expiresAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

@@ -233,6 +233,16 @@ describe('signal webhook', () => {
     ).toBe('2026-09-28T13:59:00.000Z');
   });
 
+  it('passes LIMIT entries through with their expiry (required)', () => {
+    const c = toCandidate({ ...alert, entryType: 'limit', expiresInMinutes: 60 }, NOW, '3') as any;
+    expect(c.candidate.signal).toMatchObject({
+      entryType: 'LIMIT',
+      expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+    });
+    expect(() => toCandidate({ ...alert, entryType: 'LIMIT' }, NOW, '3')).toThrow('expiresAt');
+    expect(() => toCandidate({ ...alert, entryType: 'stop' }, NOW, '3')).toThrow('entryType');
+  });
+
   it('refuses malformed alerts', () => {
     expect(() => toCandidate({ ...alert, stop: undefined }, NOW, '1')).toThrow('"stop"');
     expect(() => toCandidate({ ...alert, direction: 'up' }, NOW, '1')).toThrow('direction');

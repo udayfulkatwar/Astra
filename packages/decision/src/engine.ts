@@ -55,6 +55,9 @@ export class DecisionEngine {
             stop: signal.stop,
             target: signal.target,
             quantity: sizing.quantity,
+            ...(signal.entryType === 'LIMIT' && signal.expiresAt
+              ? { expiresAt: signal.expiresAt }
+              : {}),
           }
         : null;
     const approval = approved
@@ -99,7 +102,9 @@ function explain(
   const sizing = derived.sizing.ok && derived.sizing.value.ok ? derived.sizing.value : null;
   const failing = checks.filter((c) => c.mandatory && c.verdict !== 'PASS');
   const what = plan
-    ? `APPROVED ${plan.direction} ${plan.quantity} ${plan.symbol} @ ~${plan.entry} (stop ${plan.stop}, target ${plan.target}) in ${mode}`
+    ? plan.entryType === 'LIMIT'
+      ? `APPROVED ${plan.direction} ${plan.quantity} ${plan.symbol} LIMIT @ ${plan.entry} until ${plan.expiresAt} (stop ${plan.stop}, target ${plan.target}) in ${mode}`
+      : `APPROVED ${plan.direction} ${plan.quantity} ${plan.symbol} @ ~${plan.entry} (stop ${plan.stop}, target ${plan.target}) in ${mode}`
     : `NO TRADE: ${s.direction} ${s.symbol} from strategy ${s.strategyId} rejected in ${mode}`;
   const why = plan
     ? [...s.rationale, `all ${checks.length} gate checks passed`]

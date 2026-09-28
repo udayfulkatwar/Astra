@@ -86,6 +86,21 @@ export function toCandidate(a: Record<string, unknown>, now: Date, runId: string
     .slice(0, 10);
   const timeframe =
     typeof a.timeframe === 'string' && a.timeframe.trim() !== '' ? a.timeframe.trim() : undefined;
+  // LIMIT entries rest at the broker until they fill or expire: the expiry is required.
+  const entryType = str(a.entryType, 'MARKET').trim().toUpperCase();
+  if (entryType !== 'MARKET' && entryType !== 'LIMIT')
+    throw new Error('alert field "entryType" must be MARKET or LIMIT');
+  let expiresAt: string | undefined;
+  if (entryType === 'LIMIT') {
+    const minutes =
+      a.expiresInMinutes === undefined ? null : positive(a.expiresInMinutes, 'expiresInMinutes');
+    expiresAt =
+      minutes !== null
+        ? new Date(now.getTime() + minutes * 60_000).toISOString()
+        : (isoOrNull(a.expiresAt) ?? undefined);
+    if (!expiresAt)
+      throw new Error('a LIMIT alert needs "expiresAt" (a time) or "expiresInMinutes"');
+  }
   return {
     candidate: {
       accountId,
@@ -96,11 +111,12 @@ export function toCandidate(a: Record<string, unknown>, now: Date, runId: string
         symbol,
         direction,
         setupState: 'QUALIFIED',
-        entryType: 'MARKET',
+        entryType,
         entry,
         stop,
         target,
         ...(timeframe ? { timeframe } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
         detectedAt,
         rationale: rationale.length > 0 ? rationale : ['external alert via n8n'],
         features: {},

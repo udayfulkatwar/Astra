@@ -617,3 +617,128 @@ describe('DecisionEngine — per-instrument entry tolerance', () => {
     expect(d.checks.find((c) => c.checkId === 'market.entry')!.verdict).toBe('PASS');
   });
 });
+
+describe('DecisionEngine — LIMIT entries', () => {
+  const EXPIRES = '2026-09-28T15:00:00.000Z'; // 60 min after NOW
+  const limit = (
+    signal: Partial<DecisionInputs['candidate']['signal']> = {},
+    overrides: Partial<DecisionInputs> = {},
+  ) => {
+    const base = makeInputs();
+    return makeInputs({
+      candidate: {
+        ...base.candidate,
+        signal: {
+          ...base.candidate.signal,
+          entryType: 'LIMIT',
+          entry: 19_995,
+          stop: 19_985,
+          target: 20_025,
+          expiresAt: EXPIRES,
+          ...signal,
+        },
+      },
+      execution: { ...base.execution, supportedEntryTypes: ['MARKET', 'LIMIT'] },
+      ...overrides,
+    });
+  };
+  const check = (d: TradeDecision, id: string) => d.checks.find((c) => c.checkId === id)!;
+
+  it('approves a resting limit: sized from the limit, planned with its expiry', () => {
+    const d = decide(limit());
+    expect(failing(d)).toEqual([]);
+    expect(d.orderPlan).toMatchObject({ entryType: 'LIMIT', entry: 19_995, expiresAt: EXPIRES });
+    // 10 pts = 40 ticks + 1 slippage = 41 × $5 + $4 = $209 per contract
+    expect(d.sizing).toMatchObject({ quantity: 1, dollarRisk: 209 });
+    expect(d.explanation.what).toMatch(/LIMIT @ 19995 until 2026-09-28T15:00:00.000Z/);
+    expect(check(d, 'market.entry').details).toMatchObject({
+      marketable: false,
+      distanceTicks: 20,
+    });
+  });
+
+  it('refuses a limit without a valid expiry, off the tick grid, or after the move', () => {
+    const reasons = (d: TradeDecision) => check(d, 'market.entry').reasons.join(' | ');
+    expect(reasons(decide(limit({ expiresAt: undefined })))).toMatch(/needs an expiry/);
+    expect(reasons(decide(limit({ expiresAt: '2026-09-28T13:59:00.000Z' })))).toMatch(
+      /already be expired/,
+    );
+    expect(reasons(decide(limit({ expiresAt: '2026-09-28T18:30:00.000Z' })))).toMatch(
+      /longer than 240 min/,
+    );
+    expect(reasons(decide(limit({ entry: 19_995.1 })))).toMatch(/tick size/);
+    expect(reasons(decide(limit({ entry: 19_950, stop: 19_940, target: 19_999 })))).toMatch(
+      /already reached the target/,
+    );
+    const unsupported = limit({}, { execution: makeInputs().execution });
+    expect(check(decide(unsupported), 'market.entry').reasons[0]).toMatch(/not supported/);
+  });
+
+  it('news and calendar rules cover the whole time the order rests', () => {
+    const event = observed(
+      {
+        from: '2026-09-28T13:00:00.000Z',
+        to: '2026-09-29T13:00:00.000Z',
+        events: [
+          {
+            id: 'nfp',
+            title: 'Test NFP',
+            impact: 'HIGH' as const,
+            scheduledAt: '2026-09-28T15:10:00.000Z', // 70 min away; 10 min after the expiry
+            affectedInstruments: [],
+          },
+        ],
+      },
+      { source: 't', sourceKind: 'SIMULATED', asOf: '2026-09-28T13:59:59.000Z' },
+    );
+    expect(check(decide(makeInputs({ calendar: event })), 'calendar.event-blackout').verdict).toBe(
+      'PASS',
+    );
+    const d = decide(limit({}, { calendar: event }));
+    expect(failing(d)).toEqual(['calendar.event-blackout']);
+  });
+
+  it('never rests into the pre-close window of the market', () => {
+    const policy480 = { ...makeInputs().policy, maxWorkingOrderMinutes: 480 };
+    // Daily close 17:00 New York = 21:00Z; the 10-min buffer starts at 20:50Z.
+    const d = decide(limit({ expiresAt: '2026-09-28T20:55:00.000Z' }, { policy: policy480 }));
+    expect(failing(d)).toEqual(['market.session']);
+    expect(check(d, 'market.session').reasons[0]).toMatch(/would still rest within 10 min/);
+  });
+
+  it('a resting order counts as exposure; pending orders without details make risk unknown', () => {
+    const snap = makeInputs().accountSnapshot;
+    if (snap.status !== 'OK') throw new Error('fixture');
+    const withWorking = observed(
+      {
+        ...snap.value,
+        pendingOrders: 1,
+        workingOrders: [
+          {
+            clientOrderId: 'w1',
+            symbol: 'NQ',
+            direction: 'LONG' as const,
+            quantity: 1,
+            limitPrice: 19_990,
+            stopPrice: 19_980,
+            targetPrice: 20_020,
+            placedAt: '2026-09-28T13:50:00.000Z',
+            expiresAt: EXPIRES,
+          },
+        ],
+      },
+      { source: 't', sourceKind: 'SIMULATED', asOf: snap.asOf },
+    );
+    const d = decide(makeInputs({ accountSnapshot: withWorking }));
+    expect(d.status).toBe('REJECTED');
+    expect(d.reasons.join()).toMatch(/positions in NQ|pyramiding/);
+
+    const undetailed = observed(
+      { ...snap.value, pendingOrders: 1 },
+      { source: 't', sourceKind: 'SIMULATED', asOf: snap.asOf },
+    );
+    const u = decide(makeInputs({ accountSnapshot: undetailed }));
+    expect(u.status).toBe('REJECTED');
+    expect(u.reasons.join()).toMatch(/pending order\(s\) reported without details/);
+  });
+});

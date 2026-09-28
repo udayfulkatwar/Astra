@@ -33,6 +33,8 @@ export const SignalSchema = z.object({
   target: PositiveNumberSchema,
   timeframe: z.string().optional(),
   detectedAt: IsoDateTimeSchema,
+  /** LIMIT entries: when the unfilled order is cancelled (required for LIMIT; a missed entry is no trade). */
+  expiresAt: IsoDateTimeSchema.optional(),
   /** Human-readable facts that produced the signal (e.g. "BOS on M15", "liquidity sweep of PDL"). */
   rationale: z.array(z.string()).default([]),
   /** Machine-readable features for later analysis. */

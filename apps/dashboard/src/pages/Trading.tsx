@@ -1,6 +1,7 @@
 /** Strategies, prop-firm rules, paper trading and configuration views. */
 import { Link } from 'react-router';
-import { useConfigSummary, useOrders } from '../api/hooks';
+import { useCancelOrder, useConfigSummary, useOrders } from '../api/hooks';
+import { ConfirmButton } from '../components/ConfirmButton';
 import type { ConfigSummary } from '../api/types';
 import { Card, Empty, ErrorBox, KV, Loading, PageHeader, Pill } from '../components/ui';
 import { money, num, shortHash, utcTime } from '../lib/format';
@@ -166,6 +167,7 @@ export function Rules() {
 
 export function Paper() {
   const { data, error } = useOrders();
+  const cancel = useCancelOrder();
   return (
     <div className="page">
       <PageHeader
@@ -191,6 +193,7 @@ export function Paper() {
                 <th className="num">Filled</th>
                 <th className="num">Avg price</th>
                 <th>Reason</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -203,6 +206,9 @@ export function Paper() {
                   <td className="strong">
                     {o.direction} {num(o.quantity, 4)} {o.symbol}{' '}
                     <span className="muted">
+                      {o.entryType === 'LIMIT'
+                        ? `LIMIT ${num(o.plannedEntry, 5)} until ${utcTime(o.expiresAt)} · `
+                        : ''}
                       SL {num(o.stopLoss, 5)} TP {num(o.takeProfit, 5)}
                     </span>
                   </td>
@@ -210,11 +216,26 @@ export function Paper() {
                     <Pill status={o.mode} />
                   </td>
                   <td>
-                    <Pill status={o.status} />
+                    {/* A LIMIT the broker holds: resting until it fills or expires. */}
+                    <Pill
+                      status={o.status}
+                      label={o.status === 'ACCEPTED' ? 'WORKING' : undefined}
+                    />
                   </td>
                   <td className="num">{num(o.filledQuantity, 4)}</td>
                   <td className="num">{num(o.averageFillPrice, 5)}</td>
                   <td className="truncate">{o.rejectReason ?? ''}</td>
+                  <td>
+                    {o.status === 'ACCEPTED' && (
+                      <ConfirmButton
+                        label="Cancel"
+                        confirmLabel={`Cancel ${o.symbol} LIMIT`}
+                        className="btn small"
+                        disabled={cancel.isPending}
+                        onConfirm={() => cancel.mutate(o.clientOrderId)}
+                      />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

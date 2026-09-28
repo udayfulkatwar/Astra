@@ -1,5 +1,7 @@
 import { activeSessions, dec, marketStatus, toNum } from '@astra/core';
-import { fail, pass, unknown, type GateCheck } from './check';
+import { entryWindowEnd, type Derivations } from '../derive';
+import type { DecisionInputs } from '../types';
+import { fail, pass, unknown, type CheckOutcome, type GateCheck } from './check';
 
 export const marketSpread: GateCheck = {
   id: 'market.spread',
@@ -31,7 +33,7 @@ export const marketEntry: GateCheck = {
     if (!i.execution.supportedEntryTypes.includes(s.entryType)) {
       return fail(`entry type ${s.entryType} is not supported by the execution adapter`);
     }
-    if (s.entryType !== 'MARKET') return fail(`entry type ${s.entryType} is not supported yet`);
+    if (s.entryType === 'LIMIT') return limitEntry(i, d);
     if (!i.instrument) return unknown('instrument spec not found');
     if (!d.effectiveEntry.ok) return unknown(d.effectiveEntry.reason);
     const px = dec(d.effectiveEntry.value);
@@ -59,6 +61,54 @@ export const marketEntry: GateCheck = {
   },
 };
 
+/** Default for `maxWorkingOrderMinutes`. */
+export const DEFAULT_MAX_WORKING_ORDER_MINUTES = 240;
+
+/**
+ * A LIMIT entry rests at the broker until it fills or expires. It needs an expiry within the
+ * policy maximum, a limit on the tick grid between stop and target, and a market that has not
+ * already run through the stop or the target (a missed setup is no trade — never chased).
+ */
+function limitEntry(i: DecisionInputs, d: Derivations): CheckOutcome {
+  const s = i.candidate.signal;
+  if (!i.instrument) return unknown('instrument spec not found');
+  if (!d.effectiveEntry.ok) return unknown(d.effectiveEntry.reason);
+  const q = d.fresh.quote;
+  if (q.status !== 'OK') return unknown('no fresh quote');
+  const reasons: string[] = [];
+  const now = Date.parse(i.now);
+  const maxMinutes = i.policy.maxWorkingOrderMinutes ?? DEFAULT_MAX_WORKING_ORDER_MINUTES;
+  const expires = s.expiresAt ? Date.parse(s.expiresAt) : NaN;
+  if (!s.expiresAt) reasons.push('a LIMIT entry needs an expiry (expiresAt)');
+  else if (!(expires > now))
+    reasons.push(`the LIMIT order would already be expired (${s.expiresAt})`);
+  else if (expires - now > maxMinutes * 60_000)
+    reasons.push(`the LIMIT order would rest longer than ${maxMinutes} min`);
+  const tick = dec(i.instrument.tickSize);
+  if (!dec(s.entry).div(tick).isInteger())
+    reasons.push(`limit ${s.entry} is not a multiple of the tick size ${i.instrument.tickSize}`);
+  const long = s.direction === 'LONG';
+  const px = dec(long ? q.value.ask : q.value.bid);
+  if (long ? px.lte(s.stop) : px.gte(s.stop)) reasons.push('the market is already beyond the stop');
+  if (long ? px.gte(s.target) : px.lte(s.target))
+    reasons.push('the market already reached the target (setup missed)');
+  const marketable = long ? px.lte(s.entry) : px.gte(s.entry);
+  const details = {
+    limit: s.entry,
+    executablePrice: toNum(px),
+    expiresAt: s.expiresAt ?? null,
+    marketable,
+    distanceTicks: toNum(px.minus(s.entry).abs().div(tick), 2),
+  };
+  if (reasons.length > 0) return fail(reasons, details);
+  return pass(
+    marketable
+      ? `limit ${s.entry} is marketable: fills now at ${toNum(px)} or better`
+      : `limit ${s.entry} rests ${details.distanceTicks} ticks from the market until ${s.expiresAt}`,
+    details,
+  );
+}
+
 export const marketSession: GateCheck = {
   id: 'market.session',
   layer: 'MARKET',
@@ -83,6 +133,15 @@ export const marketSession: GateCheck = {
       return fail(`${symbol} market is closed (next open ${status.nextOpen})`, details);
 
     const reasons: string[] = [];
+    // A resting LIMIT order must be gone before the no-new-trades window of the close.
+    const until = entryWindowEnd(i.candidate.signal);
+    if (until && status.nextClose !== null) {
+      const latest = Date.parse(status.nextClose) - i.policy.minMinutesBeforeMarketClose * 60_000;
+      if (until.getTime() > latest)
+        reasons.push(
+          `the LIMIT order would still rest within ${i.policy.minMinutesBeforeMarketClose} min of the ${symbol} market close (${status.nextClose})`,
+        );
+    }
     if (
       status.minutesToClose !== null &&
       status.minutesToClose <= i.policy.minMinutesBeforeMarketClose

@@ -36,6 +36,7 @@ interface OrderRow {
   filled_quantity: string;
   average_fill_price: string | null;
   reject_reason: string | null;
+  expires_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -63,6 +64,7 @@ function mapOrder(r: OrderRow): OrderRecord {
     filledQuantity: Number(r.filled_quantity),
     averageFillPrice: num(r.average_fill_price),
     rejectReason: r.reject_reason,
+    expiresAt: iso(r.expires_at),
     createdAt: iso(r.created_at)!,
     updatedAt: iso(r.updated_at)!,
   };
@@ -138,11 +140,11 @@ export class ExecutionRepository implements ExecutionStore {
         await tx`
           insert into orders (id, client_order_id, approval_id, decision_id, account_id, strategy_id, signal_id,
             adapter_id, mode, symbol, direction, quantity, entry_type, planned_entry, stop_loss, take_profit,
-            status, broker_order_id, filled_quantity, average_fill_price, reject_reason, created_at, updated_at)
+            status, broker_order_id, filled_quantity, average_fill_price, reject_reason, expires_at, created_at, updated_at)
           values (${o.orderId}, ${o.clientOrderId}, ${o.approvalId}, ${o.decisionId}, ${o.accountId}, ${o.strategyId},
             ${o.signalId}, ${o.adapterId}, ${o.mode}, ${o.symbol}, ${o.direction}, ${o.quantity}, ${o.entryType},
             ${o.plannedEntry}, ${o.stopLoss}, ${o.takeProfit}, ${o.status}, ${o.brokerOrderId}, ${o.filledQuantity},
-            ${o.averageFillPrice}, ${o.rejectReason}, ${o.createdAt}, ${o.updatedAt})`;
+            ${o.averageFillPrice}, ${o.rejectReason}, ${o.expiresAt}, ${o.createdAt}, ${o.updatedAt})`;
         await appendAuditInTx(tx, {
           actor: { type: 'SYSTEM', id: 'execution-gateway' },
           category: 'EXECUTION',
