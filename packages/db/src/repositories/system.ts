@@ -83,7 +83,8 @@ export class SystemStateRepository {
   }
 }
 
-export type EventLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL';
+export const EVENT_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR', 'CRITICAL'] as const;
+export type EventLevel = (typeof EVENT_LEVELS)[number];
 
 export interface SystemEvent {
   readonly seq: number;
@@ -137,12 +138,35 @@ export class EventRepository {
     return mapEvent(rows[0]!);
   }
 
-  async recent(params: { limit?: number; afterSeq?: number } = {}): Promise<SystemEvent[]> {
+  /**
+   * Newest first by default. `order: 'asc'` returns the OLDEST events after `afterSeq` first, so a
+   * poller that advances its cursor to the last seq it received never skips an event.
+   */
+  async recent(
+    params: {
+      limit?: number;
+      afterSeq?: number;
+      order?: 'asc' | 'desc';
+      minLevel?: EventLevel;
+    } = {},
+  ): Promise<SystemEvent[]> {
     const limit = Math.min(params.limit ?? 100, 500);
-    const rows = await this.sql<EventRow[]>`
-      select * from system_events
-      where (${params.afterSeq ?? null}::bigint is null or seq > ${params.afterSeq ?? null})
-      order by seq desc limit ${limit}`;
+    const levels = params.minLevel
+      ? EVENT_LEVELS.slice(EVENT_LEVELS.indexOf(params.minLevel))
+      : null;
+    const after = params.afterSeq ?? null;
+    const rows =
+      params.order === 'asc'
+        ? await this.sql<EventRow[]>`
+            select * from system_events
+            where (${after}::bigint is null or seq > ${after})
+              and (${levels}::text[] is null or level = any(${levels}))
+            order by seq asc limit ${limit}`
+        : await this.sql<EventRow[]>`
+            select * from system_events
+            where (${after}::bigint is null or seq > ${after})
+              and (${levels}::text[] is null or level = any(${levels}))
+            order by seq desc limit ${limit}`;
     return rows.map(mapEvent);
   }
 }

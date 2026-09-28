@@ -151,7 +151,7 @@ astra/
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
 │   └── db/                  SQL migrations, migration runner, repositories
 ├── config/                  Versioned configuration (profiles, instruments, accounts, strategies, policies)
-├── automation/n8n/          n8n workflows (JSON, version-controlled)
+├── automation/n8n/          n8n workflows: generated JSON + the tested code-node logic (ADR-0021)
 ├── infra/docker/            Dockerfiles
 ├── docs/                    Architecture, ADRs, runbooks, project state
 ├── docker-compose.yml       Local + single-host cloud topology
@@ -317,6 +317,7 @@ rules in force.
 | GET      | `/api/v1/learning` (journal or a backtest run)                                             | viewer                                       |
 | POST     | `/api/v1/news/items` (push; MANUAL)                                                        | automation                                   |
 | GET      | `/api/v1/news`, `/api/v1/news/context`                                                     | viewer                                       |
+| GET      | `/api/v1/reports?kind=daily\|weekly&day=` (computed by ASTRA; n8n delivers)                | viewer                                       |
 | GET      | `/api/v1/ai/status`, `/api/v1/ai/calls`, `/api/v1/ai/analyses[/:id]`, `/api/v1/ai/reviews` | viewer                                       |
 | POST     | `/api/v1/ai/analyses` (analyse a signal now)                                               | automation                                   |
 | POST     | `/api/v1/ai/reviews` (post-trade review of a journaled trade)                              | operator                                     |
@@ -339,6 +340,10 @@ rules in force.
   7. **Error handler** — global n8n error workflow → `/automation/errors` → system event + alert.
 - Every workflow call carries a `workflowRunId` so ASTRA's audit log can correlate actions to
   n8n executions. n8n is never trusted for correctness: every payload is re-validated server-side.
+- **As built (ADR-0021):** the workflow JSON is generated from typed, unit-tested code
+  (`automation/n8n`). Ingestion fails closed; alerts poll `/events?afterSeq=&order=asc`; reports
+  are computed by ASTRA (`/reports`) and only delivered by n8n; one Notify sub-workflow sends to
+  Telegram / Discord / email. Tested in a real n8n 2.40.
 
 ---
 

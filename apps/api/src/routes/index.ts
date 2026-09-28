@@ -13,6 +13,7 @@ import { registerMarketRoutes } from './market';
 import { registerMonitorRoutes } from './monitor';
 import { registerNewsRoutes } from './news';
 import { registerRecordRoutes } from './records';
+import { registerReportRoutes } from './reports';
 import { registerSafetyRoutes } from './safety';
 import { registerSystemRoutes } from './system';
 
@@ -35,4 +36,5 @@ export function registerRoutes(
   registerBacktestRoutes(app, runtime, auth);
   registerLearningRoutes(app, runtime, auth);
   registerAiRoutes(app, runtime, auth);
+  registerReportRoutes(app, runtime, auth);
 }

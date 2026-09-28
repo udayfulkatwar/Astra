@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'automation/n8n'
 
 onlyBuiltDependencies:
   - esbuild

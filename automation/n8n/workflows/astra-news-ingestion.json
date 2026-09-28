@@ -1,0 +1,159 @@
+{
+  "id": "astraNewsRss0001",
+  "name": "ASTRA — News ingestion (RSS)",
+  "nodes": [
+    {
+      "id": "562fb09e-de12-42d7-84ff-c360477b367c",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9be81d52-a321-4255-8932-1a4199b06dbe",
+      "name": "Sources (edit me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/news-sources.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"Sources (edit me)\" — the RSS / Atom feeds ASTRA should watch. The owner chooses them.\n * With no feed configured the workflow stops with an error: ASTRA then sees no fresh news feed\n * and approves no new trades (it never treats \"not watching\" as \"no news\").\n */\n\n// Add one entry per feed, e.g. { name: 'my-wire', url: 'https://example.com/rss.xml' }.\nconst SOURCES = [];\nfunction checkSources(sources) {\n    if (sources.length === 0) {\n        throw new Error('No news feeds configured: add RSS or Atom feed URLs in the \"Sources (edit me)\" node. Until then ASTRA sees no fresh news feed and approves no new trades.');\n    }\n    const names = new Set();\n    return sources.map((s, i) => {\n        const name = requireSlug(s.name, `feed ${i + 1} name`);\n        if (names.has(name))\n            throw new Error(`feed name ${name} is used twice`);\n        names.add(name);\n        return { name, url: requireHttpUrl(s.url, `feed ${name} url`) };\n    });\n}\nfunction run(_items, _ctx) {\n    return checkSources(SOURCES);\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      },
+      "notes": "Add your RSS / Atom feeds to SOURCES.",
+      "notesInFlow": true
+    },
+    {
+      "id": "4f885d0d-5a48-45d2-8f93-6f31b8617f37",
+      "name": "Fetch feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "13aba342-97ed-4e4e-88b2-b0a0ac7e9332",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/news-normalise.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"Normalise\" — RSS 2.0 / RSS 1.0 / Atom → ASTRA news items (one batch per feed).\n *\n * Only what the feed states is passed on: headline, link, summary, publisher (the feed's title)\n * and publication time. An item without a readable publication time is dropped, never dated by\n * guess. Classification (category, impact, instruments) is ASTRA's job. A document that is not a\n * feed stops the workflow, so nothing is pushed and ASTRA's news freshness is not renewed.\n */\n\nconst ENTITIES = {\n    amp: '&',\n    lt: '<',\n    gt: '>',\n    quot: '\"',\n    apos: \"'\",\n    nbsp: ' ',\n};\nfunction decodeText(raw) {\n    const cdata = raw.replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1');\n    const decoded = (s) => s.replace(/&(#x[0-9a-f]+|#\\d+|[a-z]+);/gi, (m, e) => {\n        if (e[0] === '#') {\n            const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);\n            return Number.isFinite(code) && code > 0 && code <= 0x10ffff\n                ? String.fromCodePoint(code)\n                : m;\n        }\n        return ENTITIES[e.toLowerCase()] ?? m;\n    });\n    // Entities first (escaped HTML becomes markup), then strip tags, then decode once more.\n    const noTags = decoded(cdata).replace(/<[^>]*>/g, ' ');\n    return decoded(noTags).replace(/\\s+/g, ' ').trim();\n}\nfunction escapeTag(name) {\n    return name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n/** Inner text of the first <name> element (namespace prefix included in `name`, e.g. dc:date). */\nfunction tag(xml, name) {\n    const m = new RegExp(`<${escapeTag(name)}(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)</${escapeTag(name)}>`, 'i').exec(xml);\n    if (!m)\n        return null;\n    const text = decodeText(m[1] ?? '');\n    return text === '' ? null : text;\n}\nfunction attr(element, name) {\n    const m = new RegExp(`\\\\s${escapeTag(name)}\\\\s*=\\\\s*(\"([^\"]*)\"|'([^']*)')`, 'i').exec(element);\n    return m ? decodeText(m[2] ?? m[3] ?? '') : null;\n}\nfunction atomLink(entry) {\n    const links = entry.match(/<link\\b[^>]*>/gi) ?? [];\n    const alternate = links.find((l) => (attr(l, 'rel') ?? 'alternate').toLowerCase() === 'alternate') ?? links[0];\n    return alternate ? attr(alternate, 'href') : null;\n}\nfunction blocks(xml, name) {\n    const re = new RegExp(`<${name}\\\\b[^>]*>([\\\\s\\\\S]*?)</${name}>`, 'gi');\n    const out = [];\n    for (let m = re.exec(xml); m; m = re.exec(xml))\n        out.push(m[1] ?? '');\n    return out;\n}\nfunction parseFeed(xml) {\n    const head = xml.slice(0, 4_000);\n    if (/<feed\\b/i.test(head)) {\n        const firstEntry = xml.search(/<entry\\b/i);\n        return {\n            kind: 'ATOM',\n            title: tag(firstEntry < 0 ? xml : xml.slice(0, firstEntry), 'title'),\n            entries: blocks(xml, 'entry').map((e) => ({\n                id: tag(e, 'id'),\n                title: tag(e, 'title') ?? '',\n                link: atomLink(e),\n                summary: tag(e, 'summary') ?? tag(e, 'content'),\n                published: tag(e, 'published') ?? tag(e, 'updated'),\n            })),\n        };\n    }\n    if (/<rss\\b|<rdf:RDF\\b/i.test(head)) {\n        const firstItem = xml.search(/<item\\b/i);\n        return {\n            kind: 'RSS',\n            title: tag(firstItem < 0 ? xml : xml.slice(0, firstItem), 'title'),\n            entries: blocks(xml, 'item').map((e) => ({\n                id: tag(e, 'guid'),\n                title: tag(e, 'title') ?? '',\n                link: tag(e, 'link') ?? attr(e.match(/<link\\b[^>]*>/i)?.[0] ?? '', 'href'),\n                summary: tag(e, 'description') ?? tag(e, 'content:encoded'),\n                published: tag(e, 'pubDate') ?? tag(e, 'dc:date') ?? tag(e, 'published'),\n            })),\n        };\n    }\n    throw new Error('the response is not an RSS or Atom feed');\n}\nfunction toNewsItems(feed, now, opts) {\n    const oldest = now.getTime() - opts.maxAgeHours * 3_600_000;\n    const seen = new Set();\n    const items = [];\n    let skipped = 0;\n    for (const e of feed.entries) {\n        const publishedAt = isoOrNull(e.published);\n        const headline = truncate(e.title, 500);\n        if (!publishedAt || headline === '') {\n            skipped += 1;\n            continue;\n        }\n        if (Date.parse(publishedAt) < oldest)\n            continue;\n        const rawId = e.id ?? e.link ?? `${headline}|${publishedAt}`;\n        const id = rawId.length <= 200 ? rawId : `h:${fnv(rawId)}`;\n        if (seen.has(id))\n            continue;\n        seen.add(id);\n        const url = e.link && /^https?:\\/\\/\\S+$/.test(e.link) && e.link.length <= 2_000 ? e.link : null;\n        items.push({\n            id,\n            headline,\n            publishedAt,\n            ...(e.summary ? { summary: truncate(e.summary, 4_000) } : {}),\n            ...(feed.title ? { publisher: truncate(feed.title, 200) } : {}),\n            ...(url ? { url } : {}),\n        });\n        if (items.length >= opts.maxItems)\n            break;\n    }\n    return { items, skipped };\n}\n/** One output item per feed: `{ source, items }` for POST /api/v1/news/items (empty = alive). */\nfunction run(fetched, ctx) {\n    const sources = ctx.extra.sources ?? [];\n    if (fetched.length !== sources.length) {\n        throw new Error(`fetched ${fetched.length} feeds but ${sources.length} are configured`);\n    }\n    return fetched.map((f, i) => {\n        const name = String(sources[i]?.name);\n        const body = f.data;\n        if (typeof body !== 'string')\n            throw new Error(`feed ${name}: empty response`);\n        let feed;\n        try {\n            feed = parseFeed(body);\n        }\n        catch (err) {\n            throw new Error(`feed ${name}: ${err instanceof Error ? err.message : String(err)}`);\n        }\n        const { items, skipped } = toNewsItems(feed, ctx.now, { maxAgeHours: 24, maxItems: 200 });\n        return { source: `rss:${name}`, items, skipped, workflowRunId: ctx.executionId };\n    });\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: { sources: $(\"Sources (edit me)\").all().map((i) => i.json) },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "549cbcb1-4400-44cb-889e-5fb2bb378571",
+      "name": "Push to ASTRA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/v1/news/items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, items: $json.items }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "astraAutomationT",
+          "name": "ASTRA automation token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Sources (edit me)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sources (edit me)": {
+      "main": [
+        [
+          {
+            "node": "Fetch feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch feed": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Push to ASTRA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "astraErrorHandle"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "astra": "Ingestion: owner-chosen RSS/Atom feeds → ASTRA news (classified by ASTRA). Any failed feed stops the run: ASTRA news goes stale → no new trades."
+  }
+}

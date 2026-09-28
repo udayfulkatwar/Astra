@@ -1,0 +1,202 @@
+{
+  "id": "astraReports0001",
+  "name": "ASTRA — Reports",
+  "nodes": [
+    {
+      "id": "00994aec-7e58-4bd1-818b-14b5b73ce919",
+      "name": "Daily 17:10 New York (Mon–Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 17 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "810f6305-f8f6-4ebf-8fa6-37d15c5f08ef",
+      "name": "Weekly Fri 17:20 New York",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "20 17 * * 5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8fb3a5ba-07d6-4b9e-8791-6034df42520f",
+      "name": "Daily",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/report-message.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction run(items, _ctx) {\n    return items.map((r) => {\n        const text = typeof r.text === 'string' ? r.text : '';\n        if (text === '')\n            throw new Error('ASTRA returned a report without text');\n        const [title, ...rest] = text.split('\\n');\n        return { title, text: rest.join('\\n').trim(), level: 'INFO' };\n    });\n}\n/** Trigger helpers: which report the schedule asked for. */\nfunction daily(_items, _ctx) {\n    return [{ kind: 'daily' }];\n}\nfunction weekly(_items, _ctx) {\n    return [{ kind: 'weekly' }];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn daily($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "80aa64b0-491f-4a64-8625-ffed38e85f79",
+      "name": "Weekly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/report-message.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction run(items, _ctx) {\n    return items.map((r) => {\n        const text = typeof r.text === 'string' ? r.text : '';\n        if (text === '')\n            throw new Error('ASTRA returned a report without text');\n        const [title, ...rest] = text.split('\\n');\n        return { title, text: rest.join('\\n').trim(), level: 'INFO' };\n    });\n}\n/** Trigger helpers: which report the schedule asked for. */\nfunction daily(_items, _ctx) {\n    return [{ kind: 'daily' }];\n}\nfunction weekly(_items, _ctx) {\n    return [{ kind: 'weekly' }];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn weekly($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "f6f111b4-a94c-4a78-87a2-9555d1eaa3f1",
+      "name": "Get report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api:8080/api/v1/reports?kind={{ $json.kind }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "astraAutomationT",
+          "name": "ASTRA automation token"
+        }
+      }
+    },
+    {
+      "id": "07ca67d3-b6ca-4168-8470-4b34ae180250",
+      "name": "Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/report-message.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction run(items, _ctx) {\n    return items.map((r) => {\n        const text = typeof r.text === 'string' ? r.text : '';\n        if (text === '')\n            throw new Error('ASTRA returned a report without text');\n        const [title, ...rest] = text.split('\\n');\n        return { title, text: rest.join('\\n').trim(), level: 'INFO' };\n    });\n}\n/** Trigger helpers: which report the schedule asked for. */\nfunction daily(_items, _ctx) {\n    return [{ kind: 'daily' }];\n}\nfunction weekly(_items, _ctx) {\n    return [{ kind: 'weekly' }];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "ee386d14-1aa7-47bf-8e57-9d2a996e0072",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        880,
+        100
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": "astraNotify00001"
+      }
+    }
+  ],
+  "connections": {
+    "Daily 17:10 New York (Mon–Fri)": {
+      "main": [
+        [
+          {
+            "node": "Daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily": {
+      "main": [
+        [
+          {
+            "node": "Get report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get report": {
+      "main": [
+        [
+          {
+            "node": "Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Fri 17:20 New York": {
+      "main": [
+        [
+          {
+            "node": "Weekly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly": {
+      "main": [
+        [
+          {
+            "node": "Get report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "astraErrorHandle",
+    "timezone": "America/New_York"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "astra": "Reports: ASTRA computes the daily / weekly report from its records; n8n delivers it."
+  }
+}

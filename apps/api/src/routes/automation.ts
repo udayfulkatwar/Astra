@@ -48,7 +48,7 @@ export function registerAutomationRoutes(
       component: 'automation',
       type: 'WORKFLOW_ERROR',
       message: `n8n workflow "${b.workflow}" failed: ${b.error}`,
-      data: { workflowRunId: b.workflowRunId ?? null },
+      data: { workflow: b.workflow, workflowRunId: b.workflowRunId ?? null },
     });
     return { recorded: true };
   });

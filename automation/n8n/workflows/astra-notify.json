@@ -1,0 +1,217 @@
+{
+  "id": "astraNotify00001",
+  "name": "ASTRA — Notify",
+  "nodes": [
+    {
+      "id": "6e986604-a3f9-4d06-80d9-f2406b494e02",
+      "name": "Message in",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c28917d8-fe64-4142-8ace-b99fde07af90",
+      "name": "Channels (edit me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/notify.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"ASTRA — Notify\" sub-workflow: one message → the owner's channels. The channels are chosen in\n * \"Channels (edit me)\"; their secrets (bot token, webhook URL, SMTP password) live only in n8n\n * credentials. With no channel enabled the workflow stops with an error, which shows up in\n * ASTRA's live activity — alerts are never silently dropped.\n */\n\n// Enable at least one channel and create its credential in n8n (see automation/n8n/README.md).\nconst CHANNELS = {\n    telegram: { enabled: false, chatId: '' },\n    discord: { enabled: false },\n    email: { enabled: false, from: '', to: '' },\n};\nfunction checkChannels(c) {\n    if (!c.telegram.enabled && !c.discord.enabled && !c.email.enabled) {\n        throw new Error('No notification channel enabled: edit \"Channels (edit me)\" in \"ASTRA — Notify\" and add the matching credential.');\n    }\n    if (c.telegram.enabled && !/^-?\\d+$|^@\\w{5,}$/.test(c.telegram.chatId)) {\n        throw new Error('Telegram is enabled but chatId is not a chat id (a number) or @channel name');\n    }\n    const mail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n    if (c.email.enabled && (!mail.test(c.email.from) || !mail.test(c.email.to))) {\n        throw new Error('Email is enabled but \"from\" or \"to\" is not an email address');\n    }\n    return c;\n}\nconst message = (m) => ({\n    title: truncate(str(m.title, 'ASTRA'), 200),\n    text: str(m.text),\n    level: str(m.level, 'INFO'),\n});\n/** \"Channels (edit me)\": validates the choice once and passes each message on with it. */\nfunction run(items, _ctx) {\n    const channels = checkChannels(CHANNELS);\n    return items.map((m) => ({ ...message(m), channels }));\n}\nfunction telegram(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.telegram.enabled\n            ? [\n                {\n                    chatId: c.telegram.chatId,\n                    text: truncate(`${String(m.title)}\\n\\n${String(m.text)}`, 4_000),\n                },\n            ]\n            : [];\n    });\n}\nfunction discord(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.discord.enabled\n            ? [{ content: truncate(`**${String(m.title)}**\\n${String(m.text)}`, 1_990) }]\n            : [];\n    });\n}\nfunction email(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.email.enabled\n            ? [{ from: c.email.from, to: c.email.to, subject: String(m.title), text: String(m.text) }]\n            : [];\n    });\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      },
+      "notes": "Enable your channels in CHANNELS and create their credentials.",
+      "notesInFlow": true
+    },
+    {
+      "id": "0c862e24-aa26-4aa5-8d1e-e832166f50b4",
+      "name": "Telegram message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/notify.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"ASTRA — Notify\" sub-workflow: one message → the owner's channels. The channels are chosen in\n * \"Channels (edit me)\"; their secrets (bot token, webhook URL, SMTP password) live only in n8n\n * credentials. With no channel enabled the workflow stops with an error, which shows up in\n * ASTRA's live activity — alerts are never silently dropped.\n */\n\n// Enable at least one channel and create its credential in n8n (see automation/n8n/README.md).\nconst CHANNELS = {\n    telegram: { enabled: false, chatId: '' },\n    discord: { enabled: false },\n    email: { enabled: false, from: '', to: '' },\n};\nfunction checkChannels(c) {\n    if (!c.telegram.enabled && !c.discord.enabled && !c.email.enabled) {\n        throw new Error('No notification channel enabled: edit \"Channels (edit me)\" in \"ASTRA — Notify\" and add the matching credential.');\n    }\n    if (c.telegram.enabled && !/^-?\\d+$|^@\\w{5,}$/.test(c.telegram.chatId)) {\n        throw new Error('Telegram is enabled but chatId is not a chat id (a number) or @channel name');\n    }\n    const mail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n    if (c.email.enabled && (!mail.test(c.email.from) || !mail.test(c.email.to))) {\n        throw new Error('Email is enabled but \"from\" or \"to\" is not an email address');\n    }\n    return c;\n}\nconst message = (m) => ({\n    title: truncate(str(m.title, 'ASTRA'), 200),\n    text: str(m.text),\n    level: str(m.level, 'INFO'),\n});\n/** \"Channels (edit me)\": validates the choice once and passes each message on with it. */\nfunction run(items, _ctx) {\n    const channels = checkChannels(CHANNELS);\n    return items.map((m) => ({ ...message(m), channels }));\n}\nfunction telegram(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.telegram.enabled\n            ? [\n                {\n                    chatId: c.telegram.chatId,\n                    text: truncate(`${String(m.title)}\\n\\n${String(m.text)}`, 4_000),\n                },\n            ]\n            : [];\n    });\n}\nfunction discord(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.discord.enabled\n            ? [{ content: truncate(`**${String(m.title)}**\\n${String(m.text)}`, 1_990) }]\n            : [];\n    });\n}\nfunction email(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.email.enabled\n            ? [{ from: c.email.from, to: c.email.to, subject: String(m.title), text: String(m.text) }]\n            : [];\n    });\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn telegram($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "8e8dc12c-4131-441d-8e4f-d63fcfd7e19e",
+      "name": "Discord message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/notify.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"ASTRA — Notify\" sub-workflow: one message → the owner's channels. The channels are chosen in\n * \"Channels (edit me)\"; their secrets (bot token, webhook URL, SMTP password) live only in n8n\n * credentials. With no channel enabled the workflow stops with an error, which shows up in\n * ASTRA's live activity — alerts are never silently dropped.\n */\n\n// Enable at least one channel and create its credential in n8n (see automation/n8n/README.md).\nconst CHANNELS = {\n    telegram: { enabled: false, chatId: '' },\n    discord: { enabled: false },\n    email: { enabled: false, from: '', to: '' },\n};\nfunction checkChannels(c) {\n    if (!c.telegram.enabled && !c.discord.enabled && !c.email.enabled) {\n        throw new Error('No notification channel enabled: edit \"Channels (edit me)\" in \"ASTRA — Notify\" and add the matching credential.');\n    }\n    if (c.telegram.enabled && !/^-?\\d+$|^@\\w{5,}$/.test(c.telegram.chatId)) {\n        throw new Error('Telegram is enabled but chatId is not a chat id (a number) or @channel name');\n    }\n    const mail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n    if (c.email.enabled && (!mail.test(c.email.from) || !mail.test(c.email.to))) {\n        throw new Error('Email is enabled but \"from\" or \"to\" is not an email address');\n    }\n    return c;\n}\nconst message = (m) => ({\n    title: truncate(str(m.title, 'ASTRA'), 200),\n    text: str(m.text),\n    level: str(m.level, 'INFO'),\n});\n/** \"Channels (edit me)\": validates the choice once and passes each message on with it. */\nfunction run(items, _ctx) {\n    const channels = checkChannels(CHANNELS);\n    return items.map((m) => ({ ...message(m), channels }));\n}\nfunction telegram(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.telegram.enabled\n            ? [\n                {\n                    chatId: c.telegram.chatId,\n                    text: truncate(`${String(m.title)}\\n\\n${String(m.text)}`, 4_000),\n                },\n            ]\n            : [];\n    });\n}\nfunction discord(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.discord.enabled\n            ? [{ content: truncate(`**${String(m.title)}**\\n${String(m.text)}`, 1_990) }]\n            : [];\n    });\n}\nfunction email(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.email.enabled\n            ? [{ from: c.email.from, to: c.email.to, subject: String(m.title), text: String(m.text) }]\n            : [];\n    });\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn discord($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "7bb52ec0-8bc0-4730-83dc-ea8ef47ce006",
+      "name": "Email message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/notify.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"ASTRA — Notify\" sub-workflow: one message → the owner's channels. The channels are chosen in\n * \"Channels (edit me)\"; their secrets (bot token, webhook URL, SMTP password) live only in n8n\n * credentials. With no channel enabled the workflow stops with an error, which shows up in\n * ASTRA's live activity — alerts are never silently dropped.\n */\n\n// Enable at least one channel and create its credential in n8n (see automation/n8n/README.md).\nconst CHANNELS = {\n    telegram: { enabled: false, chatId: '' },\n    discord: { enabled: false },\n    email: { enabled: false, from: '', to: '' },\n};\nfunction checkChannels(c) {\n    if (!c.telegram.enabled && !c.discord.enabled && !c.email.enabled) {\n        throw new Error('No notification channel enabled: edit \"Channels (edit me)\" in \"ASTRA — Notify\" and add the matching credential.');\n    }\n    if (c.telegram.enabled && !/^-?\\d+$|^@\\w{5,}$/.test(c.telegram.chatId)) {\n        throw new Error('Telegram is enabled but chatId is not a chat id (a number) or @channel name');\n    }\n    const mail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n    if (c.email.enabled && (!mail.test(c.email.from) || !mail.test(c.email.to))) {\n        throw new Error('Email is enabled but \"from\" or \"to\" is not an email address');\n    }\n    return c;\n}\nconst message = (m) => ({\n    title: truncate(str(m.title, 'ASTRA'), 200),\n    text: str(m.text),\n    level: str(m.level, 'INFO'),\n});\n/** \"Channels (edit me)\": validates the choice once and passes each message on with it. */\nfunction run(items, _ctx) {\n    const channels = checkChannels(CHANNELS);\n    return items.map((m) => ({ ...message(m), channels }));\n}\nfunction telegram(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.telegram.enabled\n            ? [\n                {\n                    chatId: c.telegram.chatId,\n                    text: truncate(`${String(m.title)}\\n\\n${String(m.text)}`, 4_000),\n                },\n            ]\n            : [];\n    });\n}\nfunction discord(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.discord.enabled\n            ? [{ content: truncate(`**${String(m.title)}**\\n${String(m.text)}`, 1_990) }]\n            : [];\n    });\n}\nfunction email(items, _ctx) {\n    return items.flatMap((m) => {\n        const c = m.channels;\n        return c.email.enabled\n            ? [{ from: c.email.from, to: c.email.to, subject: String(m.title), text: String(m.text) }]\n            : [];\n    });\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn email($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "d7f72438-ff85-4798-8dc1-b58285552142",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "astraTelegramBot",
+          "name": "ASTRA Telegram bot"
+        }
+      }
+    },
+    {
+      "id": "86595ca4-1fba-4512-899f-25de06eda21c",
+      "name": "Send Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.content }}",
+        "options": {}
+      },
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "astraDiscordHook",
+          "name": "ASTRA Discord webhook"
+        }
+      }
+    },
+    {
+      "id": "32a7191d-c32a-486e-822c-70c04190b144",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.from }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "astraSmtpAccount",
+          "name": "ASTRA SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Message in": {
+      "main": [
+        [
+          {
+            "node": "Channels (edit me)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Channels (edit me)": {
+      "main": [
+        [
+          {
+            "node": "Telegram message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Discord message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord message": {
+      "main": [
+        [
+          {
+            "node": "Send Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email message": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "astraErrorHandle"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "astra": "Delivery: one message → Telegram / Discord / email. Called by Alerts and Reports."
+  }
+}

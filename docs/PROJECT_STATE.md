@@ -13,6 +13,9 @@ real calendar and news providers need the owner's choice. **Phase 5 groundwork d
 **Phase 6 done except the owner's key and budget:** the AI analysis layer (orchestrator,
 budgets, call log, Claude adapter with refusal fallback, a veto-only gate input, post-trade
 reviews) — real model calls need an Anthropic API key in the environment.
+**Phase 7 done except the owner's sources and channels:** n8n workflows (heartbeat, error
+handler, news and calendar ingestion, signal webhook, alerts, daily / weekly reports, Notify)
+generated from tested code and run in a real n8n 2.40.7.
 **Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised), the
 trade journal, **backtesting** and **learning metrics** are done; the gate prices the
 trailing-drawdown path and the losing-streak limit is daily (owner decisions). An extended paper
@@ -45,9 +48,9 @@ market structure, a quote-quality guard and event blackouts.
 | `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                                                        | 25 (real Postgres, end to end)              |
 | `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build                                         | 5 + browser walkthrough                     |
 | Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                                               | compose validated                           |
-| n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                                             | JSON validated                              |
+| n8n                | `@astra/n8n` (ADR-0021): 8 workflows generated from typed, tested code-node logic; drift and secret checks; `/api/v1/reports`; tested in n8n 2.40.7                                                                                          | JSON validated                              |
 
-**Total: 517 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 541 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -93,6 +96,21 @@ Remaining:
 - `POST /api/v1/news/items` (n8n push, MANUAL), `GET /api/v1/news`, `GET /api/v1/news/context`;
   items stored and restored after a restart; HIGH-impact items raise warnings. Dashboard **News
   Intelligence** page; demo "Breaking news" button; backtests take an explicit news choice.
+
+## n8n workflows (done, ADR-0021)
+
+- Eight workflows in `automation/n8n/workflows/`, generated from typed, unit-tested code:
+  heartbeat, error handler, news ingestion (RSS / Atom), calendar ingestion, signal webhook
+  (e.g. TradingView → gate), alerts, daily / weekly reports, and a Notify sub-workflow
+  (Telegram / Discord / email).
+- ASTRA computes; n8n delivers: `GET /api/v1/reports` builds the report from ASTRA's records;
+  alerts poll `GET /api/v1/events?afterSeq=&order=asc` so none are skipped.
+- Fail-closed: unconfigured sources, a failed fetch or a malformed document stop the run, so
+  ASTRA's feed goes stale and no new trades are approved. No notification channel → a visible
+  error, never silence.
+- Verified in a real n8n 2.40.7 against the API: all imported and published; heartbeat, news
+  and calendar pushes, webhook (403 without the secret, gate decision with it), alert and report
+  emails, error workflow. Setup: `automation/n8n/README.md` (publish Notify and Error handler too).
 
 ## AI analysis layer (done, ADR-0020)
 
@@ -226,6 +244,8 @@ Remaining:
    minimum) against your strategy.
 10. **Protection levels** (ADR-0013/0014, decided: both enabled) — review the thresholds in
     `config/astra.yaml` (`protection`, `monitors.positions`) against your firm and style.
+11. **n8n sources and channels** — your RSS / Atom news feeds, your calendar source, and the
+    notification channels (Telegram chat, Discord webhook or email) for alerts and reports.
 
 ## Decisions made autonomously (summary)
 
@@ -239,8 +259,10 @@ authorization. Details in `docs/adr/`.
 1. **Docker images not built here** (no Docker daemon in the build environment). Compose file is
    validated and the API bundle was verified to run without `node_modules`, but the first
    `docker compose up --build` on a real host is still unverified.
-2. **n8n workflows not yet imported into a live n8n** instance; node type versions may need
-   adjusting to the installed n8n version.
+2. n8n workflows: tested in a local n8n 2.40.7 (SQLite, no Docker); Telegram and Discord delivery
+   were not exercised (no internet from the build environment; email was). Edits made in the n8n
+   editor are not synced back to the repository. The ForexFactory-style calendar mapper is
+   unverified (the export was unreachable here).
 3. Day-start values are observed from the first snapshot after the reset unless the platform
    reports them; late observations use the conservative (higher) value.
 4. Intraday trailing drawdown: resolved — the gate, sizing and monitor price the
@@ -290,7 +312,8 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
-Without owner input: n8n workflows for news/calendar ingestion, cycles and notifications
-(Phase 7). With owner input: a first real AI analysis run with your API key and budget; the real market-data and calendar adapters for the chosen
+The owner's **Liquidity Structure FVG strategy v1.0** (received 2026-09-28): EUR/USD, GBP/USD,
+USD/JPY on H1 / M15 / M5 — strategy engine, FX instruments, limit entries, correlated-exposure
+limits and the research backtest it requires. With owner input: a first real AI analysis run with your API key and budget; the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

@@ -1,0 +1,159 @@
+{
+  "id": "astraCalendar001",
+  "name": "ASTRA — Calendar ingestion",
+  "nodes": [
+    {
+      "id": "860e8adc-3b8b-4d3f-8375-203f62355632",
+      "name": "Every 30 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "11cea0d6-8034-4c21-85c2-7d5f0a291c3c",
+      "name": "Sources (edit me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/calendar-sources.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"Sources (edit me)\" — where the economic calendar comes from. The owner chooses the provider.\n *\n * Formats:\n * - `astra-window`: the source returns ASTRA's calendar window JSON ({ from, to, events }) —\n *   e.g. a small proxy in front of a paid provider.\n * - `ff-weekly-json`: a weekly JSON export in the ForexFactory style (title, country, date,\n *   impact, forecast, previous). UNVERIFIED here: check it against the live export before relying\n *   on it. Any field that does not match stops the workflow (nothing is pushed).\n *\n * No source → the workflow stops with an error: ASTRA's calendar goes stale and no new trades\n * are approved.\n */\n\nconst FORMATS = ['astra-window', 'ff-weekly-json'];\n// Add one entry per source, e.g. { name: 'this-week', url: 'https://…', format: 'astra-window' }.\nconst SOURCES = [];\nfunction checkSources(sources) {\n    if (sources.length === 0) {\n        throw new Error('No calendar source configured: add one in the \"Sources (edit me)\" node. Until then ASTRA has no fresh calendar and approves no new trades.');\n    }\n    return sources.map((s, i) => {\n        const name = requireSlug(s.name, `calendar source ${i + 1} name`);\n        if (!FORMATS.includes(s.format)) {\n            throw new Error(`calendar source ${name}: format must be one of ${FORMATS.join(', ')}`);\n        }\n        return { name, url: requireHttpUrl(s.url, `calendar source ${name} url`), format: s.format };\n    });\n}\nfunction run(_items, _ctx) {\n    return checkSources(SOURCES);\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: {  },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      },
+      "notes": "Add your calendar source(s) to SOURCES.",
+      "notesInFlow": true
+    },
+    {
+      "id": "e2810a92-7e3d-4334-85b1-9a058768df4e",
+      "name": "Fetch calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ae12d878-4663-45af-812e-7dfe4e2d7beb",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/calendar-normalise.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"Normalise\" — calendar source(s) → one ASTRA calendar window for POST /api/v1/calendar/window.\n *\n * A window asserts that it lists EVERY event between `from` and `to`. For weekly exports that is\n * only claimed from the first to the last listed event (conservative: never beyond what the file\n * covers). Unknown impact labels become UNKNOWN, which ASTRA treats as HIGH (fail-safe). Any\n * malformed field stops the workflow: nothing is pushed, the calendar ages to stale, no trades.\n */\n\nconst FF_IMPACT = {\n    high: 'HIGH',\n    medium: 'MEDIUM',\n    low: 'LOW',\n    holiday: 'LOW',\n};\nconst text = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);\nfunction fromFfWeekly(data, source) {\n    if (!Array.isArray(data))\n        throw new Error(`${source}: expected a JSON array of events`);\n    if (data.length === 0)\n        throw new Error(`${source}: the export lists no events`);\n    const events = data.map((raw, i) => {\n        const e = (raw ?? {});\n        const title = text(e.title);\n        const scheduledAt = isoOrNull(e.date);\n        if (!title || !scheduledAt) {\n            throw new Error(`${source}: event ${i + 1} has no readable title or date`);\n        }\n        const country = text(e.country);\n        const impact = FF_IMPACT[(text(e.impact) ?? '').toLowerCase()] ?? 'UNKNOWN';\n        const expected = text(e.forecast);\n        const previous = text(e.previous);\n        return {\n            id: `ff:${fnv(`${title}|${country ?? ''}|${scheduledAt}`)}`,\n            title: truncate(impact === 'LOW' && /holiday/i.test(String(e.impact)) ? `Holiday: ${title}` : title, 300),\n            ...(country && /^[A-Z]{3}$/.test(country) ? { currency: country } : {}),\n            impact,\n            scheduledAt,\n            affectedInstruments: [],\n            ...(expected ? { expected: truncate(expected, 100) } : {}),\n            ...(previous ? { previous: truncate(previous, 100) } : {}),\n        };\n    });\n    const times = events.map((e) => Date.parse(e.scheduledAt)).sort((a, b) => a - b);\n    return {\n        from: new Date(times[0]).toISOString(),\n        to: new Date(times.at(-1) + 60_000).toISOString(),\n        events,\n    };\n}\nfunction fromAstraWindow(data, source) {\n    const w = data?.window ?? data;\n    const o = (w ?? {});\n    const from = isoOrNull(o.from);\n    const to = isoOrNull(o.to);\n    if (!from || !to || !Array.isArray(o.events)) {\n        throw new Error(`${source}: expected { from, to, events[] }`);\n    }\n    return { from, to, events: o.events };\n}\n/**\n * Joins windows that touch or overlap — a gap between two sources must never be claimed as\n * \"no events\". When sources leave a gap, only the contiguous group that covers `now` (else the\n * next one) is pushed; the others are listed as left out.\n */\nfunction mergeWindows(windows, now) {\n    const sorted = [...windows].sort((a, b) => a.from.localeCompare(b.from));\n    const groups = [];\n    for (const w of sorted) {\n        const last = groups.at(-1);\n        if (last && Date.parse(w.from) <= Date.parse(last.to)) {\n            last.names.push(w.name);\n            const byId = new Map(last.events.map((e) => [e.id, e]));\n            for (const e of w.events)\n                byId.set(e.id, e);\n            groups[groups.length - 1] = {\n                from: last.from,\n                to: w.to > last.to ? w.to : last.to,\n                events: [...byId.values()].sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt)),\n                names: last.names,\n            };\n        }\n        else {\n            groups.push({ from: w.from, to: w.to, events: [...w.events], names: [w.name] });\n        }\n    }\n    const t = now.getTime();\n    const chosen = groups.find((g) => Date.parse(g.from) <= t && t < Date.parse(g.to)) ??\n        groups.find((g) => Date.parse(g.to) > t) ??\n        groups.at(-1);\n    return {\n        window: { from: chosen.from, to: chosen.to, events: chosen.events },\n        used: chosen.names,\n        leftOut: groups.filter((g) => g !== chosen).flatMap((g) => g.names),\n    };\n}\nfunction run(fetched, ctx) {\n    const sources = ctx.extra.sources ?? [];\n    if (fetched.length !== sources.length) {\n        throw new Error(`fetched ${fetched.length} calendar sources but ${sources.length} are configured`);\n    }\n    const windows = fetched.map((f, i) => {\n        const s = sources[i];\n        const name = String(s.name);\n        let data;\n        try {\n            data = JSON.parse(String(f.data));\n        }\n        catch {\n            throw new Error(`calendar source ${name}: the response is not JSON`);\n        }\n        const w = s.format === 'ff-weekly-json' ? fromFfWeekly(data, name) : fromAstraWindow(data, name);\n        return { ...w, name };\n    });\n    const { window, used, leftOut } = mergeWindows(windows, ctx.now);\n    return [\n        {\n            source: `n8n-${used.join('+')}`.slice(0, 100),\n            window,\n            leftOut,\n            workflowRunId: ctx.executionId,\n        },\n    ];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: {},\n  extra: { sources: $(\"Sources (edit me)\").all().map((i) => i.json) },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "4ff13b16-2293-4702-8208-1e660165bf87",
+      "name": "Push to ASTRA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/v1/calendar/window",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, window: $json.window }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "astraAutomationT",
+          "name": "ASTRA automation token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30 minutes": {
+      "main": [
+        [
+          {
+            "node": "Sources (edit me)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sources (edit me)": {
+      "main": [
+        [
+          {
+            "node": "Fetch calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch calendar": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Push to ASTRA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "astraErrorHandle"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "astra": "Ingestion: owner-chosen economic calendar → ASTRA calendar window (ASTRA keeps it fresh for 1 h). A failure stops the run → calendar stale → no new trades."
+  }
+}

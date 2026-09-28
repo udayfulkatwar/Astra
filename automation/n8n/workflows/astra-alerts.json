@@ -1,0 +1,182 @@
+{
+  "id": "astraAlerts00001",
+  "name": "ASTRA — Alerts",
+  "nodes": [
+    {
+      "id": "3f447754-e758-487a-8458-65a980f5744a",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "433f5365-2237-4ca0-8c52-bd2606f4786f",
+      "name": "Latest event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8080/api/v1/events?limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "astraAutomationT",
+          "name": "ASTRA automation token"
+        }
+      }
+    },
+    {
+      "id": "a3d2f72c-2bb0-4cb3-82e0-71cad762d799",
+      "name": "Cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/alerts-cursor.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction run(_items, ctx) {\n    const latest = ctx.extra.latest?.[0]?.events;\n    const newest = Array.isArray(latest) && latest.length > 0 ? Number(latest[0].seq) : 0;\n    const saved = ctx.staticData.lastSeq;\n    const afterSeq = typeof saved === 'number' && Number.isFinite(saved) ? saved : newest;\n    return [{ afterSeq }];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: $getWorkflowStaticData('global'),\n  extra: { latest: $(\"Latest event\").all().map((i) => i.json) },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "e7129144-ee12-417c-86c9-a36d63102823",
+      "name": "New events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api:8080/api/v1/events?afterSeq={{ $json.afterSeq }}&order=asc&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "astraAutomationT",
+          "name": "ASTRA automation token"
+        }
+      }
+    },
+    {
+      "id": "529af012-98bc-4ef6-857d-ab21e2898774",
+      "name": "Pick and format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Generated from automation/n8n/src/nodes/alerts-format.ts — change it there and rebuild.\n/** FNV-1a 64-bit, hex: short, stable ids for items a source does not identify. */\nfunction fnv(text) {\n    let h = 0xcbf29ce484222325n;\n    for (let i = 0; i < text.length; i++) {\n        h ^= BigInt(text.charCodeAt(i));\n        h = (h * 0x100000001b3n) & 0xffffffffffffffffn;\n    }\n    return h.toString(16).padStart(16, '0');\n}\n/** A string field, or `fallback` when the value is missing or not a string. */\nfunction str(value, fallback = '') {\n    return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;\n}\nfunction truncate(text, max) {\n    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;\n}\n/** ISO-8601 UTC from a date string; null when it cannot be read (never guessed). */\nfunction isoOrNull(value) {\n    if (typeof value !== 'string' || value.trim() === '')\n        return null;\n    const ms = Date.parse(value.trim());\n    return Number.isNaN(ms) ? null : new Date(ms).toISOString();\n}\nfunction requireSlug(value, what) {\n    if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(value)) {\n        throw new Error(`${what} must be a short lowercase name (a-z, 0-9, -), got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\nfunction requireHttpUrl(value, what) {\n    if (typeof value !== 'string' || !/^https?:\\/\\/[^\\s]+$/.test(value)) {\n        throw new Error(`${what} must be an http(s) URL, got ${JSON.stringify(value)}`);\n    }\n    return value;\n}\n/**\n * \"Pick and format\" — ASTRA events worth a message → one grouped notification (or nothing).\n *\n * Sent by default: every ERROR and CRITICAL; kill switches, mode changes, account-health\n * changes, position alerts, protective closes, high-impact news, executions and closed trades.\n * Not sent: routine gate rejections and calendar updates (they are in the daily report), and\n * failures of the alert / notify workflows themselves (that would loop). The cursor advances\n * past every event read, sent or not.\n */\n\nconst ALERT_RULES = {\n    levels: ['ERROR', 'CRITICAL'],\n    types: [\n        'KILL_SWITCH_ACTIVATED',\n        'KILL_SWITCH_DEACTIVATED',\n        'MODE_CHANGED',\n        'ACCOUNT_HEALTH_CHANGED',\n        'NEWS_HIGH_IMPACT',\n        'TRADE_JOURNALED',\n    ],\n    typePrefixes: ['POSITION_', 'PROTECTIVE_CLOSE_', 'EXECUTION_'],\n    /** Workflows whose own failures are not alerted (they deliver the alerts). */\n    quietWorkflows: ['ASTRA — Alerts', 'ASTRA — Notify'],\n    maxLines: 25,\n};\nfunction wanted(e) {\n    if (e.type === 'WORKFLOW_ERROR') {\n        const wf = str(e.data?.workflow);\n        if (ALERT_RULES.quietWorkflows.includes(wf))\n            return false;\n    }\n    return (ALERT_RULES.levels.includes(e.level) ||\n        ALERT_RULES.types.includes(e.type) ||\n        ALERT_RULES.typePrefixes.some((p) => e.type.startsWith(p)));\n}\nconst line = (e) => `${e.level === 'INFO' ? '' : `${e.level} `}${e.at.slice(11, 16)}Z ${e.component}: ${e.message}`;\nfunction format(events) {\n    const picked = events.filter(wanted);\n    if (picked.length === 0)\n        return null;\n    const worst = ['CRITICAL', 'ERROR', 'WARN', 'INFO'].find((l) => picked.some((e) => e.level === l)) ?? 'INFO';\n    if (picked.length === 1) {\n        const e = picked[0];\n        return {\n            title: `ASTRA ${e.level}: ${e.type.toLowerCase().replace(/_/g, ' ')}`,\n            text: truncate(line(e), 1_800),\n            level: e.level,\n        };\n    }\n    const shown = picked.slice(-ALERT_RULES.maxLines);\n    const more = picked.length - shown.length;\n    return {\n        title: `ASTRA: ${picked.length} alerts (worst ${worst})`,\n        text: truncate([...(more > 0 ? [`… ${more} earlier alert(s) not shown`] : []), ...shown.map(line)].join('\\n'), 3_800),\n        level: worst,\n    };\n}\nfunction run(items, ctx) {\n    const events = (items[0]?.events ?? [])\n        .slice()\n        .sort((a, b) => a.seq - b.seq);\n    const after = Number(ctx.extra.cursor?.[0]?.afterSeq ?? 0);\n    const last = events.at(-1)?.seq;\n    ctx.staticData.lastSeq = typeof last === 'number' ? last : after;\n    const message = format(events.filter((e) => e.seq > after));\n    return message ? [message] : [];\n}\nconst ctx = {\n  now: new Date(),\n  executionId: String($execution.id),\n  staticData: $getWorkflowStaticData('global'),\n  extra: { cursor: $(\"Cursor\").all().map((i) => i.json) },\n};\nreturn run($input.all().map((i) => i.json), ctx).map((json) => ({ json }));"
+      }
+    },
+    {
+      "id": "e7050db6-6272-4900-8343-94d4ea47a696",
+      "name": "Notify",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": "astraNotify00001"
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Latest event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest event": {
+      "main": [
+        [
+          {
+            "node": "Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cursor": {
+      "main": [
+        [
+          {
+            "node": "New events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New events": {
+      "main": [
+        [
+          {
+            "node": "Pick and format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick and format": {
+      "main": [
+        [
+          {
+            "node": "Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "astraErrorHandle"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "astra": "Notifications: new ASTRA events worth a message → ASTRA — Notify (grouped, once each)."
+  }
+}

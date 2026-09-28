@@ -25,3 +25,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0018](0018-learning-metrics.md)                 | Learning metrics: descriptive, sample-size honest             | Accepted |
 | [0019](0019-news-intelligence.md)                | News intelligence: rules classifier, news risk in the gate    | Accepted |
 | [0020](0020-ai-analysis-layer.md)                | AI analysis layer: orchestrator, budgets, veto-only input     | Accepted |
+| [0021](0021-n8n-workflows.md)                    | n8n workflows: generated from tested code; ASTRA computes     | Accepted |

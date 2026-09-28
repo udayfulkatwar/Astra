@@ -1,4 +1,5 @@
 /** Audit log, activity events and the live SSE stream (spec §22, §68). */
+import { EVENT_LEVELS } from '@astra/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { READ_ROLES, requireRole, type TokenAuthenticator } from '../auth';
@@ -31,6 +32,9 @@ export function registerRecordRoutes(
       .object({
         limit: z.coerce.number().int().min(1).max(500).default(100),
         afterSeq: z.coerce.number().int().optional(),
+        /** asc: oldest after `afterSeq` first (for pollers such as the n8n alert workflow). */
+        order: z.enum(['asc', 'desc']).default('desc'),
+        minLevel: z.enum(EVENT_LEVELS).optional(),
       })
       .parse(req.query);
     return { events: await runtime.repos.events.recent(q) };

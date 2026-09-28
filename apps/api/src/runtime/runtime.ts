@@ -32,6 +32,7 @@ import {
   MarketBarRepository,
   NewsRepository,
   PaperBrokerStateRepository,
+  ReportRepository,
   SystemStateRepository,
   migrate,
   type Sql,
@@ -62,6 +63,7 @@ import { ModeService } from './mode-service';
 import { JournalService } from './journal-service';
 import { PositionMonitorService } from './position-monitor';
 import { ProtectionService } from './protection-service';
+import { ReportService } from './report-service';
 import { createSimulation } from './simulation';
 
 export interface RuntimeOptions {
@@ -103,6 +105,7 @@ export class AstraRuntime {
     backtests: BacktestRepository;
     news: NewsRepository;
     ai: AiRepository;
+    reports: ReportRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
@@ -117,6 +120,8 @@ export class AstraRuntime {
   readonly news: NewsService;
   /** AI analysis layer (Phase 6): context for the gate, post-trade reviews. */
   readonly ai: AiService;
+  /** Daily / weekly reports (delivered by n8n). */
+  readonly reports: ReportService;
   /** News provider poller (null: items arrive by push only). */
   readonly newsPoller: NewsPoller | null;
   readonly monitor: PositionMonitorService;
@@ -164,6 +169,7 @@ export class AstraRuntime {
       backtests: new BacktestRepository(sql),
       news: new NewsRepository(sql),
       ai: new AiRepository(sql),
+      reports: new ReportRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
@@ -305,6 +311,16 @@ export class AstraRuntime {
       log,
       providers: opts.aiProviders ?? new Map(),
       simulation: opts.simulation,
+    });
+    this.reports = new ReportService({
+      config,
+      repo: this.repos.reports,
+      accounts: this.accounts,
+      killSwitches: this.killSwitches,
+      health: this.health,
+      mode: () => this.mode.current(),
+      simulation: opts.simulation,
+      now: () => clock.now(),
     });
     this.decisions = new DecisionService({
       config,
