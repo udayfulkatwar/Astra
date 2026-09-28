@@ -213,6 +213,7 @@ Remaining:
    Rithmic/ProjectX, NinjaTrader) — determines the execution and market-data adapters.
 3. **Instruments** you actually trade, and your broker's contract specs for CFDs (contract size).
 4. **Your strategy rules** (entries, confirmation, stops, targets, management) — Phase 5.
+   `docs/STRATEGY_PROMPT.md` is a prompt for drafting them with another model in ASTRA's format.
 5. **Your personal risk limits** — review `config/risk-policies/template-conservative.yaml`.
 6. **Data/AI providers and budget** — market data, economic calendar, news (Phase 2/4); for AI,
    an Anthropic API key set as `ANTHROPIC_API_KEY` in the server environment, and your daily AI
