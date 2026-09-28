@@ -80,6 +80,35 @@ export const SystemConfigSchema = z.object({
     .strict()
     .optional(),
   /**
+   * News intelligence (ADR-0019). Omitted → defaults and no provider: items arrive by push
+   * (n8n → POST /api/v1/news/items) or from the SIMULATED feed in simulation mode.
+   */
+  news: z
+    .object({
+      /** Provider adapter; real ones are added once the owner chooses a provider. */
+      provider: z.enum(['none']).default('none'),
+      pollIntervalMs: z.number().int().min(10_000).default(60_000),
+      timeoutMs: z.number().int().positive().max(60_000).default(10_000),
+      /** How far back the first poll after a start reaches. */
+      lookbackHours: z.number().int().min(1).max(72).default(6),
+      /** Items older than this are dropped from memory (they stay in the database). */
+      retentionHours: z.number().int().min(1).max(720).default(48),
+      /** DEFAULTS: how long a HIGH / MEDIUM-impact item keeps news risk HIGH / ELEVATED. */
+      risk: z
+        .object({
+          highImpactMinutes: z.number().int().min(1).max(1_440).default(30),
+          mediumImpactMinutes: z.number().int().min(1).max(1_440).default(15),
+        })
+        .strict()
+        .default({ highImpactMinutes: 30, mediumImpactMinutes: 15 }),
+      /** Words that tie a headline to an instrument (in addition to its event currencies). */
+      instrumentKeywords: z
+        .record(z.string(), z.array(z.string().trim().min(2).max(60)).max(50))
+        .default({}),
+    })
+    .strict()
+    .optional(),
+  /**
    * Market-structure detection definitions (swings, BOS/CHoCH, liquidity, gaps — ADR-0010).
    * Omitted → the @astra/market-structure defaults. DEFAULTS to review with the strategy (Phase 5).
    */

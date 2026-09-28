@@ -21,6 +21,8 @@ export class HealthService {
       marketData: () => { status: HealthStatus; detail: string };
       /** CALENDAR from calendar freshness (the gate's `calendarMaxAgeMs`). */
       calendar: () => { status: HealthStatus; detail: string };
+      /** NEWS from news-feed freshness (the gate's `newsMaxAgeMs`). */
+      news: () => { status: HealthStatus; detail: string };
     },
   ) {
     const policies = Object.fromEntries(
@@ -53,6 +55,9 @@ export class HealthService {
 
     const calendar = this.deps.calendar();
     this.registry.report('CALENDAR', calendar.status, calendar.detail);
+
+    const news = this.deps.news();
+    this.registry.report('NEWS', news.status, news.detail);
 
     const adapters = this.deps.adapters();
     if (adapters.length === 0) {

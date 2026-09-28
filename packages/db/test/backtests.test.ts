@@ -31,7 +31,12 @@ describe.skipIf(!available)('backtest runs repository', () => {
       seed: 7,
     });
     const result = await runBacktest({
-      config: { symbol: 'MNQ', accountId: 'paper-demo', calendar: 'NOT_MODELLED' },
+      config: {
+        symbol: 'MNQ',
+        accountId: 'paper-demo',
+        calendar: 'NOT_MODELLED',
+        news: 'NOT_MODELLED',
+      },
       bars,
       env: {
         config: decisionConfigView(config),

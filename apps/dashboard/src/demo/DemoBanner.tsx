@@ -67,6 +67,14 @@ export default function DemoBanner() {
         <button
           type="button"
           className="btn small"
+          title="Adds a SIMULATED high-impact headline now: news risk turns HIGH and the gate blocks new trades for 30 minutes"
+          onClick={() => rt.injectBreakingNews()}
+        >
+          Breaking news
+        </button>
+        <button
+          type="button"
+          className="btn small"
           title="Books a SIMULATED realized loss so open trades push the daily loss limit past 90%: automatic protection should close them"
           onClick={() => rt.simulateLargeLoss()}
         >

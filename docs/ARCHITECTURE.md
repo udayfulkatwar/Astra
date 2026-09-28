@@ -142,6 +142,7 @@ astra/
 │   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
+│   ├── news/                News provider port + poller, rules classifier, news risk, sentiment (ADR-0019)
 │   ├── journal/             Trade journal: excursions, plan-vs-actual entries, statistics (ADR-0015)
 │   ├── learning/            Learning metrics over journal entries, observations only (ADR-0018)
 │   ├── backtest/            M1 replay through the real gate, protection and journal (ADR-0016)
@@ -165,6 +166,7 @@ safety      → core
 market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
 calendar    → core   (pure and isomorphic)
+news        → core   (pure and isomorphic; CONTEXT only)
 journal     → core   (pure and isomorphic)
 learning    → core, journal   (pure and isomorphic; descriptive only, no write path)
 backtest    → core, calendar, decision, journal, market-data, market-structure, prop-firm, risk, safety
@@ -232,6 +234,12 @@ two instances migrating concurrently.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | `market_bars` | completed OHLC bars built from observed quotes; PK (symbol, timeframe, open_time, source); `volume` NULL when not reported | upsert (complete bars only) |
 
+### Phase-4 tables
+
+| Table        | Purpose                                                                 | Mutability  |
+| ------------ | ----------------------------------------------------------------------- | ----------- |
+| `news_items` | accepted news items with their classification (classifier version kept) | insert-only |
+
 ### Phase-8 tables
 
 | Table           | Purpose                                                                            | Mutability  |
@@ -241,7 +249,7 @@ two instances migrating concurrently.
 
 ### Later phases (planned)
 
-`instruments`, `news_items`, `economic_events`, `sentiment_readings`, `signals`,
+`instruments`, `economic_events`, `sentiment_readings`, `signals`,
 `positions`, `ai_model_calls`, `workflow_runs`, `alerts`, `performance_metrics`,
 `operating_costs`.
 
@@ -296,6 +304,8 @@ rules in force.
 | POST     | `/api/v1/backtests` (replay; never trades)                                  | operator                                     |
 | GET      | `/api/v1/backtests`, `/api/v1/backtests/:id`                                | viewer                                       |
 | GET      | `/api/v1/learning` (journal or a backtest run)                              | viewer                                       |
+| POST     | `/api/v1/news/items` (push; MANUAL)                                         | automation                                   |
+| GET      | `/api/v1/news`, `/api/v1/news/context`                                      | viewer                                       |
 
 ---
 

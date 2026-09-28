@@ -77,6 +77,9 @@ importers:
       '@astra/market-structure':
         specifier: workspace:*
         version: link:../../packages/market-structure
+      '@astra/news':
+        specifier: workspace:*
+        version: link:../../packages/news
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../../packages/prop-firm
@@ -120,6 +123,9 @@ importers:
       '@astra/learning':
         specifier: workspace:*
         version: link:../../packages/learning
+      '@astra/news':
+        specifier: workspace:*
+        version: link:../../packages/news
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.0)
@@ -205,6 +211,9 @@ importers:
       '@astra/market-structure':
         specifier: workspace:*
         version: link:../market-structure
+      '@astra/news':
+        specifier: workspace:*
+        version: link:../news
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../prop-firm
@@ -298,6 +307,9 @@ importers:
       '@astra/market-data':
         specifier: workspace:*
         version: link:../market-data
+      '@astra/news':
+        specifier: workspace:*
+        version: link:../news
       '@astra/prop-firm':
         specifier: workspace:*
         version: link:../prop-firm
@@ -387,6 +399,15 @@ importers:
       '@astra/market-data':
         specifier: workspace:*
         version: link:../market-data
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  packages/news:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^4.6.5
         version: 4.6.5

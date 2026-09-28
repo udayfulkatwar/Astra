@@ -63,6 +63,7 @@ export default tseslint.config(
       'packages/calendar/src/**/*.ts',
       'packages/journal/src/**/*.ts',
       'packages/learning/src/**/*.ts',
+      'packages/news/src/**/*.ts',
       'packages/backtest/src/**/*.ts',
     ],
     rules: {

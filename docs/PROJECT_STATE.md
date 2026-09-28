@@ -1,14 +1,15 @@
 # ASTRA — Project State
 
-_Last updated: 2026-09-27 · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-09-28 · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
 **Phase 0 (architecture) and Phase 1 (foundation) complete. Phase 3 safety core complete.
 Phase 2 (market data) complete except the real provider adapter**, which needs the owner's
-platform choice (see _Owner inputs_). **Phase 4 calendar groundwork done** (provider port,
-poller, validation, change events, event-risk view; a real provider needs the owner's choice);
-news is not started. **Phase 5 groundwork done:** market-structure detection (no lookahead).
+platform choice (see _Owner inputs_). **Phase 4 done except real providers:** economic
+calendar (provider port, poller, validation, change events, event-risk view) and **news
+intelligence** (provider port, rules classifier, news risk in the gate, provider sentiment) —
+real calendar and news providers need the owner's choice. **Phase 5 groundwork done:** market-structure detection (no lookahead).
 **Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised), the
 trade journal, **backtesting** and **learning metrics** are done; the gate prices the
 trailing-drawdown path and the losing-streak limit is daily (owner decisions). An extended paper
@@ -18,30 +19,31 @@ market structure, a quote-quality guard and event blackouts.
 
 ## Completed
 
-| Area               | What exists                                                                                                                                                                                                      | Tests                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| Architecture       | `docs/ARCHITECTURE.md` (18 sections), ADR-0001…0009                                                                                                                                                              | —                                           |
-| Tooling            | pnpm workspace, TS 6 strict, ESLint (type-aware), Prettier, Vitest, GitHub Actions CI with Postgres                                                                                                              | —                                           |
-| `@astra/core`      | `Observed<T>` (no-fabrication wrapper), modes, health, UTC/time-zone (DST-safe) utilities, sessions/trading hours, decimal math, UUIDv7, canonical JSON/hash, DATA/SIGNAL/CONTEXT schemas                        | 38                                          |
-| `@astra/prop-firm` | Rule-profile schema (all §13 rule families), account tracking (peaks, day-start), account state engine, worst-case `canTrade` rule engine, firm quantity headroom                                                | 51 (incl. property tests)                   |
-| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN; position monitor + alert tracker (ADR-0012)                                  | 33 (incl. 500-run property test)            |
-| `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                     | 24                                          |
-| `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                        | 83 (incl. property test)                    |
-| `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt)  | 22                                          |
-| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                          | 57                                          |
-| Market structure   | `@astra/market-structure` (pure; ADR-0010): swings with labels, BOS/CHoCH, liquidity pools and sweeps, fair value gaps — complete bars only, every item stamped with when it became known                        | 13 (incl. no-lookahead property)            |
-| Learning metrics   | `@astra/learning` (pure; ADR-0018): performance by 11 dimensions with 95 % ranges and small-sample flags, R drawdown, streaks, execution quality, observations (never applied); per-trade context in the journal | 5 + 3 (context) + API                       |
-| Backtesting        | `@astra/backtest` (pure; ADR-0016): M1 replay through the real gate, sizing, prop-firm rules, protection and journal; next-open pessimistic fills; resampler; TEMPLATE strategy; seeded SIMULATED bars           | 21 (incl. no-lookahead property) + DB + API |
-| Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                 | 7 + DB + API                                |
-| Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`     | 12 + 3 (core)                               |
-| `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                            | 21 (real Postgres)                          |
-| `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                         | 10                                          |
-| `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                            | 25 (real Postgres, end to end)              |
-| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build             | 5 + browser walkthrough                     |
-| Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                   | compose validated                           |
-| n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                 | JSON validated                              |
+| Area               | What exists                                                                                                                                                                                                                                  | Tests                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Architecture       | `docs/ARCHITECTURE.md` (18 sections), ADR-0001…0009                                                                                                                                                                                          | —                                           |
+| Tooling            | pnpm workspace, TS 6 strict, ESLint (type-aware), Prettier, Vitest, GitHub Actions CI with Postgres                                                                                                                                          | —                                           |
+| `@astra/core`      | `Observed<T>` (no-fabrication wrapper), modes, health, UTC/time-zone (DST-safe) utilities, sessions/trading hours, decimal math, UUIDv7, canonical JSON/hash, DATA/SIGNAL/CONTEXT schemas                                                    | 38                                          |
+| `@astra/prop-firm` | Rule-profile schema (all §13 rule families), account tracking (peaks, day-start), account state engine, worst-case `canTrade` rule engine, firm quantity headroom                                                                            | 51 (incl. property tests)                   |
+| `@astra/risk`      | Risk policy, position sizing (smallest limit wins, binding constraint reported), policy checks, account health SAFE→HALTED/UNKNOWN; position monitor + alert tracker (ADR-0012)                                                              | 33 (incl. 500-run property test)            |
+| `@astra/safety`    | Kill switches (7 scopes, fail-closed until loaded, human-only manual clears), component health registry (silence → UNKNOWN), halt conditions                                                                                                 | 24                                          |
+| `@astra/decision`  | Context assembler (timeouts → TIMEOUT/ERROR), gate checks across 11 layers (incl. `market.session`), required-layer enforcement, decision engine with §58 explanations, persist-or-reject                                                    | 83 (incl. property test)                    |
+| `@astra/execution` | Broker adapter interface, paper broker (brackets, P&L, failure injection, persistence), execution gateway (re-validation, per-account lock, 3-level duplicate protection, confirmation polling, UNKNOWN → halt)                              | 22                                          |
+| Market data        | `@astra/market-data` (pure, isomorphic; ADR-0009): adapter port, simulation adapter, quote-quality guard, OHLC bars M1…D1 (gaps never filled), ATR(14), market snapshot                                                                      | 57                                          |
+| Market structure   | `@astra/market-structure` (pure; ADR-0010): swings with labels, BOS/CHoCH, liquidity pools and sweeps, fair value gaps — complete bars only, every item stamped with when it became known                                                    | 13 (incl. no-lookahead property)            |
+| Learning metrics   | `@astra/learning` (pure; ADR-0018): performance by 11 dimensions with 95 % ranges and small-sample flags, R drawdown, streaks, execution quality, observations (never applied); per-trade context in the journal                             | 5 + 3 (context) + API                       |
+| Backtesting        | `@astra/backtest` (pure; ADR-0016): M1 replay through the real gate, sizing, prop-firm rules, protection and journal; next-open pessimistic fills; resampler; TEMPLATE strategy; seeded SIMULATED bars                                       | 21 (incl. no-lookahead property) + DB + API |
+| Trade journal      | `@astra/journal` (pure; ADR-0015): excursion tracker (observed prices only), plan-vs-actual entries (slippage, costs, R, MFE/MAE), statistics; append-only `trade_journal` table                                                             | 7 + DB + API                                |
+| News intelligence  | `@astra/news` (pure; ADR-0019): provider port + poller, per-item validation, de-duplication, rules classifier (13 categories, impact, instruments), news risk per instrument, provider sentiment summary, SIMULATED feed; `news_items` table | 11 + DB + API                               |
+| Calendar           | `@astra/calendar` (pure; ADR-0011): provider port + poller (timeout, never overlaps), validation, currency → instrument mapping, change events, event-risk view, SIMULATED schedule; shared `assessBlackout`                                 | 12 + 3 (core)                               |
+| `@astra/db`        | Checksum-verified SQL migrations, hash-chained append-only audit log, immutable decisions, one-approval-per-signal index, `market_bars`, repositories                                                                                        | 21 (real Postgres)                          |
+| `@astra/config`    | YAML loader, cross-reference validation, secret detection, config hash; template configs                                                                                                                                                     | 10                                          |
+| `apps/api`         | Fastify core service: role tokens, REST + SSE, in-core safety loop, startup reconciliation, restart recovery, DB-outage fail-closed start, market scanner/bars, self-contained bundle                                                        | 25 (real Postgres, end to end)              |
+| `apps/dashboard`   | Command center: status bar, overview (§66), Trade Approval Center, market scanner, accounts, risk controls, health, live activity, audit, calendar, rules, strategies, config; in-browser demo build                                         | 5 + browser walkthrough                     |
+| Deployment         | `docker-compose.yml` (postgres, api, dashboard, n8n), Dockerfiles, nginx, `.env.example`, `docs/DEPLOYMENT.md`                                                                                                                               | compose validated                           |
+| n8n                | Heartbeat + error-handler workflows, setup guide                                                                                                                                                                                             | JSON validated                              |
 
-**Total: 478 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 493 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -75,6 +77,18 @@ Remaining:
   `providerSymbols`, reconnect/backoff, honest health) — needs the owner's platform choice.
 - Provider history backfill (seed complete bars from the provider) so D1/H4 levels and session
   ranges are available right after a restart (today they return once a full period is observed).
+
+## News intelligence (done, ADR-0019)
+
+- The gate now **requires** a fresh news-risk assessment (`decision.news.required: true`):
+  HIGH-impact news for an instrument blocks new trades on it for 30 min (MEDIUM → ELEVATED,
+  shown as context for 15 min); a feed silent for 15 min is STALE → no new trades.
+- Headlines are classified by deterministic, explainable rules (category, impact, affected
+  instruments via currencies, keywords and provider tags; fail-safe when relevance is unknown).
+  Impact only ever rounds up. Sentiment is the provider's only — never guessed.
+- `POST /api/v1/news/items` (n8n push, MANUAL), `GET /api/v1/news`, `GET /api/v1/news/context`;
+  items stored and restored after a restart; HIGH-impact items raise warnings. Dashboard **News
+  Intelligence** page; demo "Breaking news" button; backtests take an explicit news choice.
 
 ## Phase 4 / 5 groundwork (done without owner input)
 
@@ -157,7 +171,7 @@ Remaining:
 | Phase | Scope                                                                                                                                             |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                    |
-| 4     | Real economic-calendar provider adapter (owner's choice); news ingestion + classification; sentiment; flip `decision.news.required`               |
+| 4     | Real economic-calendar and news provider adapters (owner's choice); news-driven strategies and §57 actions (reduce size / close / halt)           |
 | 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
 | 6     | AI orchestrator (provider adapters, routing, schema-validated outputs, call log, budgets); post-trade analysis                                    |
 | 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
@@ -233,10 +247,14 @@ authorization. Details in `docs/adr/`.
     every instrument" — safe (over-blocking), but wrong once currencies are configured.
 22. Backtests know only M1 OHLC: the path inside a bar is unknown (stop assumed first), and there
     is no historical news, AI or real calendar yet; queueing and partial fills are not modelled.
+23. News classification is keyword-based (rules-v1): some headlines will be misclassified; impact
+    only rounds up, so errors lean towards blocking. Paper trading without simulation now needs a
+    news source (provider, or n8n pushing at least every 15 minutes).
+24. `news_items` has no retention policy yet (the in-memory window is 48 h).
 
 ## Next implementation target
 
-Without owner input: the news-ingestion port and news-risk classification (Phase 4), then the
-AI orchestrator contracts (Phase 6). With owner input: the real market-data and calendar adapters for the chosen
+Without owner input: the AI orchestrator contracts and provider-agnostic adapters (Phase 6:
+structured analysis, call log, budgets), then n8n workflows for news/calendar ingestion (Phase 7). With owner input: the real market-data and calendar adapters for the chosen
 providers, the owner's strategy on top of the structure engine (Phase 5), and later the
 execution adapter.

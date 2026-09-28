@@ -19,6 +19,7 @@
     "@astra/execution": "workspace:*",
     "@astra/journal": "workspace:*",
     "@astra/market-data": "workspace:*",
+    "@astra/news": "workspace:*",
     "@astra/prop-firm": "workspace:*",
     "@astra/safety": "workspace:*",
     "postgres": "^3.4.9"

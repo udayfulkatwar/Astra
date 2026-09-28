@@ -17,7 +17,12 @@ const sim = (seed: number, from = '2026-03-02T00:00:00Z', to = '2026-03-07T00:00
     seed,
   });
 const BARS = sim(7);
-const BASE = { symbol: 'MNQ', accountId: 'paper-demo', calendar: 'SIMULATED_SCHEDULE' } as const;
+const BASE = {
+  symbol: 'MNQ',
+  accountId: 'paper-demo',
+  calendar: 'SIMULATED_SCHEDULE',
+  news: 'SIMULATED_FEED',
+} as const;
 const run = (bars: readonly Bar[], env: BacktestEnvironment = environment(), extra = {}) =>
   runBacktest({ config: { ...BASE, ...extra }, bars, env });
 
@@ -76,17 +81,28 @@ describe('runBacktest', () => {
     );
   }, 60_000);
 
-  it('blocks every trade when a mandatory input is missing (news required, none in backtests)', async () => {
+  it('applies news risk from the SIMULATED feed through the real gate', async () => {
+    const r = await run(BARS);
+    expect(r.warnings).toContain('News comes from the SIMULATED placeholder feed, not real news.');
+    // Treating every news level as blocking proves the assessment reaches the gate.
     const env = environment();
-    const policy = { ...env.config.policy, news: { ...env.config.policy.news, required: true } };
-    const r = await run(BARS, { ...env, config: { ...env.config, policy } });
-    expect(r.decisions.signals).toBeGreaterThan(0);
-    expect(r.decisions.approved).toBe(0);
-    expect(r.trades).toEqual([]);
-    expect(r.decisions.blockedBy.find((b) => b.checkId === 'news.risk')?.count).toBe(
-      r.decisions.signals,
+    const news = {
+      ...env.config.policy.news,
+      blockLevels: ['HIGH', 'ELEVATED', 'NORMAL'] as const,
+    };
+    const policy = { ...env.config.policy, news: { ...news, blockLevels: [...news.blockLevels] } };
+    const blocked = await run(BARS, { ...env, config: { ...env.config, policy } });
+    expect(blocked.decisions.signals).toBeGreaterThan(0);
+    expect(blocked.decisions.approved).toBe(0);
+    expect(blocked.decisions.blockedBy.find((b) => b.checkId === 'news.risk')?.count).toBe(
+      blocked.decisions.signals,
     );
-    expect(r.warnings.some((w) => w.includes('News assessment is required'))).toBe(true);
+  });
+
+  it('says so loudly when news is not modelled', async () => {
+    const r = await run(BARS, environment(), { news: 'NOT_MODELLED' });
+    expect(r.warnings).toContain('News risk NOT applied: no news data was used for this period.');
+    expect(r.decisions.blockedBy.find((b) => b.checkId === 'news.risk')).toBeUndefined();
   });
 
   it('says so loudly when the calendar is not modelled', async () => {
@@ -144,7 +160,14 @@ describe('runBacktest', () => {
     await expect(
       runBacktest({ config: { ...BASE, symbol: 'ES' }, bars: BARS, env: environment() }),
     ).rejects.toThrow('no instrument spec for ES');
-    // The calendar choice is explicit: there is no silent default.
+    // The calendar and news choices are explicit: there is no silent default.
+    await expect(
+      runBacktest({
+        config: { symbol: 'MNQ', accountId: 'paper-demo', calendar: 'NOT_MODELLED' } as never,
+        bars: BARS,
+        env: environment(),
+      }),
+    ).rejects.toThrow();
     await expect(
       runBacktest({
         config: { symbol: 'MNQ', accountId: 'paper-demo' } as never,

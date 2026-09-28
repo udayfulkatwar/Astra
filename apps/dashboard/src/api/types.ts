@@ -25,6 +25,12 @@ import type {
 import type { EventRiskView, InstrumentEventRisk } from '@astra/calendar';
 import type { JournalEntry, JournalStats, JournalSummary } from '@astra/journal';
 import type { GroupStats, LearningReport } from '@astra/learning';
+import type {
+  ClassifiedNews,
+  NewsContextView,
+  NewsFeedStatus,
+  NewsPollerStatus,
+} from '@astra/news';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
@@ -211,4 +217,12 @@ export type { JournalEntry, JournalStats, JournalSummary };
 export type { GroupStats, LearningReport };
 export interface LearningResponse extends LearningReport {
   source: { kind: 'journal' | 'backtest'; runId: string | null; label: string };
+}
+
+/** News intelligence (GET /api/v1/news, /api/v1/news/context). */
+export type { ClassifiedNews, NewsContextView };
+export interface NewsFeedResponse {
+  feed: NewsFeedStatus & { health: { status: string; detail: string } };
+  poller: NewsPollerStatus | null;
+  items: ClassifiedNews[];
 }

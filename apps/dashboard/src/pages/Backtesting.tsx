@@ -78,6 +78,7 @@ function RunForm({ onDone }: { onDone: (runId: string) => void }) {
   const [startPrice, setStartPrice] = useState('');
   const [source, setSource] = useState('');
   const [calendar, setCalendar] = useState<'SIMULATED_SCHEDULE' | 'NOT_MODELLED' | null>(null);
+  const [news, setNews] = useState<'SIMULATED_FEED' | 'NOT_MODELLED' | null>(null);
   const [timeframe, setTimeframe] = useState<StrategyTf>('M15');
   const [rr, setRr] = useState(2);
   const [minStop, setMinStop] = useState(8);
@@ -86,13 +87,14 @@ function RunForm({ onDone }: { onDone: (runId: string) => void }) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!account || !sym || !calendar) return;
+    if (!account || !sym || !calendar || !news) return;
     const body: BacktestRequestInput = {
       symbol: sym,
       accountId: account.account.id,
       from: `${from}T00:00:00Z`,
       to: `${to}T00:00:00Z`,
       calendar,
+      news,
       strategy: {
         id: 'structure-breakout-template',
         timeframe,
@@ -201,6 +203,15 @@ function RunForm({ onDone }: { onDone: (runId: string) => void }) {
             { value: 'NOT_MODELLED', label: 'Not modelled' },
           ]}
         />
+        <Segmented
+          label="News (choose one)"
+          value={news}
+          onChange={setNews}
+          options={[
+            { value: 'SIMULATED_FEED', label: 'Simulated feed' },
+            { value: 'NOT_MODELLED', label: 'Not modelled' },
+          ]}
+        />
       </div>
       <div className="form-grid">
         <label className="field">
@@ -263,14 +274,14 @@ function RunForm({ onDone }: { onDone: (runId: string) => void }) {
       </div>
       <div className="row-between">
         <span className="muted small">
-          {calendar === null
-            ? 'Choose how economic events are handled — there is no silent default.'
+          {calendar === null || news === null
+            ? 'Choose how economic events and news are handled — there is no silent default.'
             : 'A backtest never trades and never changes accounts, the mode or kill switches.'}
         </span>
         <button
           id="bt-run"
           className="btn primary"
-          disabled={run.isPending || !account || !sym || calendar === null}
+          disabled={run.isPending || !account || !sym || calendar === null || news === null}
         >
           {run.isPending ? 'Replaying…' : 'Run backtest'}
         </button>

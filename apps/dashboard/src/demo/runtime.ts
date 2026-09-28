@@ -55,6 +55,7 @@ import {
   type JournalEntry,
 } from '@astra/journal';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
+import { DEFAULT_NEWS_RISK_RULE, NewsService, SimulatedNewsAdapter } from '@astra/news';
 import {
   DEFAULT_MONITOR_POLICY,
   DEFAULT_PROTECTION_POLICY,
@@ -157,6 +158,10 @@ export class DemoRuntime {
   /** The real calendar engine, fed by the SIMULATED weekly schedule. */
   readonly calendarService: CalendarService;
   private readonly calendarAdapter = new SimulatedCalendarAdapter();
+  /** The real news engine, fed by the SIMULATED placeholder feed. */
+  readonly news: NewsService;
+  private readonly newsAdapter = new SimulatedNewsAdapter();
+  private newsPolledAt: number | null = null;
   /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
   readonly tradedSymbols: readonly string[];
 
@@ -212,6 +217,31 @@ export class DemoRuntime {
     for (const a of this.config.accounts.values())
       if (a.status === 'ACTIVE') for (const sym of a.instruments) traded.add(sym);
     this.tradedSymbols = [...traded].sort();
+    const nc = this.config.system.news;
+    this.news = new NewsService({
+      clock: this.clock,
+      freshness: { maxAgeMs: freshness.newsMaxAgeMs, maxFutureSkewMs: freshness.maxFutureSkewMs },
+      instruments: new Map(
+        [...this.config.instruments].map(([symbol, spec]) => [
+          symbol,
+          { eventCurrencies: spec.eventCurrencies, keywords: nc?.instrumentKeywords[symbol] },
+        ]),
+      ),
+      risk: nc?.risk ?? DEFAULT_NEWS_RISK_RULE,
+      retentionMs: (nc?.retentionHours ?? 48) * 3_600_000,
+      onItems: (items) => {
+        for (const n of items) {
+          const hit = n.affected.map((a) => a.symbol).filter((s) => traded.has(s));
+          if (n.impact === 'HIGH' && hit.length > 0)
+            this.emit(
+              'WARN',
+              'news',
+              'NEWS_HIGH_IMPACT',
+              `HIGH-impact ${n.category.toLowerCase().replace('_', ' ')} news for ${hit.join(', ')}: "${n.item.headline}"`,
+            );
+        }
+      },
+    });
     this.historyQuotes = this.simulateHistory(historyStart, start);
     this.clock.set(start);
     this.killSwitches = new KillSwitchRegistry(this.clock);
@@ -282,6 +312,7 @@ export class DemoRuntime {
     this.health.report('DATABASE', 'ONLINE', 'in-browser demo store (not persisted)');
     this.heartbeat();
     this.refreshCalendar();
+    this.refreshNews();
     this.feed();
     void this.syncAccounts();
     this.emit(
@@ -306,6 +337,7 @@ export class DemoRuntime {
       window.setInterval(() => void this.syncAccounts(), 1_000),
       window.setInterval(() => this.heartbeat(), 30_000),
       window.setInterval(() => this.refreshCalendar(), 60_000),
+      window.setInterval(() => this.refreshNews(), 60_000),
     );
   }
 
@@ -326,6 +358,7 @@ export class DemoRuntime {
     // Simulated inputs keep reporting across simulated time (n8n would have kept beating).
     this.heartbeat();
     this.refreshCalendar();
+    this.refreshNews();
     this.feed();
     void this.syncAccounts();
   }
@@ -417,6 +450,8 @@ export class DemoRuntime {
     this.health.report('MARKET_DATA', h.status, `${h.detail} (SIMULATED demo feed)`);
     const cal = this.calendarService.health();
     this.health.report('CALENDAR', cal.status, `${cal.detail} (SIMULATED demo schedule)`);
+    const news = this.news.health();
+    this.health.report('NEWS', news.status, `${news.detail} (SIMULATED demo feed)`);
   }
 
   /**
@@ -530,6 +565,31 @@ export class DemoRuntime {
 
   calendar(): Observed<CalendarWindow> {
     return this.calendarService.current();
+  }
+
+  /** Polls the SIMULATED news feed like the core's news poller (6 h back on the first poll). */
+  private refreshNews(): void {
+    const now = this.clock.now().getTime();
+    const since = this.newsPolledAt === null ? now - 6 * 3_600_000 : this.newsPolledAt - 5 * 60_000;
+    this.news.ingest(
+      { items: this.newsAdapter.itemsBetween(new Date(since), new Date(now)) },
+      this.newsAdapter.id,
+      this.newsAdapter.kind,
+    );
+    this.newsPolledAt = now;
+  }
+
+  /** Demo: a SIMULATED high-impact headline now — news risk turns HIGH and blocks new trades. */
+  injectBreakingNews(): void {
+    const item = this.newsAdapter.breaking(this.clock.now());
+    this.news.ingest({ items: [item] }, this.newsAdapter.id, this.newsAdapter.kind);
+    this.emit(
+      'WARN',
+      'demo',
+      'BREAKING_NEWS',
+      `injected SIMULATED breaking news: "${item.headline}"`,
+    );
+    this.feed();
   }
 
   /** The next restricted (blackout) event from now, for the demo's clock jump. */
@@ -1147,10 +1207,7 @@ export class DemoRuntime {
           );
         },
         calendar: () => Promise.resolve(this.calendar()),
-        newsRisk: () =>
-          Promise.resolve(
-            notObserved('UNAVAILABLE', 'news engine not implemented yet (Phase 4)', 'news'),
-          ),
+        newsRisk: (symbol) => Promise.resolve(this.news.risk(symbol)),
         aiAnalysis: () =>
           Promise.resolve(
             notObserved('UNAVAILABLE', 'AI engine not implemented yet (Phase 6)', 'ai'),

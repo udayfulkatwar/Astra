@@ -24,6 +24,7 @@ describe.skipIf(!available)('API — learning metrics', () => {
           symbol: 'MNQ',
           accountId: 'paper-demo',
           calendar: 'SIMULATED_SCHEDULE',
+          news: 'SIMULATED_FEED',
           from: '2026-03-02T00:00:00Z',
           to: '2026-03-14T00:00:00Z',
           data: { kind: 'SIMULATED', seed: 8, startPrice: 18_000 },

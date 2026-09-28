@@ -54,7 +54,7 @@ export function statusBar(runtime: AstraRuntime) {
     mode,
     trading: { enabled: tradingReasons.length === 0, reasons: tradingReasons },
     risk,
-    news: { status: byId.NEWS!.status, detail: 'news engine not implemented yet (Phase 4)' },
+    news: { status: byId.NEWS!.status, detail: byId.NEWS!.detail },
     calendar: {
       status: byId.CALENDAR!.status,
       highImpactNext4h: highImpact,

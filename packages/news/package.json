@@ -1,0 +1,18 @@
+{
+  "name": "@astra/news",
+  "version": "0.1.0",
+  "private": true,
+  "description": "News intelligence: provider port and poller, item validation and de-duplication, deterministic classification (category, impact, affected instruments), per-instrument news risk and sentiment CONTEXT, SIMULATED feed for paper tests. Pure and isomorphic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

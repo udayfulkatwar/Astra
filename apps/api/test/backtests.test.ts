@@ -16,6 +16,7 @@ const request = (extra: Json = {}) => ({
   symbol: 'MNQ',
   accountId: 'paper-demo',
   calendar: 'SIMULATED_SCHEDULE',
+  news: 'SIMULATED_FEED',
   ...RANGE,
   data: { kind: 'SIMULATED', seed: 7, startPrice: 18_000 },
   ...extra,
@@ -98,6 +99,9 @@ describe.skipIf(!available)('API — backtests', () => {
     const noCalendar: Json = request();
     delete noCalendar.calendar;
     expect((await post(h, noCalendar)).statusCode).toBe(400); // no silent default
+    const noNews: Json = request();
+    delete noNews.news;
+    expect((await post(h, noNews)).statusCode).toBe(400);
     expect((await post(h, request({ from: RANGE.to, to: RANGE.from }))).statusCode).toBe(400);
     expect((await post(h, request({ to: '2026-12-01T00:00:00Z' }))).statusCode).toBe(400); // > 184 days
     const empty = await post(h, request({ data: { kind: 'STORED' } }));

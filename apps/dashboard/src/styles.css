@@ -758,8 +758,10 @@ select:focus {
 }
 .demo-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
+  max-width: 100%;
 }
 
 /* Forms */
@@ -1307,4 +1309,33 @@ select:focus {
 .chart-table .table-scroll {
   max-height: 260px;
   overflow: auto;
+}
+
+/* News intelligence */
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.news-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.news-item:last-child {
+  border-bottom: 0;
+}
+.news-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 4px;
+}
+.news-headline {
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.news-headline a {
+  color: inherit;
 }

@@ -62,6 +62,14 @@ import {
   type ProtectionPolicy,
   type ProtectiveTrigger,
 } from '@astra/risk';
+import {
+  DEFAULT_NEWS_RISK_RULE,
+  SimulatedNewsAdapter,
+  assessNewsRisk,
+  classifyNews,
+  type ClassifiedNews,
+  type NewsRiskRule,
+} from '@astra/news';
 import { KillSwitchRegistry } from '@astra/safety';
 import { BacktestBroker, type BacktestClosedTrade } from './broker';
 import { BacktestConfigSchema, type BacktestConfig, type BacktestConfigInput } from './config';
@@ -84,6 +92,10 @@ export interface BacktestEnvironment {
   readonly protectionPolicy: ProtectionPolicy;
   readonly structureParams?: Partial<StructureParams> | undefined;
   readonly lateObservationThresholdMs: number;
+  /** News risk windows and instrument keywords (config `news`); defaults when omitted. */
+  readonly news?:
+    | { readonly risk: NewsRiskRule; readonly instrumentKeywords: Record<string, string[]> }
+    | undefined;
 }
 
 export interface EquityPoint {
@@ -257,6 +269,15 @@ export async function runBacktest(params: {
   const engine = new DecisionEngine({ newApprovalId: () => `bt-apr-${seq}` });
   const calendarAdapter =
     config.calendar === 'SIMULATED_SCHEDULE' ? new SimulatedCalendarAdapter() : null;
+  const newsAdapter = config.news === 'SIMULATED_FEED' ? new SimulatedNewsAdapter() : null;
+  const newsRule = env.news?.risk ?? DEFAULT_NEWS_RISK_RULE;
+  const newsProfile = new Map([
+    [
+      symbol,
+      { eventCurrencies: spec.eventCurrencies, keywords: env.news?.instrumentKeywords[symbol] },
+    ],
+  ]);
+  const classified = new Map<string, ClassifiedNews>();
   const lookup = (s: string) => base.instrument(s);
   const half = (config.spreadTicks * spec.tickSize) / 2;
   // Replayed recordings are HISTORICAL; generated bars stay SIMULATED.
@@ -609,8 +630,7 @@ export async function runBacktest(params: {
       tracking: () => Promise.resolve(observed(ctx.tracking, meta)),
       activity: () => Promise.resolve(observed(ctx.activity, meta)),
       calendar: (from, to) => Promise.resolve(calendarWindow(from, to, at)),
-      newsRisk: () =>
-        Promise.resolve(notObserved('UNAVAILABLE', 'no historical news in backtests', 'news')),
+      newsRisk: (s) => Promise.resolve(newsRisk(s, at)),
       aiAnalysis: () =>
         Promise.resolve(notObserved('UNAVAILABLE', 'no AI analysis in backtests', 'ai')),
       duplicates: () =>
@@ -653,6 +673,48 @@ export async function runBacktest(params: {
     return engine.evaluate(inputs);
   }
 
+  /** News risk from items published up to `at` only (no lookahead); or the NOT_MODELLED choice. */
+  function newsRisk(s: string, at: string) {
+    const meta = { sourceKind: 'SIMULATED' as const, asOf: at };
+    const now = new Date(at);
+    if (!newsAdapter)
+      return observed(
+        {
+          symbol: s,
+          level: 'NORMAL' as const,
+          assessedAt: at,
+          reasons: ['news not modelled in this backtest (explicit choice)'],
+        },
+        { source: 'news-not-modelled', ...meta },
+      );
+    const reach = Math.max(newsRule.highImpactMinutes, newsRule.mediumImpactMinutes) * 60_000;
+    const items = newsAdapter.itemsBetween(new Date(now.getTime() - reach), now).map((item) => {
+      const hit = classified.get(item.id);
+      if (hit) return hit;
+      const n = classifyNews({
+        item,
+        source: newsAdapter.id,
+        sourceKind: 'SIMULATED',
+        receivedAt: item.publishedAt,
+        instruments: newsProfile,
+      });
+      classified.set(item.id, n);
+      return n;
+    });
+    const r = assessNewsRisk(items, s, now, newsRule);
+    return observed(
+      {
+        symbol: s,
+        level: r.level,
+        assessedAt: at,
+        reasons: r.reasons,
+        items: r.items,
+        clearsAt: r.clearsAt,
+      },
+      { source: `news:${newsAdapter.id}`, ...meta },
+    );
+  }
+
   function calendarWindow(from: Date, to: Date, at: string) {
     const meta = { sourceKind: 'SIMULATED' as const, asOf: at };
     if (calendarAdapter) {
@@ -692,11 +754,11 @@ export async function runBacktest(params: {
     ...(spec.verification.status !== 'USER_VERIFIED'
       ? [`Instrument spec ${spec.symbol} is ${spec.verification.status} (not owner-verified).`]
       : []),
-    ...(base.policy.news.required
-      ? [
-          'News assessment is required by policy but no historical news exists: every trade is blocked.',
-        ]
-      : []),
+    ...(!base.policy.news.required
+      ? ['News risk is not required by the decision policy, so it was not applied.']
+      : config.news === 'NOT_MODELLED'
+        ? ['News risk NOT applied: no news data was used for this period.']
+        : ['News comes from the SIMULATED placeholder feed, not real news.']),
     ...(streakDays.size > 0
       ? [
           `On ${streakDays.size} trading day(s) new trades stopped for the rest of the day after ${riskPolicy.activity.maxConsecutiveLosses} losses in a row (risk policy ${riskPolicy.id}).`,

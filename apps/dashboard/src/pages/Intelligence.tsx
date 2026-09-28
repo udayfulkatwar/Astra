@@ -204,22 +204,6 @@ export function CalendarPage() {
   );
 }
 
-export function News() {
-  return (
-    <div className="page">
-      <PageHeader title="News Intelligence" />
-      <Card>
-        <NotBuilt phase="Phase 4" what="News ingestion, classification and sentiment">
-          <p className="muted">
-            The gate already consumes a news-risk assessment contract; `decision.news.required`
-            becomes true when this engine is live.
-          </p>
-        </NotBuilt>
-      </Card>
-    </div>
-  );
-}
-
 export function AiMonitor() {
   return (
     <div className="page">

@@ -28,6 +28,7 @@ import {
   KillSwitchRepository,
   JournalRepository,
   MarketBarRepository,
+  NewsRepository,
   PaperBrokerStateRepository,
   SystemStateRepository,
   migrate,
@@ -38,6 +39,13 @@ import {
   type MarketDataAdapter,
   type SimulationAdapter,
 } from '@astra/market-data';
+import {
+  DEFAULT_NEWS_RISK_RULE,
+  NewsPoller,
+  NewsService,
+  SimulatedNewsAdapter,
+  type ClassifiedNews,
+} from '@astra/news';
 import type { Logger } from 'pino';
 import { AccountService } from './account-service';
 import { BacktestService } from './backtest-service';
@@ -88,6 +96,7 @@ export class AstraRuntime {
     marketBars: MarketBarRepository;
     journal: JournalRepository;
     backtests: BacktestRepository;
+    news: NewsRepository;
   };
   readonly events: EventBus;
   readonly mode: ModeService;
@@ -99,6 +108,9 @@ export class AstraRuntime {
   /** Instruments traded by ACTIVE accounts: MARKET_DATA is ONLINE only when all are fresh. */
   readonly tradedSymbols: readonly string[];
   readonly calendar: CalendarService;
+  readonly news: NewsService;
+  /** News provider poller (null: items arrive by push only). */
+  readonly newsPoller: NewsPoller | null;
   readonly monitor: PositionMonitorService;
   readonly journal: JournalService;
   readonly backtests: BacktestService;
@@ -118,6 +130,7 @@ export class AstraRuntime {
   private initTimer: NodeJS.Timeout | undefined;
   private cycleRunning = false;
   private calendarEvents: Promise<void> = Promise.resolve();
+  private newsRecorded: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(private readonly opts: RuntimeOptions) {
@@ -141,6 +154,7 @@ export class AstraRuntime {
       marketBars: new MarketBarRepository(sql),
       journal: new JournalRepository(sql),
       backtests: new BacktestRepository(sql),
+      news: new NewsRepository(sql),
     };
     this.events = new EventBus(this.repos.events, clock, log);
     this.mode = new ModeService(this.repos.system, clock, this.events, opts.liveTradingAuthorized);
@@ -157,6 +171,7 @@ export class AstraRuntime {
       adapters: () => [...this.execution.adapters.values()],
       marketData: () => this.market.feedHealth(this.tradedSymbols),
       calendar: () => this.calendar.health(),
+      news: () => this.news.health(),
     });
     this.barPersister = new BarPersister(this.repos.marketBars, log);
     const freshness = config.system.decision.freshness;
@@ -186,6 +201,23 @@ export class AstraRuntime {
         this.calendarEvents = this.calendarEvents.then(() =>
           this.reportCalendarChanges(changes, source),
         );
+      },
+    });
+    const nc = config.system.news;
+    this.news = new NewsService({
+      clock,
+      freshness: { maxAgeMs: freshness.newsMaxAgeMs, maxFutureSkewMs: freshness.maxFutureSkewMs },
+      instruments: new Map(
+        [...config.instruments].map(([symbol, spec]) => [
+          symbol,
+          { eventCurrencies: spec.eventCurrencies, keywords: nc?.instrumentKeywords[symbol] },
+        ]),
+      ),
+      risk: nc?.risk ?? DEFAULT_NEWS_RISK_RULE,
+      retentionMs: (nc?.retentionHours ?? 48) * 3_600_000,
+      // Queued: items are stored and announced in order, and pushes can wait for them.
+      onItems: (items, source) => {
+        this.newsRecorded = this.newsRecorded.then(() => this.recordNews(items, source));
       },
     });
     this.execution = new ExecutionService({
@@ -255,6 +287,7 @@ export class AstraRuntime {
       health: this.health,
       market: this.market,
       calendar: this.calendar,
+      news: this.news,
       accounts: this.accounts,
       decisions: this.repos.decisions,
       executionStore: this.repos.execution,
@@ -276,6 +309,22 @@ export class AstraRuntime {
           lookaheadMs: (cal?.lookaheadHours ?? 168) * 3_600_000,
           onResult: (r) => {
             if (!r.ok) log.warn({ err: r.error, failures: r.failures }, 'calendar poll failed');
+          },
+        })
+      : null;
+    // News provider: the SIMULATED feed in simulation mode; real providers once chosen.
+    this.newsPoller = opts.simulation
+      ? new NewsPoller({
+          adapter: new SimulatedNewsAdapter(),
+          service: this.news,
+          clock,
+          intervalMs: nc?.pollIntervalMs ?? 60_000,
+          timeoutMs: nc?.timeoutMs ?? 10_000,
+          lookbackMs: (nc?.lookbackHours ?? 6) * 3_600_000,
+          onResult: (r) => {
+            if (!r.ok) log.warn({ err: r.error, failures: r.failures }, 'news poll failed');
+            else if (r.rejected.length > 0)
+              log.warn({ rejected: r.rejected }, 'news items rejected');
           },
         })
       : null;
@@ -341,6 +390,16 @@ export class AstraRuntime {
       await this.calendarPoller.poll();
       if (this.opts.startLoops) this.calendarPoller.start();
     }
+    // Stored news restores the recent picture; the feed is fresh only after a new delivery.
+    const retentionMs = (config.system.news?.retentionHours ?? 48) * 3_600_000;
+    this.news.load(
+      await this.repos.news.since(new Date(clock.now().getTime() - retentionMs).toISOString()),
+    );
+    if (this.newsPoller) {
+      await this.newsPoller.poll();
+      await this.newsRecorded;
+      if (this.opts.startLoops) this.newsPoller.start();
+    }
     if (this.opts.startLoops) {
       await this.cycle();
       this.loopTimer = setInterval(
@@ -354,6 +413,40 @@ export class AstraRuntime {
   /** Resolves once every calendar change reported so far is recorded as a system event. */
   calendarEventsRecorded(): Promise<void> {
     return this.calendarEvents;
+  }
+
+  /** Resolves once every news item accepted so far is stored and announced. */
+  newsItemsRecorded(): Promise<void> {
+    return this.newsRecorded;
+  }
+
+  /**
+   * Stores accepted news items and raises a warning for each HIGH-impact item that concerns an
+   * instrument of an active account. Never rejects (a storage failure is logged and raised).
+   */
+  private async recordNews(items: readonly ClassifiedNews[], source: string): Promise<void> {
+    try {
+      await this.repos.news.record(items);
+    } catch (err) {
+      this.log.error({ err: errorMessage(err), source }, 'news items could not be stored');
+      await this.events.emit({
+        level: 'ERROR',
+        component: 'news',
+        type: 'NEWS_STORE_FAILED',
+        message: `${items.length} news item(s) from ${source} could not be stored: ${errorMessage(err)}`,
+      });
+    }
+    for (const n of items) {
+      const traded = n.affected.map((a) => a.symbol).filter((s) => this.tradedSymbols.includes(s));
+      if (n.impact !== 'HIGH' || traded.length === 0) continue;
+      await this.events.emit({
+        level: 'WARN',
+        component: 'news',
+        type: 'NEWS_HIGH_IMPACT',
+        message: `HIGH-impact ${n.category.toLowerCase().replace('_', ' ')} news for ${traded.join(', ')}: "${n.item.headline}" (${source})`,
+        data: { key: n.key, category: n.category, symbols: traded, sourceKind: n.sourceKind },
+      });
+    }
   }
 
   /** Calendar changes become system events (restricted-impact ones as warnings). Never rejects. */
@@ -430,6 +523,7 @@ export class AstraRuntime {
     clearTimeout(this.initTimer);
     clearInterval(this.loopTimer);
     this.calendarPoller?.stop();
+    this.newsPoller?.stop();
     for (const adapter of this.marketAdapters) {
       try {
         await adapter.stop();

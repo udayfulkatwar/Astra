@@ -65,6 +65,7 @@ export class BacktestService {
           protectionPolicy: config.system.protection ?? DEFAULT_PROTECTION_POLICY,
           structureParams: config.system.structure,
           lateObservationThresholdMs: config.system.tracking.lateObservationThresholdMs,
+          news: config.system.news,
         },
         yieldControl: () => new Promise((resolve) => setImmediate(resolve)),
       });

@@ -13,6 +13,7 @@ import type { ExecutionResult } from '@astra/execution';
 import type { MarketDataService } from '@astra/market-data';
 import type { AccountService } from './account-service';
 import type { CalendarService } from '@astra/calendar';
+import type { NewsService } from '@astra/news';
 import type { EventBus } from './event-bus';
 import type { ExecutionService } from './execution-service';
 import type { HealthService } from './health-service';
@@ -37,6 +38,7 @@ export class DecisionService {
       health: HealthService;
       market: MarketDataService;
       calendar: CalendarService;
+      news: NewsService;
       accounts: AccountService;
       decisions: DecisionRepository;
       executionStore: ExecutionRepository;
@@ -47,18 +49,15 @@ export class DecisionService {
   ) {}
 
   private dataPorts(): DecisionDataPorts {
-    const { market, accounts, calendar, decisions, executionStore, clock } = this.deps;
+    const { market, accounts, calendar, news, decisions, executionStore, clock } = this.deps;
     return {
       quote: (symbol) => Promise.resolve(market.latest(symbol)),
       accountSnapshot: (id) => Promise.resolve(accounts.snapshot(id)),
       tracking: (id) => Promise.resolve(accounts.tracking(id)),
       activity: (id) => accounts.activity(id),
       calendar: () => Promise.resolve(calendar.current()),
-      // Phase 4 / Phase 6 engines are not built yet: report that honestly.
-      newsRisk: () =>
-        Promise.resolve(
-          notObserved('UNAVAILABLE', 'news engine not implemented yet (Phase 4)', 'news'),
-        ),
+      newsRisk: (symbol) => Promise.resolve(news.risk(symbol)),
+      // The Phase 6 AI engine is not built yet: report that honestly.
       aiAnalysis: () =>
         Promise.resolve(
           notObserved('UNAVAILABLE', 'AI engine not implemented yet (Phase 6)', 'ai'),

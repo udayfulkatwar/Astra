@@ -21,6 +21,8 @@ import type {
   JournalEntry,
   JournalSummary,
   LearningResponse,
+  NewsContextView,
+  NewsFeedResponse,
   KillSwitchState,
   MarketSnapshot,
   MarketStructure,
@@ -186,6 +188,33 @@ export const useJournalSummary = (strategy: string | null) =>
   useQuery({
     queryKey: ['journal-summary', strategy],
     queryFn: () => api<JournalSummary>(`/api/v1/journal/summary?${journalQuery(strategy)}`),
+    refetchInterval: 5_000,
+  });
+
+export interface NewsQuery {
+  symbol: string | null;
+  impact: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  category: string | null;
+}
+
+export const useNews = (q: NewsQuery) =>
+  useQuery({
+    queryKey: ['news', q],
+    queryFn: () => {
+      const p = new URLSearchParams({ limit: '150' });
+      if (q.symbol) p.set('symbol', q.symbol);
+      if (q.impact) p.set('impact', q.impact);
+      if (q.category) p.set('category', q.category);
+      return api<NewsFeedResponse>(`/api/v1/news?${p.toString()}`);
+    },
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+  });
+
+export const useNewsContext = () =>
+  useQuery({
+    queryKey: ['news-context'],
+    queryFn: () => api<NewsContextView>('/api/v1/news/context'),
     refetchInterval: 5_000,
   });
 

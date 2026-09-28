@@ -23,6 +23,7 @@
     "@astra/learning": "workspace:*",
     "@astra/market-data": "workspace:*",
     "@astra/market-structure": "workspace:*",
+    "@astra/news": "workspace:*",
     "@astra/prop-firm": "workspace:*",
     "@astra/risk": "workspace:*",
     "@astra/safety": "workspace:*",

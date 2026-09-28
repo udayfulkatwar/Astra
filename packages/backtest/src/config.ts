@@ -36,6 +36,12 @@ export const BacktestConfigSchema = z
      * blackout is not applied and the result says so. There is no silent default.
      */
     calendar: z.enum(['SIMULATED_SCHEDULE', 'NOT_MODELLED']),
+    /**
+     * SIMULATED_FEED: the labelled simulated news feed (items published up to each decision
+     * only). NOT_MODELLED: no news data — news risk is not applied and the result says so.
+     * There is no silent default.
+     */
+    news: z.enum(['SIMULATED_FEED', 'NOT_MODELLED']),
   })
   .strict();
 export type BacktestConfig = z.infer<typeof BacktestConfigSchema>;

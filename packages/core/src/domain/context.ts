@@ -32,5 +32,9 @@ export const NewsRiskAssessmentSchema = z.object({
   level: z.enum(NEWS_RISK_LEVELS),
   assessedAt: IsoDateTimeSchema,
   reasons: z.array(z.string()).default([]),
+  /** Ids of the news items that set the level. */
+  items: z.array(z.string()).optional(),
+  /** When the current level lapses if nothing new arrives (null at NORMAL). */
+  clearsAt: IsoDateTimeSchema.nullable().optional(),
 });
 export type NewsRiskAssessment = z.infer<typeof NewsRiskAssessmentSchema>;

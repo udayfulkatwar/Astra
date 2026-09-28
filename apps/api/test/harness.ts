@@ -139,6 +139,13 @@ export async function bringOnline(
       },
     },
   });
+  // An empty news batch: the feed is alive and nothing high-impact has been reported.
+  await h.app.inject({
+    method: 'POST',
+    url: '/api/v1/news/items',
+    headers: H.automation,
+    payload: { source: 'test', items: [] },
+  });
   await h.runtime.cycle();
 }
 

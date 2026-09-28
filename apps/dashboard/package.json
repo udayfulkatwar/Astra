@@ -15,6 +15,7 @@
   "dependencies": {
     "@astra/backtest": "workspace:*",
     "@astra/learning": "workspace:*",
+    "@astra/news": "workspace:*",
     "@tanstack/react-query": "^5.104.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

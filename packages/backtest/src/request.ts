@@ -38,5 +38,6 @@ export function backtestConfigOf(req: BacktestRequest) {
     spreadTicks: req.spreadTicks,
     slippageTicks: req.slippageTicks,
     calendar: req.calendar,
+    news: req.news,
   };
 }

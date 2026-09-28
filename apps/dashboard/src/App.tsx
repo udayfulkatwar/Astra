@@ -6,7 +6,8 @@ import { Layout } from './components/Layout';
 import { AccountDetailPage, Accounts } from './pages/Accounts';
 import { Approvals, DecisionDetailPage } from './pages/Approvals';
 import { Backtesting } from './pages/Backtesting';
-import { AiMonitor, CalendarPage, News } from './pages/Intelligence';
+import { AiMonitor, CalendarPage } from './pages/Intelligence';
+import { NewsPage } from './pages/News';
 import { MarketScanner } from './pages/MarketScanner';
 import { Journal } from './pages/Journal';
 import { Learning } from './pages/Learning';
@@ -42,7 +43,7 @@ const routes = [
       { path: 'risk', element: <RiskControls /> },
       { path: 'activity', element: <Activity /> },
       { path: 'calendar', element: <CalendarPage /> },
-      { path: 'news', element: <News /> },
+      { path: 'news', element: <NewsPage /> },
       { path: 'market', element: <MarketScanner /> },
       { path: 'strategies', element: <Strategies /> },
       { path: 'rules', element: <Rules /> },

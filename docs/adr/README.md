@@ -23,3 +23,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0016](0016-backtesting.md)                      | Backtesting: real gate, pessimistic fills, honest labels      | Accepted |
 | [0017](0017-losing-streak-per-trading-day.md)    | The losing-streak limit counts within one trading day         | Accepted |
 | [0018](0018-learning-metrics.md)                 | Learning metrics: descriptive, sample-size honest             | Accepted |
+| [0019](0019-news-intelligence.md)                | News intelligence: rules classifier, news risk in the gate    | Accepted |

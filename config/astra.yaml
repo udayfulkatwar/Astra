@@ -26,8 +26,9 @@ decision:
     minutesBefore: 15
     minutesAfter: 15
   news:
-    # Becomes true once the news engine (Phase 4) is live.
-    required: false
+    # A fresh news-risk assessment is mandatory for every approval (ADR-0019): no news feed, or a
+    # STALE one, means no new trades. News risk HIGH blocks; ELEVATED is shown as context.
+    required: true
     blockLevels: [HIGH]
   ai:
     minConfidence: 0.6
@@ -137,6 +138,24 @@ protection:
 # Economic calendar (ADR-0011). No provider is chosen yet (owner input): windows arrive by push
 # from n8n (POST /api/v1/calendar/window). With ASTRA_SIMULATION=true a SIMULATED weekly schedule
 # is polled instead (paper tests only; refused in SHADOW and LIVE).
+# News intelligence (ADR-0019). No real provider until the owner chooses one: items arrive by push
+# (n8n → POST /api/v1/news/items, at least every 15 min — an empty batch counts) or, with
+# ASTRA_SIMULATION=true, from the SIMULATED feed. The risk windows and keywords are DEFAULTS.
+news:
+  provider: none
+  pollIntervalMs: 60000
+  timeoutMs: 10000
+  lookbackHours: 6
+  retentionHours: 48
+  risk:
+    highImpactMinutes: 30 # a HIGH-impact item for an instrument → news risk HIGH (blocks) this long
+    mediumImpactMinutes: 15 # a MEDIUM-impact item → ELEVATED (context) this long
+  # Words that tie a headline to an instrument, in addition to its event currencies.
+  instrumentKeywords:
+    NQ: [nasdaq, nasdaq 100, tech shares, tech stocks, technology stocks]
+    MNQ: [nasdaq, nasdaq 100, tech shares, tech stocks, technology stocks]
+    XAUUSD: [gold, bullion, precious metals]
+
 calendar:
   provider: none
   pollIntervalMs: 300000

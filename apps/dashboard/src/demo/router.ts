@@ -13,6 +13,7 @@ import {
 import { eventRiskView } from '@astra/calendar';
 import { journalSummary } from '@astra/journal';
 import { learningReport } from '@astra/learning';
+import { NEWS_CATEGORIES, NEWS_IMPACTS, newsContextView } from '@astra/news';
 import { mergedBlackout } from '@astra/decision';
 import { TimeframeSchema } from '@astra/market-data';
 import { analyzeStructure } from '@astra/market-structure';
@@ -51,7 +52,7 @@ function statusBar(rt: DemoRuntime): StatusBar {
     mode,
     trading: { enabled: reasons.length === 0, reasons },
     risk,
-    news: { status: byId.NEWS!.status, detail: 'news engine not implemented yet (Phase 4)' },
+    news: { status: byId.NEWS!.status, detail: byId.NEWS!.detail },
     calendar: calendarStatus(rt, byId.CALENDAR!.status),
     ai: { status: byId.AI!.status, detail: 'AI engine not implemented yet (Phase 6)' },
     automation: { status: byId.AUTOMATION!.status, detail: byId.AUTOMATION!.detail },
@@ -256,6 +257,42 @@ export async function handleDemoRequest(
         ? { entries: entries.slice(0, Number(q.get('limit') ?? 100)) }
         : journalSummary(entries);
     }
+    if (path === '/api/v1/news') {
+      const impact = q.get('impact');
+      const category = q.get('category');
+      if (impact && !(NEWS_IMPACTS as readonly string[]).includes(impact))
+        throw new ApiError(400, 'VALIDATION', 'invalid impact');
+      if (category && !(NEWS_CATEGORIES as readonly string[]).includes(category))
+        throw new ApiError(400, 'VALIDATION', 'invalid category');
+      return {
+        feed: { ...rt.news.feedStatus(), health: rt.news.health() },
+        poller: null,
+        items: rt.news.list({
+          symbol: q.get('symbol') ?? undefined,
+          minImpact: (impact ?? undefined) as (typeof NEWS_IMPACTS)[number] | undefined,
+          category: (category ?? undefined) as (typeof NEWS_CATEGORIES)[number] | undefined,
+          limit: Number(q.get('limit') ?? 100),
+        }),
+      };
+    }
+    if (path === '/api/v1/news/context') {
+      const now = rt.clock.now();
+      const symbols = [...rt.config.instruments.keys()];
+      const cal = eventRiskView({
+        calendar: rt.calendarService.fresh(),
+        symbols,
+        now,
+        rule: mergedBlackout(rt.config.system.decision.eventBlackout),
+        poller: null,
+      });
+      const state = new Map(cal.instruments.map((i) => [i.symbol, i.state]));
+      return newsContextView({
+        service: rt.news,
+        symbols,
+        now,
+        calendarState: (s) => state.get(s) ?? 'UNKNOWN',
+      });
+    }
     if (path === '/api/v1/learning') {
       const tz = TimeZoneSchema.safeParse(q.get('timeZone') ?? 'UTC');
       if (!tz.success) throw new ApiError(400, 'VALIDATION', 'timeZone must be an IANA time zone');
@@ -299,6 +336,17 @@ export async function handleDemoRequest(
 
   if (method === 'POST') {
     if (path === '/api/v1/backtests') return runDemoBacktest(rt, requestBody);
+    if (path === '/api/v1/news/items') {
+      const b = body<{ source?: string; items?: unknown[] }>(requestBody);
+      if (!b.source || !Array.isArray(b.items))
+        throw new ApiError(400, 'VALIDATION', 'source and items are required');
+      try {
+        const r = rt.news.ingest({ items: b.items }, `ingest:${b.source}`, 'MANUAL');
+        return { accepted: r.accepted, duplicates: r.duplicates, rejected: r.rejected };
+      } catch (err) {
+        throw new ApiError(400, 'VALIDATION', err instanceof Error ? err.message : String(err));
+      }
+    }
     if (path === '/api/v1/decisions/evaluate') {
       const b = body<{ candidate?: unknown; autoExecute?: boolean }>(requestBody);
       const parsed = TradeCandidateSchema.omit({ submittedAt: true }).safeParse(b.candidate);
