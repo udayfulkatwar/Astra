@@ -1,0 +1,32 @@
+{
+  "name": "@astra/research",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Research backtests on genuine history (SPEC \u00a720\u2013\u00a725): data import and validation, multi-pair replay through the real gate, \u00a723 metrics, out-of-sample, walk-forward, Monte Carlo, sensitivity. Never fabricates results.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "research": "tsx scripts/research.ts"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/decision": "workspace:*",
+    "@astra/journal": "workspace:*",
+    "@astra/market-data": "workspace:*",
+    "@astra/prop-firm": "workspace:*",
+    "@astra/risk": "workspace:*",
+    "@astra/safety": "workspace:*",
+    "@astra/strategy-lsfvg": "workspace:*",
+    "luxon": "^3.7.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@astra/config": "workspace:*",
+    "tsx": "^4.23.0",
+    "@types/luxon": "^3.7.5"
+  }
+}

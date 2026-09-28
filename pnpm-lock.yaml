@@ -469,6 +469,49 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/research:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@astra/decision':
+        specifier: workspace:*
+        version: link:../decision
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../journal
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../market-data
+      '@astra/prop-firm':
+        specifier: workspace:*
+        version: link:../prop-firm
+      '@astra/risk':
+        specifier: workspace:*
+        version: link:../risk
+      '@astra/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@astra/strategy-lsfvg':
+        specifier: workspace:*
+        version: link:../strategy-lsfvg
+      luxon:
+        specifier: ^3.7.2
+        version: 3.7.2
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@astra/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/luxon':
+        specifier: ^3.7.5
+        version: 3.7.5
+      tsx:
+        specifier: ^4.23.0
+        version: 4.23.15
+
   packages/risk:
     dependencies:
       '@astra/core':

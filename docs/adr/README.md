@@ -29,3 +29,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0022](0022-account-currency-valuation.md)       | Account-currency valuation of instruments (FX pairs)                   | Accepted |
 | [0023](0023-limit-entries.md)                    | LIMIT entries: resting orders that stay inside the gate's guarantees   | Accepted |
 | [0024](0024-lsfvg-strategy-engine.md)            | The owner's LSFVG v1.0 strategy as code, run by ASTRA through the gate | Accepted |
+| [0025](0025-research-backtest.md)                | Research backtests on genuine history through the real gate            | Accepted |

@@ -17,8 +17,10 @@ coverage/
 *.key
 secrets/
 
-# local data
+# local data (historical price files and research output stay out of Git)
 .data/
+research-data/
+research-out/
 *.log
 
 # editor / OS
