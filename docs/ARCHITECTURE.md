@@ -143,6 +143,7 @@ astra/
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
 │   ├── journal/             Trade journal: excursions, plan-vs-actual entries, statistics (ADR-0015)
+│   ├── learning/            Learning metrics over journal entries, observations only (ADR-0018)
 │   ├── backtest/            M1 replay through the real gate, protection and journal (ADR-0016)
 │   ├── decision/            Fail-closed gate pipeline, standard checks, decision records
 │   ├── execution/           Broker adapter interface, paper broker, execution gateway
@@ -165,6 +166,7 @@ market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
 calendar    → core   (pure and isomorphic)
 journal     → core   (pure and isomorphic)
+learning    → core, journal   (pure and isomorphic; descriptive only, no write path)
 backtest    → core, calendar, decision, journal, market-data, market-structure, prop-firm, risk, safety
               (pure and isomorphic; composes the real engines; no lookahead)
 decision    → core, prop-firm, risk, safety
@@ -293,6 +295,7 @@ rules in force.
 | GET      | `/api/v1/journal`, `/api/v1/journal/summary`                                | viewer                                       |
 | POST     | `/api/v1/backtests` (replay; never trades)                                  | operator                                     |
 | GET      | `/api/v1/backtests`, `/api/v1/backtests/:id`                                | viewer                                       |
+| GET      | `/api/v1/learning` (journal or a backtest run)                              | viewer                                       |
 
 ---
 

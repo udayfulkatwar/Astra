@@ -206,12 +206,25 @@ describe.skipIf(!available)('repositories', () => {
         realizedPnl: -150,
         closedAt: '2026-09-28T14:10:00.000Z',
       });
+      // A loss before today's reset does not extend today's streak.
+      await repo.recordClosedTrade({
+        ...trade,
+        id: 't0',
+        realizedPnl: -100,
+        closedAt: '2026-09-27T20:30:00.000Z',
+      });
       const a = await repo.activity('acct-a', {
         key: '2026-09-28',
         start: '2026-09-27T21:00:00.000Z',
         end: '2026-09-28T21:00:00.000Z',
       });
       expect(a).toEqual({ tradingDayKey: '2026-09-28', tradesToday: 1, consecutiveLosses: 2 });
+      const previousDay = await repo.activity('acct-a', {
+        key: '2026-09-27',
+        start: '2026-09-26T21:00:00.000Z',
+        end: '2026-09-27T21:00:00.000Z',
+      });
+      expect(previousDay.consecutiveLosses).toBe(1);
     });
   });
 });

@@ -207,6 +207,7 @@ export class AstraRuntime {
       repo: this.repos.journal,
       orders: this.repos.execution,
       decisions: this.repos.decisions,
+      calendar: this.calendar,
       events: this.events,
       log,
     });

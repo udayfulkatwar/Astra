@@ -7,6 +7,7 @@ import { registerBacktestRoutes } from './backtests';
 import { registerCalendarRoutes } from './calendar';
 import { registerDecisionRoutes } from './decisions';
 import { registerJournalRoutes } from './journal';
+import { registerLearningRoutes } from './learning';
 import { registerMarketRoutes } from './market';
 import { registerMonitorRoutes } from './monitor';
 import { registerRecordRoutes } from './records';
@@ -29,4 +30,5 @@ export function registerRoutes(
   registerMonitorRoutes(app, runtime, auth);
   registerJournalRoutes(app, runtime, auth);
   registerBacktestRoutes(app, runtime, auth);
+  registerLearningRoutes(app, runtime, auth);
 }

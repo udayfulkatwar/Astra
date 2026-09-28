@@ -20,6 +20,7 @@ exposure:
   allowPyramiding: false
 activity:
   maxTradesPerDay: 3
+  # Losses in a row within one trading day; the count starts fresh at the next reset.
   maxConsecutiveLosses: 2
 health:
   cautionUsagePct: 40

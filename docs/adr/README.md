@@ -21,3 +21,5 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0014](0014-automatic-protective-closing.md)     | Automatic protective closing                                  | Accepted |
 | [0015](0015-trade-journal.md)                    | Trade journal: append-only, plan vs actual                    | Accepted |
 | [0016](0016-backtesting.md)                      | Backtesting: real gate, pessimistic fills, honest labels      | Accepted |
+| [0017](0017-losing-streak-per-trading-day.md)    | The losing-streak limit counts within one trading day         | Accepted |
+| [0018](0018-learning-metrics.md)                 | Learning metrics: descriptive, sample-size honest             | Accepted |

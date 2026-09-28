@@ -9,6 +9,7 @@ import { Backtesting } from './pages/Backtesting';
 import { AiMonitor, CalendarPage, News } from './pages/Intelligence';
 import { MarketScanner } from './pages/MarketScanner';
 import { Journal } from './pages/Journal';
+import { Learning } from './pages/Learning';
 import { Login } from './pages/Login';
 import { Activity, Audit, Automation, Health } from './pages/Operations';
 import { Overview } from './pages/Overview';
@@ -36,6 +37,7 @@ const routes = [
       { path: 'accounts', element: <Accounts /> },
       { path: 'positions', element: <Positions /> },
       { path: 'journal', element: <Journal /> },
+      { path: 'learning', element: <Learning /> },
       { path: 'accounts/:id', element: <AccountDetailPage /> },
       { path: 'risk', element: <RiskControls /> },
       { path: 'activity', element: <Activity /> },

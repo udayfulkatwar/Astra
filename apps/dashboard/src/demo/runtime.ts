@@ -48,7 +48,12 @@ import {
   type AccountTracking,
 } from '@astra/prop-firm';
 import { CalendarService, SimulatedCalendarAdapter } from '@astra/calendar';
-import { ExcursionTracker, buildJournalEntry, type JournalEntry } from '@astra/journal';
+import {
+  ExcursionTracker,
+  buildJournalEntry,
+  tradeContext,
+  type JournalEntry,
+} from '@astra/journal';
 import { MarketDataService, type MarketSnapshot } from '@astra/market-data';
 import {
   DEFAULT_MONITOR_POLICY,
@@ -565,8 +570,11 @@ export class DemoRuntime {
         Date.parse(o.createdAt) >= w.start.getTime() &&
         Date.parse(o.createdAt) < w.end.getTime(),
     ).length;
+    // Losing streak within the current trading day (it starts fresh at each reset).
     let streak = 0;
     for (const t of this.closedTrades.get(accountId) ?? []) {
+      const closed = Date.parse(t.closedAt);
+      if (closed < w.start.getTime() || closed >= w.end.getTime()) break;
       if (t.realizedPnl < 0) streak++;
       else break;
     }
@@ -659,6 +667,8 @@ export class DemoRuntime {
     const d = order
       ? this.decisions.find((x) => x.decision.decisionId === order.decisionId)
       : undefined;
+    const account = this.config.accounts.get(accountId);
+    const profile = account && this.config.profiles.get(account.propFirmProfileId);
     const entry = buildJournalEntry({
       trade: { ...t, accountId },
       order: order
@@ -682,6 +692,17 @@ export class DemoRuntime {
         : null,
       spec: this.config.instruments.get(t.symbol),
       excursion: this.excursions.take(t.positionId),
+      context: profile
+        ? tradeContext({
+            signal: d?.inputs.candidate.signal ?? null,
+            symbol: t.symbol,
+            eventCurrencies: this.config.instruments.get(t.symbol)?.eventCurrencies,
+            entryAt: t.openedAt,
+            exitAt: t.closedAt,
+            day: tradingDayWindow(new Date(t.openedAt), profile.tradingDayReset),
+            calendars: [d?.inputs.calendar ?? null, this.calendarService.current()],
+          })
+        : undefined,
     });
     this.journal.unshift(entry);
     const r = entry.result;

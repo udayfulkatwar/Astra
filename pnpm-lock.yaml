@@ -68,6 +68,9 @@ importers:
       '@astra/journal':
         specifier: workspace:*
         version: link:../../packages/journal
+      '@astra/learning':
+        specifier: workspace:*
+        version: link:../../packages/learning
       '@astra/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
@@ -114,6 +117,9 @@ importers:
       '@astra/backtest':
         specifier: workspace:*
         version: link:../../packages/backtest
+      '@astra/learning':
+        specifier: workspace:*
+        version: link:../../packages/learning
       '@tanstack/react-query':
         specifier: ^5.104.0
         version: 5.104.0(react@19.3.0)
@@ -347,6 +353,22 @@ importers:
       '@astra/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/learning:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@astra/journal':
+        specifier: workspace:*
+        version: link:../journal
+      luxon:
+        specifier: ^3.7.2
+        version: 3.7.2
+    devDependencies:
+      '@types/luxon':
+        specifier: ^3.7.5
+        version: 3.7.5
 
   packages/market-data:
     dependencies:

@@ -62,6 +62,7 @@ export default tseslint.config(
       'packages/market-structure/src/**/*.ts',
       'packages/calendar/src/**/*.ts',
       'packages/journal/src/**/*.ts',
+      'packages/learning/src/**/*.ts',
       'packages/backtest/src/**/*.ts',
     ],
     rules: {

@@ -4,15 +4,16 @@
  * the fill, the exit and the observed excursions (@astra/journal). A failure to journal never
  * disturbs account sync or trading; it is logged and raised as an event.
  */
+import type { CalendarService } from '@astra/calendar';
 import type { AstraConfig } from '@astra/config';
-import { errorMessage, type Clock, type Quote } from '@astra/core';
+import { errorMessage, tradingDayWindow, type Clock, type Quote } from '@astra/core';
 import type {
   ClosedTradeRecord,
   DecisionRepository,
   ExecutionRepository,
   JournalRepository,
 } from '@astra/db';
-import { ExcursionTracker, buildJournalEntry } from '@astra/journal';
+import { ExcursionTracker, buildJournalEntry, tradeContext } from '@astra/journal';
 import type { AccountMonitorView } from '@astra/risk';
 import type { Logger } from 'pino';
 import type { EventBus } from './event-bus';
@@ -27,6 +28,7 @@ export class JournalService {
       repo: JournalRepository;
       orders: ExecutionRepository;
       decisions: DecisionRepository;
+      calendar: CalendarService;
       events: EventBus;
       log: Logger;
     },
@@ -60,6 +62,21 @@ export class JournalService {
         ? await this.deps.orders.orderByClientId(t.clientOrderId)
         : null;
       const detail = order ? await this.deps.decisions.get(order.decisionId) : null;
+      const { config } = this.deps;
+      const account = config.accounts.get(accountId);
+      const profile = account && config.profiles.get(account.propFirmProfileId);
+      const context = profile
+        ? tradeContext({
+            signal: detail?.inputs.candidate.signal ?? null,
+            symbol: t.symbol,
+            eventCurrencies: config.instruments.get(t.symbol)?.eventCurrencies,
+            entryAt: t.openedAt,
+            exitAt: t.closedAt,
+            day: tradingDayWindow(new Date(t.openedAt), profile.tradingDayReset),
+            // The calendar the decision saw, then the one known now.
+            calendars: [detail?.inputs.calendar ?? null, this.deps.calendar.current()],
+          })
+        : undefined;
       const entry = buildJournalEntry({
         trade: {
           positionId: t.id,
@@ -96,6 +113,7 @@ export class JournalService {
           : null,
         spec: this.deps.config.instruments.get(t.symbol),
         excursion: this.tracker.take(t.id),
+        context,
       });
       const isNew = await this.deps.repo.record(entry, this.deps.clock.now().toISOString());
       if (!isNew) return;

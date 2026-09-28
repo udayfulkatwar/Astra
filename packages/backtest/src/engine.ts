@@ -13,6 +13,7 @@ import { SimulatedCalendarAdapter } from '@astra/calendar';
 import {
   AstraError,
   ManualClock,
+  eventAffectsInstrument,
   notObserved,
   observed,
   tradingDayWindow,
@@ -24,6 +25,7 @@ import {
   type Observed,
   type OpenPosition,
   type Quote,
+  type Signal,
   type StrategyDefinition,
   type TradeCandidate,
 } from '@astra/core';
@@ -38,6 +40,7 @@ import {
 import {
   buildJournalEntry,
   journalSummary,
+  tradeContext,
   type DecisionInput,
   type ExcursionRecord,
   type JournalEntry,
@@ -219,6 +222,9 @@ export async function runBacktest(params: {
     fail(`${symbol} is not enabled for account ${configured.id}`);
   if (!spec.tradingHours) fail(`trading hours not configured for ${symbol}`);
   validateBars(bars, symbol);
+  // Validated above; typed for the helper functions below (declarations do not keep narrowing).
+  const dayReset = profile.tradingDayReset;
+  const eventCurrencies = spec.eventCurrencies;
 
   const strategy: BacktestStrategy = structureBreakoutTemplate(symbol, config.strategy);
   // The replay enables the strategy on a COPY of the account; configuration is not changed.
@@ -261,9 +267,12 @@ export async function runBacktest(params: {
   const tfBars: Bar[] = [];
   let strategyBars = 0;
   const trades: JournalEntry[] = [];
-  const closedPnl: number[] = [];
+  const closedPnl: { pnl: number; day: string }[] = [];
   const filledByDay = new Map<string, number>();
-  const orders = new Map<string, { order: OrderInput; decision: DecisionInput; log: number }>();
+  const orders = new Map<
+    string,
+    { order: OrderInput; decision: DecisionInput; signal: Signal; log: number }
+  >();
   const excursions = new Map<string, { best: number; worst: number; from: string; bars: number }>();
   const log: DecisionLogEntry[] = [];
   let logged = 0;
@@ -273,8 +282,8 @@ export async function runBacktest(params: {
   const protective: BacktestProtectiveAction[] = [];
   const closing = new Set<string>();
   let breach: BacktestResult['breach'] = null;
-  /** First decision made while the losing-streak limit was reached. */
-  let streakStop: string | null = null;
+  /** Trading days on which the losing-streak limit stopped new trades. */
+  const streakDays = new Set<string>();
   const marks: { t: string; balance: number; equity: number }[] = [];
   const sourceKinds = new Set<DataSourceKind>();
   const sources = new Set<string>();
@@ -483,10 +492,10 @@ export async function runBacktest(params: {
       const activity: AccountActivity = {
         tradingDayKey: today,
         tradesToday: filledByDay.get(today) ?? 0,
-        consecutiveLosses: streak(closedPnl),
+        consecutiveLosses: streak(closedPnl, today),
       };
       if (activity.consecutiveLosses >= riskPolicy.activity.maxConsecutiveLosses)
-        streakStop ??= now;
+        streakDays.add(today);
       const d = await decide(candidate, { at: now, quoteObs, snapObs, tracking, activity });
       const logIndex = logged++;
       log.push({
@@ -518,6 +527,7 @@ export async function runBacktest(params: {
             configHash: d.configHash,
             plannedRisk: d.sizing?.dollarRisk ?? null,
           },
+          signal: candidate.signal,
           log: logIndex,
         });
         broker.queueEntry({
@@ -542,7 +552,7 @@ export async function runBacktest(params: {
 
   function journal(t: BacktestClosedTrade): void {
     closing.delete(t.positionId);
-    closedPnl.push(t.realizedPnl);
+    closedPnl.push({ pnl: t.realizedPnl, day: dayKey(t.closedAt) });
     const rec = orders.get(t.clientOrderId) ?? null;
     const e = excursions.get(t.positionId);
     excursions.delete(t.positionId);
@@ -557,6 +567,9 @@ export async function runBacktest(params: {
           quotes: e.bars,
         }
       : null;
+    const day = tradingDayWindow(new Date(t.openedAt), dayReset);
+    const from = new Date(Math.min(day.start.getTime(), Date.parse(t.openedAt)));
+    const to = new Date(Math.max(day.end.getTime(), Date.parse(t.closedAt)));
     trades.push(
       buildJournalEntry({
         trade: { ...t, accountId: account.id },
@@ -564,6 +577,16 @@ export async function runBacktest(params: {
         decision: rec?.decision ?? null,
         spec,
         excursion,
+        context: tradeContext({
+          signal: rec?.signal ?? null,
+          symbol,
+          eventCurrencies,
+          entryAt: t.openedAt,
+          exitAt: t.closedAt,
+          day,
+          // NOT_MODELLED: no calendar, so event facts stay UNKNOWN.
+          calendars: calendarAdapter ? [calendarWindow(from, to, t.closedAt)] : [],
+        }),
       }),
     );
   }
@@ -632,11 +655,16 @@ export async function runBacktest(params: {
 
   function calendarWindow(from: Date, to: Date, at: string) {
     const meta = { sourceKind: 'SIMULATED' as const, asOf: at };
-    if (calendarAdapter)
-      return observed<CalendarWindow>(calendarAdapter.window({ from, to }), {
-        source: `calendar:${calendarAdapter.id}`,
-        ...meta,
-      });
+    if (calendarAdapter) {
+      // Events that do not concern this instrument are left out, as the live CalendarService's
+      // currency mapping does (the replay trades one instrument).
+      const w = calendarAdapter.window({ from, to });
+      const events = w.events.filter((e) => eventAffectsInstrument(e, symbol, eventCurrencies));
+      return observed<CalendarWindow>(
+        { ...w, events },
+        { source: `calendar:${calendarAdapter.id}`, ...meta },
+      );
+    }
     // NOT_MODELLED: the owner chose to run without calendar data; stated in every result.
     return observed<CalendarWindow>(
       { from: from.toISOString(), to: to.toISOString(), events: [] },
@@ -669,9 +697,9 @@ export async function runBacktest(params: {
           'News assessment is required by policy but no historical news exists: every trade is blocked.',
         ]
       : []),
-    ...(streakStop
+    ...(streakDays.size > 0
       ? [
-          `From ${streakStop} new trades were blocked after ${riskPolicy.activity.maxConsecutiveLosses} losses in a row (risk policy ${riskPolicy.id}); only a winning trade resets that count, so the block lasted to the end — the live system behaves the same way today.`,
+          `On ${streakDays.size} trading day(s) new trades stopped for the rest of the day after ${riskPolicy.activity.maxConsecutiveLosses} losses in a row (risk policy ${riskPolicy.id}).`,
         ]
       : []),
     ...(final.openPositions.length > 0
@@ -739,10 +767,13 @@ export async function runBacktest(params: {
   };
 }
 
-/** Current losing streak from the newest closed trade backwards (gross P&L < 0), as live. */
-function streak(pnls: readonly number[]): number {
+/**
+ * Current losing streak within the trading day `day` (gross P&L < 0, newest backwards), as live:
+ * the count starts fresh at each trading-day reset.
+ */
+function streak(closed: readonly { pnl: number; day: string }[], day: string): number {
   let n = 0;
-  for (let i = pnls.length - 1; i >= 0 && pnls[i]! < 0; i--) n++;
+  for (let i = closed.length - 1; i >= 0 && closed[i]!.day === day && closed[i]!.pnl < 0; i--) n++;
   return n;
 }
 

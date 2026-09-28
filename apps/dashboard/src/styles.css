@@ -1225,3 +1225,86 @@ select:focus {
   stroke: var(--panel);
   stroke-width: 2;
 }
+
+/* Learning metrics */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+  margin-bottom: 8px;
+}
+.field.inline {
+  min-width: 160px;
+}
+.learn-source {
+  margin: 0 0 10px;
+}
+.refetching {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+.learn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  gap: 18px 24px;
+}
+.learn-dim {
+  min-width: 0;
+  overflow-x: auto;
+}
+.table.learn {
+  width: 100%;
+}
+.table.learn td {
+  vertical-align: top;
+}
+.table.learn td.num {
+  white-space: nowrap;
+}
+.table.learn td.rcell {
+  width: 170px;
+}
+.rline {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.table.learn tr.small-sample td,
+.table.learn tr.small-sample td span {
+  color: var(--muted);
+}
+.rbar {
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.rbar-pos {
+  fill: var(--viz-profit);
+}
+.rbar-neg {
+  fill: var(--viz-loss);
+}
+.rbar-ci line {
+  stroke: var(--text);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+.rbar-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.r-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+.chart-table {
+  margin-top: 6px;
+}
+.chart-table summary {
+  cursor: pointer;
+}
+.chart-table .table-scroll {
+  max-height: 260px;
+  overflow: auto;
+}

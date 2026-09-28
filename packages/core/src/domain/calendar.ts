@@ -40,6 +40,21 @@ export function eventAffects(event: EconomicEvent, symbol: string): boolean {
   return event.affectedInstruments.length === 0 || event.affectedInstruments.includes(symbol);
 }
 
+/**
+ * Whether an event affects one instrument, applying the currency mapping to an event the
+ * provider did not map: an instrument without `eventCurrencies`, or an event without a currency,
+ * is affected (fail-safe) — the rule `CalendarService` applies when it ingests a window.
+ */
+export function eventAffectsInstrument(
+  event: EconomicEvent,
+  symbol: string,
+  eventCurrencies: readonly string[] | undefined,
+): boolean {
+  if (event.affectedInstruments.length > 0) return event.affectedInstruments.includes(symbol);
+  if (event.currency === undefined || eventCurrencies === undefined) return true;
+  return eventCurrencies.includes(event.currency.toUpperCase());
+}
+
 /** Event blackout rule: restricted impact levels and the window around each event. */
 export interface BlackoutRule {
   readonly impactLevels: readonly EventImpact[];

@@ -75,6 +75,15 @@ describe.skipIf(!available)('API — trade journal', () => {
     });
     expect(e.result.rMultiple).toBeCloseTo(1.93, 1);
     expect(e.plan.plannedRisk).toBe(r.decision.sizing.dollarRisk);
+    // Trade context: the pushed calendar (MANUAL) covers the time the trade was open but not
+    // the whole trading day (reset 17:00 New York), so "event day" is UNKNOWN — never "no".
+    expect(e.context).toEqual({
+      setup: null,
+      timeframe: null,
+      eventDay: 'UNKNOWN',
+      heldThroughEvent: 'NO',
+      calendarSource: 'MANUAL',
+    });
 
     const events = (await get(h, '/api/v1/events?limit=50')).events as Json[];
     expect(events.find((x) => x.type === 'TRADE_JOURNALED')).toMatchObject({

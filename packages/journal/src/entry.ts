@@ -5,6 +5,7 @@
  * configured commission (labelled as such), because the paper broker reports gross P&L.
  */
 import { dec, directionSign, toNum, type Direction, type InstrumentSpec } from '@astra/core';
+import type { TradeContext } from './context';
 import type { ExcursionRecord } from './excursion';
 
 export interface ClosedTradeInput {
@@ -104,6 +105,8 @@ export interface JournalEntry {
   } | null;
   /** Exited at its own stop or target (as planned) vs manually / by protection. */
   readonly exitedAsPlanned: boolean;
+  /** Context for learning (absent on entries recorded before it existed). */
+  readonly context?: TradeContext | undefined;
 }
 
 export function buildJournalEntry(input: {
@@ -112,6 +115,7 @@ export function buildJournalEntry(input: {
   readonly decision: DecisionInput | null;
   readonly spec: InstrumentSpec | undefined;
   readonly excursion: ExcursionRecord | null;
+  readonly context?: TradeContext | undefined;
 }): JournalEntry {
   const { trade: t, order: o, decision: d, spec } = input;
   const sign = directionSign(t.direction);
@@ -212,5 +216,6 @@ export function buildJournalEntry(input: {
           }
         : null,
     exitedAsPlanned: o !== null && (t.exitReason === 'STOP' || t.exitReason === 'TARGET'),
+    ...(input.context ? { context: input.context } : {}),
   };
 }

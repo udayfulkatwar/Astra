@@ -24,6 +24,7 @@ import type {
 } from '@astra/backtest';
 import type { EventRiskView, InstrumentEventRisk } from '@astra/calendar';
 import type { JournalEntry, JournalStats, JournalSummary } from '@astra/journal';
+import type { GroupStats, LearningReport } from '@astra/learning';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
@@ -205,3 +206,9 @@ export interface PositionMonitor {
 
 /** Trade journal (GET /api/v1/journal, /api/v1/journal/summary). */
 export type { JournalEntry, JournalStats, JournalSummary };
+
+/** Learning metrics (GET /api/v1/learning). */
+export type { GroupStats, LearningReport };
+export interface LearningResponse extends LearningReport {
+  source: { kind: 'journal' | 'backtest'; runId: string | null; label: string };
+}

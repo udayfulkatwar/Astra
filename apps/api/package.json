@@ -20,6 +20,7 @@
     "@astra/decision": "workspace:*",
     "@astra/execution": "workspace:*",
     "@astra/journal": "workspace:*",
+    "@astra/learning": "workspace:*",
     "@astra/market-data": "workspace:*",
     "@astra/market-structure": "workspace:*",
     "@astra/prop-firm": "workspace:*",

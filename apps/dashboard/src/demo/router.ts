@@ -3,6 +3,7 @@
  * routes and response shapes as the real ASTRA API.
  */
 import {
+  TimeZoneSchema,
   TradeCandidateSchema,
   modePolicy,
   worstHealth,
@@ -11,6 +12,7 @@ import {
 } from '@astra/core';
 import { eventRiskView } from '@astra/calendar';
 import { journalSummary } from '@astra/journal';
+import { learningReport } from '@astra/learning';
 import { mergedBlackout } from '@astra/decision';
 import { TimeframeSchema } from '@astra/market-data';
 import { analyzeStructure } from '@astra/market-structure';
@@ -253,6 +255,26 @@ export async function handleDemoRequest(
       return path === '/api/v1/journal'
         ? { entries: entries.slice(0, Number(q.get('limit') ?? 100)) }
         : journalSummary(entries);
+    }
+    if (path === '/api/v1/learning') {
+      const tz = TimeZoneSchema.safeParse(q.get('timeZone') ?? 'UTC');
+      if (!tz.success) throw new ApiError(400, 'VALIDATION', 'timeZone must be an IANA time zone');
+      const runId = q.get('runId');
+      const mode = q.get('mode');
+      const backtest = q.get('source') === 'backtest';
+      if (backtest && !runId) throw new ApiError(400, 'VALIDATION', 'runId is required');
+      const run = backtest && runId ? getBacktest(runId) : null;
+      const entries = run ? run.result.trades : rt.journal.filter((e) => !mode || e.mode === mode);
+      return {
+        source: {
+          kind: backtest ? 'backtest' : 'journal',
+          runId: run?.runId ?? null,
+          label: run
+            ? `Backtest ${run.runId}: ${run.result.label}`
+            : 'Trade journal (recorded trades)',
+        },
+        ...learningReport(entries, { timeZone: tz.data, sessions: rt.config.system.sessions }),
+      };
     }
     if (path === '/api/v1/backtests') return listBacktests();
     const bt = /^\/api\/v1\/backtests\/([^/]+)$/.exec(path);

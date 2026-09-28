@@ -20,6 +20,7 @@ import type {
   ExecutionResult,
   JournalEntry,
   JournalSummary,
+  LearningResponse,
   KillSwitchState,
   MarketSnapshot,
   MarketStructure,
@@ -186,6 +187,27 @@ export const useJournalSummary = (strategy: string | null) =>
     queryKey: ['journal-summary', strategy],
     queryFn: () => api<JournalSummary>(`/api/v1/journal/summary?${journalQuery(strategy)}`),
     refetchInterval: 5_000,
+  });
+
+export interface LearningQuery {
+  source: 'journal' | 'backtest';
+  runId: string | null;
+  mode: string | null;
+  timeZone: string;
+}
+
+export const useLearning = (q: LearningQuery) =>
+  useQuery({
+    queryKey: ['learning', q],
+    queryFn: () => {
+      const p = new URLSearchParams({ source: q.source, timeZone: q.timeZone });
+      if (q.source === 'backtest' && q.runId) p.set('runId', q.runId);
+      if (q.source === 'journal' && q.mode) p.set('mode', q.mode);
+      return api<LearningResponse>(`/api/v1/learning?${p.toString()}`);
+    },
+    enabled: q.source === 'journal' || q.runId !== null,
+    placeholderData: keepPreviousData,
+    refetchInterval: q.source === 'journal' ? 15_000 : false,
   });
 
 export const useBacktests = () =>

@@ -39,6 +39,10 @@ export const RiskPolicySchema = z
     }),
     activity: z.object({
       maxTradesPerDay: z.number().int().positive(),
+      /**
+       * Losses in a row within the current trading day; the count starts fresh at each
+       * trading-day reset (owner decision 2026-09-28).
+       */
       maxConsecutiveLosses: z.number().int().positive(),
     }),
     health: z.object({

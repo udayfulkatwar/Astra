@@ -125,7 +125,10 @@ export class AccountRepository {
     }));
   }
 
-  /** Trades taken in the trading-day window and the current losing streak. */
+  /**
+   * Trades taken in the trading-day window and the current losing streak within that window
+   * (owner decision 2026-09-28: the streak starts fresh at each trading-day reset).
+   */
   async activity(
     accountId: string,
     window: { key: string; start: string; end: string },
@@ -135,7 +138,9 @@ export class AccountRepository {
        where account_id = ${accountId} and created_at >= ${window.start} and created_at < ${window.end}
          and status in ${this.sql(COUNTED)}`;
     const recent = await this.sql<{ realized_pnl: string }[]>`
-      select realized_pnl from closed_trades where account_id = ${accountId} order by closed_at desc limit 100`;
+      select realized_pnl from closed_trades
+       where account_id = ${accountId} and closed_at >= ${window.start} and closed_at < ${window.end}
+       order by closed_at desc limit 100`;
     let streak = 0;
     for (const r of recent) {
       if (Number(r.realized_pnl) < 0) streak++;

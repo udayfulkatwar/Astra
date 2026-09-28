@@ -1,0 +1,22 @@
+{
+  "name": "@astra/learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Learning metrics over journal entries: performance by strategy, instrument, session, time, setup and event context, with sample-size honesty; observations only — never changes configuration. Pure and isomorphic.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/journal": "workspace:*",
+    "luxon": "^3.7.2"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.5"
+  }
+}

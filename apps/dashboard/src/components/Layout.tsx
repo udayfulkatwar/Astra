@@ -16,6 +16,7 @@ const NAV: { to: string; label: string; section?: string }[] = [
   { to: '/strategies', label: 'Strategy Manager', section: 'Trading' },
   { to: '/rules', label: 'Prop-Firm Rules' },
   { to: '/journal', label: 'Trade Journal' },
+  { to: '/learning', label: 'Learning Metrics' },
   { to: '/paper', label: 'Paper Trading' },
   { to: '/backtesting', label: 'Backtesting' },
   { to: '/health', label: 'System Health', section: 'Operations' },

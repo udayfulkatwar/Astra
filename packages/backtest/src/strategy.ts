@@ -125,6 +125,7 @@ export function structureBreakoutTemplate(
             `stop at the last swing ${long ? 'low' : 'high'} ${swing.price}; target ${params.rewardToRisk} R`,
           ],
           features: {
+            setup: `${brk.type} ${long ? 'long' : 'short'}`,
             breakType: brk.type,
             breakLevel: brk.level,
             trendBefore: brk.from,
