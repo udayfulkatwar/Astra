@@ -16,6 +16,7 @@ import {
 } from '@astra/risk';
 import type { AccountService } from './account-service';
 import type { EventBus } from './event-bus';
+import { marketValuation } from './valuation';
 
 export interface PositionMonitorSnapshot {
   readonly asOf: string | null;
@@ -45,6 +46,7 @@ export class PositionMonitorService {
 
   async evaluate(): Promise<void> {
     const { config, clock, accounts, market, events } = this.deps;
+    const valuation = marketValuation(config, market);
     const now = clock.now();
     this.views = accounts
       .views()
@@ -56,7 +58,7 @@ export class PositionMonitorService {
           snapshot: v.snapshot,
           state: v.state,
           drawdownRule: config.profiles.get(v.account.propFirmProfileId)!.maxDrawdown,
-          instruments: (s) => config.instruments.get(s),
+          instruments: valuation(v.account.currency),
           quote: (s) => market.fresh(s),
           policy: this.policy,
         }),

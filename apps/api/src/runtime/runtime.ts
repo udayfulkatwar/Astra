@@ -55,6 +55,7 @@ import { AiService } from './ai-service';
 import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
+import { marketValuation } from './valuation';
 import { ExecutionService } from './execution-service';
 import { HealthService } from './health-service';
 import { KillSwitchService } from './kill-switch-service';
@@ -258,6 +259,7 @@ export class AstraRuntime {
       calendar: this.calendar,
       events: this.events,
       log,
+      valuation: marketValuation(config, this.market),
       onJournaled: (entry) => this.ai.onJournaled(entry),
     });
     this.market.onQuote((q) => this.journal.onQuote(q));
@@ -279,6 +281,7 @@ export class AstraRuntime {
       killSwitches: this.killSwitches,
       log,
       providerTimeoutMs: config.system.assembler.providerTimeoutMs,
+      valuation: marketValuation(config, this.market),
       onClosedTrade: (accountId, trade) => this.journal.recordClosed(accountId, trade),
     });
     this.monitor = new PositionMonitorService({

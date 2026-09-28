@@ -155,6 +155,9 @@ news:
     NQ: [nasdaq, nasdaq 100, tech shares, tech stocks, technology stocks]
     MNQ: [nasdaq, nasdaq 100, tech shares, tech stocks, technology stocks]
     XAUUSD: [gold, bullion, precious metals]
+    EURUSD: [euro, eurozone, euro area, ecb, eur/usd, eurusd]
+    GBPUSD: [pound, sterling, bank of england, boe, gbp/usd, gbpusd, cable]
+    USDJPY: [yen, bank of japan, boj, usd/jpy, usdjpy]
 
 calendar:
   provider: none
@@ -232,3 +235,6 @@ simulation:
     NQ: { startPrice: 20000, volatilityTicks: 4, spreadTicks: 1 }
     MNQ: { startPrice: 20000, volatilityTicks: 4, spreadTicks: 1 }
     XAUUSD: { startPrice: 2600, volatilityTicks: 15, spreadTicks: 20 }
+    EURUSD: { startPrice: 1.1, volatilityTicks: 3, spreadTicks: 5 }
+    GBPUSD: { startPrice: 1.3, volatilityTicks: 4, spreadTicks: 7 }
+    USDJPY: { startPrice: 150, volatilityTicks: 3, spreadTicks: 6 }

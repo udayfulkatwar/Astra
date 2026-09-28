@@ -28,6 +28,7 @@ import {
   notObserved,
   observed,
   tradingDayWindow,
+  valuationLookup,
   type AccountActivity,
   type AccountDefinition,
   type AccountSnapshot,
@@ -723,6 +724,14 @@ export class DemoRuntime {
     );
   }
 
+  /** Account-currency specs from live quotes (the core's `marketValuation`). */
+  private valued(currency: string) {
+    return valuationLookup(this.config.instruments, currency, (symbol) => {
+      const q = this.market.fresh(symbol);
+      return q.status === 'OK' ? q.value : null;
+    });
+  }
+
   latestQuote(symbol: string): Observed<Quote> {
     return this.market.latest(symbol);
   }
@@ -861,7 +870,7 @@ export class DemoRuntime {
           snapshot: e.snapshot,
           state: e.state,
           drawdownRule: this.config.profiles.get(a.propFirmProfileId)!.maxDrawdown,
-          instruments: (s) => this.config.instruments.get(s),
+          instruments: this.valued(a.currency),
           quote: (s) => this.market.fresh(s),
           policy: this.monitorPolicy,
         });
@@ -932,7 +941,7 @@ export class DemoRuntime {
             plannedRisk: d.decision.sizing?.dollarRisk ?? null,
           }
         : null,
-      spec: this.config.instruments.get(t.symbol),
+      spec: account ? this.valued(account.currency)(t.symbol) : undefined,
       excursion: this.excursions.take(t.positionId),
       context: profile
         ? tradeContext({
@@ -1194,7 +1203,7 @@ export class DemoRuntime {
         profile,
         tracking: entry.tracking,
         snapshot: snap,
-        instruments: (s) => this.config.instruments.get(s),
+        instruments: this.valued(account.currency),
       });
       const health = classifyAccountHealth({
         state,
@@ -1385,6 +1394,7 @@ export class DemoRuntime {
         riskPolicy: (id) => config.riskPolicies.get(id),
         strategy: (id) => config.strategies.get(id),
         instrument: (s) => config.instruments.get(s),
+        instrumentSymbols: () => [...config.instruments.keys()],
         sessions: () => config.system.sessions,
       },
       data: {

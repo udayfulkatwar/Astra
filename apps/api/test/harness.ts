@@ -24,6 +24,12 @@ export const H = {
 
 export const CONFIG = loadAstraConfig(resolve(__dirname, '../../../config'));
 export const START = '2026-09-28T14:00:00.000Z'; // Monday 10:00 New York
+/** Test prices for the paper FX account's pairs (fixtures, not market data). */
+export const FX_QUOTES = [
+  { symbol: 'EURUSD', bid: 1.1, ask: 1.10008 },
+  { symbol: 'GBPUSD', bid: 1.3, ask: 1.3001 },
+  { symbol: 'USDJPY', bid: 150, ask: 150.01 },
+] as const;
 
 export interface Harness {
   app: FastifyInstance;
@@ -127,6 +133,7 @@ export async function bringOnline(
         { symbol: 'MNQ', ...prices, asOf: at },
         { symbol: 'NQ', ...prices, asOf: at },
         { symbol: 'XAUUSD', bid: 2_600, ask: 2_600.2, asOf: at },
+        ...FX_QUOTES.map((q) => ({ ...q, asOf: at })),
       ],
     },
   });

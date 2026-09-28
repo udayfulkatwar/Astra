@@ -194,3 +194,45 @@ describe('simulateM1Bars', () => {
     expect(a.at(-1)!.closeTime <= '2026-03-09T02:00:00.000Z').toBe(true);
   });
 });
+
+describe('runBacktest — FX quoted in another currency', () => {
+  const jpy = config.instruments.get('USDJPY')!;
+  const bars = simulateM1Bars({
+    symbol: 'USDJPY',
+    tickSize: jpy.tickSize,
+    startPrice: 150,
+    from: '2026-03-02T00:00:00Z',
+    to: '2026-03-07T00:00:00Z',
+    hours: jpy.tradingHours!,
+    seed: 11,
+  });
+  const fxRun = (env = environment()) =>
+    runBacktest({ config: { ...BASE, symbol: 'USDJPY', accountId: 'paper-fx' }, bars, env });
+
+  it('values USD/JPY in dollars with the replayed rate: a stop loses about the planned risk', async () => {
+    const r = await fxRun();
+    const stopped = r.trades.filter((t) => t.exit.reason === 'STOP' && t.plan?.plannedRisk);
+    expect(stopped.length).toBeGreaterThan(0);
+    for (const t of stopped) {
+      // Planned risk (sized in USD at the decision) vs the booked loss (converted at the exit):
+      // unconverted yen would be ~150× larger.
+      const ratio = Math.abs(t.result.grossPnl) / t.plan!.plannedRisk!;
+      expect(ratio).toBeGreaterThan(0.5);
+      expect(ratio).toBeLessThan(1.5);
+    }
+  });
+
+  it("refuses a replay it cannot value with the instrument's own price", async () => {
+    const env = environment();
+    const gbpQuoted = { ...jpy, quoteCurrency: 'GBP' };
+    await expect(
+      fxRun({
+        ...env,
+        config: {
+          ...env.config,
+          instrument: (s) => (s === 'USDJPY' ? gbpQuoted : env.config.instrument(s)),
+        },
+      }),
+    ).rejects.toThrow(/can only convert with its own price/);
+  });
+});

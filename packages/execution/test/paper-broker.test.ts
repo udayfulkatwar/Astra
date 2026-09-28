@@ -112,3 +112,70 @@ describe('PaperBrokerAdapter persistence', () => {
     expect((await restarted.getOrder('A', 'c1'))?.status).toBe('FILLED');
   });
 });
+
+describe('PaperBrokerAdapter — FX quoted in another currency', () => {
+  const fx = (symbol: string, quoteCurrency: string, tickSize: number, tickValue: number) =>
+    ({
+      ...NQ,
+      symbol,
+      assetClass: 'FOREX',
+      quantityUnit: 'LOTS',
+      quoteCurrency,
+      tickSize,
+      tickValue,
+      quantityStep: 0.01,
+      minQuantity: 0.01,
+      costs: {
+        commissionPerUnitRoundTurn: 7,
+        commissionCurrency: 'USD',
+        slippageAllowanceTicks: 5,
+      },
+    }) satisfies InstrumentSpec;
+  const specs: Record<string, InstrumentSpec> = {
+    USDJPY: fx('USDJPY', 'JPY', 0.001, 100),
+    EURGBP: fx('EURGBP', 'GBP', 0.00001, 1),
+  };
+  const at = '2026-09-28T14:00:00Z';
+  const setup = () => {
+    const b = new PaperBrokerAdapter({
+      clock: new ManualClock(at),
+      instruments: (s) => specs[s],
+    });
+    b.openAccount('A', 50_000, 'USD');
+    b.onQuote({ symbol: 'USDJPY', bid: 150, ask: 150.01, asOf: at });
+    b.onQuote({ symbol: 'EURGBP', bid: 0.85, ask: 0.85005, asOf: at });
+    return b;
+  };
+  const fxOrder = {
+    ...order,
+    symbol: 'USDJPY',
+    quantity: 1,
+    stopLoss: 149.8,
+    takeProfit: 150.4,
+  };
+
+  it('books USD/JPY profit in dollars at the USDJPY rate of the exit', async () => {
+    const b = setup();
+    expect(await b.submitOrder(fxOrder)).toMatchObject({ status: 'FILLED' });
+    expect((await b.getAccountSnapshot('A', 'x')).balance).toBe(49_993); // $7 commission
+    b.onQuote({ symbol: 'USDJPY', bid: 150.4, ask: 150.41, asOf: '2026-09-28T14:05:00Z' });
+    const [t] = b.closedTrades('A');
+    // 390 ticks × 100 JPY = 39,000 JPY ÷ 150.405 (mid) = $259.30
+    expect(t).toMatchObject({ exitReason: 'TARGET', exitPrice: 150.4 });
+    expect(t!.realizedPnl).toBeCloseTo(259.3, 2);
+  });
+
+  it('refuses an order whose P&L it cannot convert (no GBPUSD quote for a GBP-quoted pair)', async () => {
+    const b = setup();
+    const s = await b.submitOrder({
+      ...order,
+      clientOrderId: 'c-eg',
+      symbol: 'EURGBP',
+      quantity: 1,
+      stopLoss: 0.849,
+      takeProfit: 0.852,
+    });
+    expect(s.status).toBe('REJECTED');
+    expect(s.rejectReason).toMatch(/no fresh GBP→USD rate/);
+  });
+});

@@ -1,0 +1,42 @@
+# Euro / US Dollar spot FX. TEMPLATE VALUES — standard FX conventions, not your broker's confirmed specs.
+# ASSUMED: 1 lot = 100,000 units of the base currency, prices quoted to 0.00001
+# (so one tick = 1.00 USD per lot), and a raw-spread commission of 7.00 USD per lot round turn.
+# Confirm contract size, digits, commission and hours with your broker/prop-firm platform, then
+# mark USER_VERIFIED. LIVE refuses UNVERIFIED specs.
+symbol: EURUSD
+displayName: Euro / US Dollar (spot FX)
+assetClass: FOREX
+quantityUnit: LOTS
+# Tick value is in USD.
+quoteCurrency: USD
+tickSize: 0.00001
+tickValue: 1.00
+quantityStep: 0.01
+minQuantity: 0.01
+# Spread guard: 20 ticks = 2.0 pips.
+maxSpreadTicks: 20
+costs:
+  commissionPerUnitRoundTurn: 7.00
+  commissionCurrency: USD
+  slippageAllowanceTicks: 5
+# ASSUMED broker schedule: Sun 17:05 – Fri 17:00 New York, with a daily 17:00–17:05 rollover
+# break. The FX trading day ends at 17:00 New York. Holidays are not modelled (no fresh quotes →
+# the data gate blocks trading).
+tradingHours:
+  timeZone: America/New_York
+  dayStart: '17:00'
+  weekly:
+    - { open: { day: SUN, time: '17:05' }, close: { day: MON, time: '17:00' } }
+    - { open: { day: MON, time: '17:05' }, close: { day: TUE, time: '17:00' } }
+    - { open: { day: TUE, time: '17:05' }, close: { day: WED, time: '17:00' } }
+    - { open: { day: WED, time: '17:05' }, close: { day: THU, time: '17:00' } }
+    - { open: { day: THU, time: '17:05' }, close: { day: FRI, time: '17:00' } }
+# Entry tolerance for MARKET entries: 20 ticks = 2 pips.
+maxEntryDeviationTicks: 20
+# Data-quality guard: a quote-to-quote move above 1000 ticks (100 pips) is treated as abnormal.
+maxQuoteJumpTicks: 1000
+# Economic events of these currencies affect the pair.
+eventCurrencies: [EUR, USD]
+verification:
+  status: UNVERIFIED
+  note: Standard FX conventions assumed (100k lot, 0.00001 tick, 7 USD/lot commission) — confirm with your broker.

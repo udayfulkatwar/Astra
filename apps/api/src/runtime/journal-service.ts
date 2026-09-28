@@ -22,6 +22,7 @@ import {
 import type { AccountMonitorView } from '@astra/risk';
 import type { Logger } from 'pino';
 import type { EventBus } from './event-bus';
+import type { Valuation } from './valuation';
 
 export class JournalService {
   private readonly tracker = new ExcursionTracker();
@@ -36,6 +37,8 @@ export class JournalService {
       calendar: CalendarService;
       events: EventBus;
       log: Logger;
+      /** Account-currency specs (converted with live quotes when an instrument needs it). */
+      valuation: Valuation;
       /** Called once per newly journaled trade (e.g. automatic AI review); must not reject. */
       onJournaled?: (entry: JournalEntry) => Promise<void>;
     },
@@ -118,7 +121,8 @@ export class JournalService {
               plannedRisk: detail.decision.sizing?.dollarRisk ?? null,
             }
           : null,
-        spec: this.deps.config.instruments.get(t.symbol),
+        // Valued at the quotes current when the close is recorded (unknown without one).
+        spec: account ? this.deps.valuation(account.currency)(t.symbol) : undefined,
         excursion: this.tracker.take(t.id),
         context,
       });

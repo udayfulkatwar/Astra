@@ -107,9 +107,16 @@ export function riskPerUnit(
 export function calculatePositionSize(input: PositionSizingInput): PositionSizing {
   const { instrument, state, policy } = input;
 
+  const conversionError = (instrument as { conversionError?: string }).conversionError;
+  if (conversionError) return reject(conversionError);
   if (instrument.quoteCurrency !== input.accountCurrency) {
     return reject(
-      `instrument quote currency ${instrument.quoteCurrency} differs from account currency ${input.accountCurrency}; conversion not supported`,
+      `instrument quote currency ${instrument.quoteCurrency} differs from account currency ${input.accountCurrency} and was not converted`,
+    );
+  }
+  if ((instrument.costs.commissionCurrency ?? instrument.quoteCurrency) !== input.accountCurrency) {
+    return reject(
+      `commission currency differs from account currency ${input.accountCurrency} and was not converted`,
     );
   }
   if (dec(input.entry).minus(input.stop).mul(directionSign(input.direction)).lte(0)) {

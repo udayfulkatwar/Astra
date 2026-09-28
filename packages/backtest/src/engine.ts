@@ -13,10 +13,13 @@ import { SimulatedCalendarAdapter } from '@astra/calendar';
 import {
   AstraError,
   ManualClock,
+  commissionCurrency,
+  conversionRate,
   eventAffectsInstrument,
   notObserved,
   observed,
   tradingDayWindow,
+  valueInAccountCurrency,
   type AccountActivity,
   type AccountSnapshot,
   type CalendarWindow,
@@ -234,6 +237,13 @@ export async function runBacktest(params: {
     fail(`${symbol} is not enabled for account ${configured.id}`);
   if (!spec.tradingHours) fail(`trading hours not configured for ${symbol}`);
   validateBars(bars, symbol);
+  const convertible = valueInAccountCurrency(spec, configured.currency, (from) =>
+    conversionRate(from, configured.currency, [symbol], () => ({ bid: 1, ask: 1 })),
+  );
+  if (convertible.conversionError)
+    fail(
+      `${symbol} is valued in ${spec.quoteCurrency}/${commissionCurrency(spec)} but the account is in ${configured.currency}; a single-instrument replay can only convert with its own price`,
+    );
   // Validated above; typed for the helper functions below (declarations do not keep narrowing).
   const dayReset = profile.tradingDayReset;
   const eventCurrencies = spec.eventCurrencies;
@@ -249,6 +259,8 @@ export async function runBacktest(params: {
     riskPolicy: (id) => base.riskPolicy(id),
     strategy: (id) => (id === strategy.definition.id ? strategy.definition : base.strategy(id)),
     instrument: (s) => base.instrument(s),
+    // Only the replayed instrument has prices: it is the only conversion source.
+    instrumentSymbols: () => [symbol],
     sessions: () => base.sessions(),
   };
 
@@ -278,7 +290,8 @@ export async function runBacktest(params: {
     ],
   ]);
   const classified = new Map<string, ClassifiedNews>();
-  const lookup = (s: string) => base.instrument(s);
+  let lastMid = first.open;
+  const lookup = (s: string) => (s === symbol ? broker.valued(lastMid) : undefined);
   const half = (config.spreadTicks * spec.tickSize) / 2;
   // Replayed recordings are HISTORICAL; generated bars stay SIMULATED.
   const replayKind = (b: Bar): DataSourceKind =>
@@ -371,6 +384,7 @@ export async function runBacktest(params: {
           actor: SYSTEM,
         }),
       );
+    lastMid = bar.close;
     const snapshot = broker.snapshot(now, bar.close);
     const today = dayKey(now);
     tracking = tracking
@@ -596,7 +610,7 @@ export async function runBacktest(params: {
         trade: { ...t, accountId: account.id },
         order: rec?.order ?? null,
         decision: rec?.decision ?? null,
-        spec,
+        spec: broker.valued(t.exitPrice),
         excursion,
         context: tradeContext({
           signal: rec?.signal ?? null,

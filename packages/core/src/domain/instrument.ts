@@ -33,7 +33,10 @@ export const InstrumentSpecSchema = z
     quoteCurrency: CurrencySchema,
     /** Minimum price increment. */
     tickSize: PositiveNumberSchema,
-    /** Value of a one-tick move for a quantity of 1, in quoteCurrency. */
+    /**
+     * Value of a one-tick move for a quantity of 1, in quoteCurrency. When that is not the account
+     * currency, it is converted from a live quote before any money is computed (domain/valuation).
+     */
     tickValue: PositiveNumberSchema,
     /** Quantity increment (e.g. 1 contract, 0.01 lots). */
     quantityStep: PositiveNumberSchema,
@@ -45,6 +48,8 @@ export const InstrumentSpecSchema = z
     /** Cost assumptions used in worst-case risk (conservative estimates, not fills). */
     costs: z.object({
       commissionPerUnitRoundTurn: NonNegativeNumberSchema,
+      /** Currency of the commission; defaults to quoteCurrency (FX brokers often charge in USD). */
+      commissionCurrency: CurrencySchema.optional(),
       slippageAllowanceTicks: NonNegativeNumberSchema,
     }),
     /**

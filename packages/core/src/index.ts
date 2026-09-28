@@ -9,6 +9,7 @@ export * from './decimal';
 export * from './canonical';
 export * from './schemas';
 export * from './domain/instrument';
+export * from './domain/valuation';
 export * from './domain/market';
 export * from './domain/calendar';
 export * from './domain/account';

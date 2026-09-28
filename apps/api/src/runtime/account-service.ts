@@ -30,6 +30,7 @@ import { classifyAccountHealth, type AccountHealthAssessment } from '@astra/risk
 import { evaluateAccountHaltConditions } from '@astra/safety';
 import type { Logger } from 'pino';
 import type { EventBus } from './event-bus';
+import type { Valuation } from './valuation';
 import type { HealthService } from './health-service';
 import type { KillSwitchService } from './kill-switch-service';
 
@@ -71,6 +72,8 @@ export class AccountService {
       killSwitches: KillSwitchService;
       log: Logger;
       providerTimeoutMs: number;
+      /** Account-currency specs (converted with live quotes when an instrument needs it). */
+      valuation: Valuation;
       /** Called once per newly recorded closed trade (trade journal). Must not throw. */
       onClosedTrade?: (accountId: string, trade: ClosedTradeRecord) => Promise<void>;
     },
@@ -203,7 +206,7 @@ export class AccountService {
       await repo.saveTracking(tracking);
       entry.tracking = tracking;
 
-      const lookup = (s: string) => config.instruments.get(s);
+      const lookup = this.deps.valuation(account.currency);
       const state = computeAccountState({
         profile,
         tracking,

@@ -1,0 +1,16 @@
+# Paper account for the FX strategy (EUR/USD, GBP/USD, USD/JPY). No real money, no credentials.
+# It uses the TEMPLATE prop-firm profile until the owner names the firm and account type; the
+# firm's real rules then replace it (they are never assumed).
+id: paper-fx
+name: Paper FX (template profile)
+firm: TEMPLATE (not a real firm)
+propFirmProfileId: template-static-50k
+riskPolicyId: template-conservative
+currency: USD
+status: ACTIVE
+broker:
+  adapterId: paper
+  accountRef: PAPER-FX-1
+strategies: []
+instruments: [EURUSD, GBPUSD, USDJPY]
+liveTradingAuthorized: false

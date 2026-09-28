@@ -7,17 +7,22 @@
  *   gapped through at the open fills at the open; stops pay slippage; targets fill at the target
  *   (never better). Protective closes fill at the next open with slippage.
  * - Commission is charged in full at entry (like the paper broker); P&L reported gross.
+ * - Money is in the account currency: a spec quoted in another currency (USD/JPY for a USD
+ *   account) is converted with the replayed pair's own mid price at that moment.
  */
 import {
+  conversionRate,
   dec,
   directionSign,
   money,
   toNum,
+  valueInAccountCurrency,
   type AccountSnapshot,
   type Dec,
   type Direction,
   type InstrumentSpec,
   type OpenPosition,
+  type ValuedInstrumentSpec,
 } from '@astra/core';
 import type { Bar } from '@astra/market-data';
 
@@ -110,6 +115,21 @@ export class BacktestBroker {
     return [...this.open.values()];
   }
 
+  /**
+   * The spec valued in the account currency at `mid` (this instrument's price). A conversion the
+   * replayed instrument cannot provide is refused (`runBacktest` checks it before replaying).
+   */
+  valued(mid: number): ValuedInstrumentSpec {
+    const { spec, currency } = this.opts;
+    const v = valueInAccountCurrency(spec, currency, (from) =>
+      conversionRate(from, currency, [spec.symbol], (s) =>
+        s === spec.symbol ? { bid: mid, ask: mid } : null,
+      ),
+    );
+    if (v.conversionError) throw new Error(v.conversionError);
+    return v;
+  }
+
   private get half(): Dec {
     return dec(this.opts.model.spreadTicks).mul(this.opts.spec.tickSize).div(2);
   }
@@ -147,7 +167,7 @@ export class BacktestBroker {
         o.direction === 'LONG' ? dec(bar.open).plus(this.half) : dec(bar.open).minus(this.half)
       ).plus(this.slip.mul(sign));
       this.balance = this.balance.minus(
-        dec(this.opts.spec.costs.commissionPerUnitRoundTurn).mul(o.quantity),
+        dec(this.valued(bar.open).costs.commissionPerUnitRoundTurn).mul(o.quantity),
       );
       const p: BacktestPosition = {
         positionId: `bt-pos-${++this.seq}`,
@@ -190,7 +210,7 @@ export class BacktestBroker {
 
   /** Account snapshot marked at the bar close (exit side). */
   snapshot(asOf: string, closeMid: number): AccountSnapshot {
-    const spec = this.opts.spec;
+    const spec = this.valued(closeMid);
     let floating = dec(0);
     const positions: OpenPosition[] = [...this.open.values()].map((p) => {
       const px = this.exitSide(p.direction, closeMid);
@@ -231,7 +251,7 @@ export class BacktestBroker {
     reason: BacktestClosedTrade['exitReason'],
     at: string,
   ): BacktestClosedTrade {
-    const spec = this.opts.spec;
+    const spec = this.valued(toNum(exit, 10));
     const pnl = exit
       .minus(p.entryPrice)
       .mul(directionSign(p.direction))

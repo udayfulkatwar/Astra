@@ -8,6 +8,8 @@
  */
 import {
   AstraError,
+  conversionRate,
+  valueInAccountCurrency,
   ZERO,
   dec,
   uuidv7,
@@ -267,7 +269,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     const positions: OpenPosition[] = [];
     for (const p of acct.positions.values()) {
       const q = this.quotes.get(p.symbol);
-      const spec = this.spec(p.symbol);
+      const spec = this.valued(p.symbol, acct.currency);
       const mark = q ? (p.direction === 'LONG' ? q.bid : q.ask) : p.currentPrice;
       const pnl = dec(mark)
         .minus(p.entryPrice)
@@ -354,6 +356,12 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     const spec = this.opts.instruments(req.symbol);
     if (!spec) return `unknown instrument ${req.symbol}`;
     if (!this.quotes.has(req.symbol)) return `no market for ${req.symbol}`;
+    // P&L must be convertible to the account currency; quotes are kept, so it stays convertible.
+    const currency = this.account(req.accountRef).currency;
+    const valued = valueInAccountCurrency(spec, currency, (from) =>
+      conversionRate(from, currency, this.quotes.keys(), (s) => this.quotes.get(s) ?? null),
+    );
+    if (valued.conversionError) return valued.conversionError;
     if (req.quantity < spec.minQuantity) return 'quantity below minimum';
     const sign = directionSign(req.direction);
     const q = this.quotes.get(req.symbol)!;
@@ -382,7 +390,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     }
     if (qty.lte(0)) return { ...base, status: 'ACCEPTED' };
 
-    acct.balance = acct.balance.minus(dec(spec.costs.commissionPerUnitRoundTurn).mul(qty));
+    const fee = this.valued(req.symbol, acct.currency).costs.commissionPerUnitRoundTurn;
+    acct.balance = acct.balance.minus(dec(fee).mul(qty));
     const now = this.opts.clock.now().toISOString();
     const positionId = `PAPER-POS-${uuidv7()}`;
     acct.positions.set(positionId, {
@@ -417,7 +426,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     const acct = this.account(accountRef);
     const pos = acct.positions.get(positionId);
     if (!pos) return;
-    const spec = this.spec(pos.symbol);
+    const spec = this.valued(pos.symbol, acct.currency);
     const pnl = dec(exitPrice)
       .minus(pos.entryPrice)
       .mul(directionSign(pos.direction))
@@ -451,5 +460,14 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     const s = this.opts.instruments(symbol);
     if (!s) throw new AstraError('NOT_FOUND', `unknown instrument ${symbol}`);
     return s;
+  }
+
+  /** The spec valued in the account currency from the latest quotes (P&L is never 1:1 guessed). */
+  private valued(symbol: string, currency: string): InstrumentSpec {
+    const v = valueInAccountCurrency(this.spec(symbol), currency, (from) =>
+      conversionRate(from, currency, this.quotes.keys(), (s) => this.quotes.get(s) ?? null),
+    );
+    if (v.conversionError) throw new AstraError('UNAVAILABLE', v.conversionError);
+    return v;
   }
 }

@@ -1,3 +1,4 @@
+import { valueInAccountCurrency, type InstrumentSpec } from '@astra/core';
 import { PropFirmRuleProfileSchema, trailingExposure } from '@astra/prop-firm';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -218,5 +219,46 @@ describe('calculatePositionSize — trailing intraday drawdown path', () => {
       ok: false,
       reason: 'trailing drawdown path risk unknown: unbounded',
     });
+  });
+});
+
+describe('calculatePositionSize — instruments quoted in another currency', () => {
+  const USDJPY: InstrumentSpec = {
+    ...XAU,
+    symbol: 'USDJPY',
+    assetClass: 'FOREX',
+    quoteCurrency: 'JPY',
+    tickSize: 0.001,
+    tickValue: 100,
+    maxQuantity: undefined,
+    costs: { commissionPerUnitRoundTurn: 7, commissionCurrency: 'USD', slippageAllowanceTicks: 5 },
+  };
+
+  it('sizes a converted spec in account money (100 JPY/tick at 150.00 = $0.6667)', () => {
+    const valued = valueInAccountCurrency(USDJPY, 'USD', () => ({
+      from: 'JPY',
+      to: 'USD',
+      rate: 1 / 150,
+      via: 'USDJPY',
+    }));
+    // 20 pips = 200 ticks + 5 slippage = 205 × $0.6667 + $7 = $143.67 per lot → 1.74 lots
+    const r = calculatePositionSize(base({ instrument: valued, entry: 150, stop: 149.8 }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.quantity).toBe(1.74);
+    expect(r.dollarRisk).toBeCloseTo(249.98, 2);
+  });
+
+  it('refuses a spec that was not (or could not be) converted', () => {
+    const raw = calculatePositionSize(base({ instrument: USDJPY, entry: 150, stop: 149.8 }));
+    expect(raw).toMatchObject({ ok: false, reason: expect.stringMatching(/was not converted/) });
+    const failed = calculatePositionSize(
+      base({
+        instrument: valueInAccountCurrency(USDJPY, 'USD', () => null),
+        entry: 150,
+        stop: 149.8,
+      }),
+    );
+    expect(failed).toMatchObject({ ok: false, reason: expect.stringMatching(/no fresh JPY→USD/) });
   });
 });

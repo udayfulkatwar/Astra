@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { H, bringOnline, candidate, createHarness, dbAvailable, type Harness } from './harness';
+import {
+  FX_QUOTES,
+  H,
+  bringOnline,
+  candidate,
+  createHarness,
+  dbAvailable,
+  type Harness,
+} from './harness';
 
 const available = await dbAvailable();
 let h: Harness | undefined;
@@ -36,7 +44,14 @@ describe.skipIf(!available)('API — market scanner', () => {
     expect((await h.app.inject({ url: '/api/v1/market/scanner' })).statusCode).toBe(401);
     await bringOnline(h);
     const snaps = await scanner(h);
-    expect(snaps.map((s) => s.symbol).sort()).toEqual(['MNQ', 'NQ', 'XAUUSD']);
+    expect(snaps.map((s) => s.symbol).sort()).toEqual([
+      'EURUSD',
+      'GBPUSD',
+      'MNQ',
+      'NQ',
+      'USDJPY',
+      'XAUUSD',
+    ]);
     const mnq = snaps.find((s) => s.symbol === 'MNQ')!;
     expect(mnq).toMatchObject({
       asOf: '2026-09-28T14:00:00.000Z',
@@ -202,6 +217,7 @@ describe.skipIf(!available)('API — market-data quality and health', () => {
       { symbol: 'MNQ', bid: 20_100, ask: 20_100.25 },
       { symbol: 'NQ', bid: 20_000, ask: 20_000.25 },
       { symbol: 'XAUUSD', bid: 2_600, ask: 2_600.2 },
+      ...FX_QUOTES,
     ]);
     await h.runtime.cycle();
     const ok = json(
@@ -231,7 +247,7 @@ describe.skipIf(!available)('API — market-data quality and health', () => {
     await h.runtime.cycle();
     const s = json(await get(h, '/api/v1/system/status'));
     expect(s.data.status).toBe('DEGRADED');
-    expect(s.data.detail).toMatch(/fresh quotes for 1\/3: MNQ \(ingest:test\)/);
+    expect(s.data.detail).toMatch(/fresh quotes for 1\/6: MNQ \(ingest:test\)/);
     expect(s.data.detail).toMatch(/NQ STALE/);
     expect(s.trading.reasons).toContain('MARKET_DATA DEGRADED');
   });
@@ -266,8 +282,11 @@ describe.skipIf(!available)('API — market-data quality and health', () => {
     await h.runtime.cycle();
     const quotes = json(await get(h, '/api/v1/market/quotes')).quotes as Json[];
     expect(quotes.map((q) => [q.value.symbol, q.source, q.sourceKind]).sort()).toEqual([
+      ['EURUSD', 'simulation', 'SIMULATED'],
+      ['GBPUSD', 'simulation', 'SIMULATED'],
       ['MNQ', 'simulation', 'SIMULATED'],
       ['NQ', 'simulation', 'SIMULATED'],
+      ['USDJPY', 'simulation', 'SIMULATED'],
       ['XAUUSD', 'simulation', 'SIMULATED'],
     ]);
     const s = json(await get(h, '/api/v1/system/status'));
@@ -315,8 +334,11 @@ describe.skipIf(!available)('API — market structure', () => {
     const all = json(await get(h, '/api/v1/market/structure')).structures as Json[];
     // Default H1: the 14:00 bar is still in progress, so there is nothing to analyse yet.
     expect(all.map((x) => [x.symbol, x.timeframe, x.barsAnalysed, x.trend]).sort()).toEqual([
+      ['EURUSD', 'H1', 0, 'UNKNOWN'],
+      ['GBPUSD', 'H1', 0, 'UNKNOWN'],
       ['MNQ', 'H1', 0, 'UNKNOWN'],
       ['NQ', 'H1', 0, 'UNKNOWN'],
+      ['USDJPY', 'H1', 0, 'UNKNOWN'],
       ['XAUUSD', 'H1', 0, 'UNKNOWN'],
     ]);
     expect((await get(h, '/api/v1/market/structure?timeframe=M2')).statusCode).toBe(400);

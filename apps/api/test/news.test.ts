@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { H, bringOnline, candidate, createHarness, dbAvailable, type Harness } from './harness';
+import {
+  FX_QUOTES,
+  H,
+  bringOnline,
+  candidate,
+  createHarness,
+  dbAvailable,
+  type Harness,
+} from './harness';
 
 const available = await dbAvailable();
 let h: Harness | undefined;
@@ -88,6 +96,7 @@ describe.skipIf(!available)('API — news intelligence', () => {
 
     // No delivery for 16 minutes: the feed is STALE and news risk is unknown → no trades.
     h.clock.advance(16 * 60_000);
+    const asOf = h.clock.now().toISOString();
     await h.app.inject({
       method: 'POST',
       url: '/api/v1/market/quotes',
@@ -95,9 +104,10 @@ describe.skipIf(!available)('API — news intelligence', () => {
       payload: {
         source: 'test',
         quotes: [
-          { symbol: 'MNQ', bid: 20_000, ask: 20_000.25, asOf: h.clock.now().toISOString() },
-          { symbol: 'NQ', bid: 20_000, ask: 20_000.25, asOf: h.clock.now().toISOString() },
-          { symbol: 'XAUUSD', bid: 2_600, ask: 2_600.2, asOf: h.clock.now().toISOString() },
+          { symbol: 'MNQ', bid: 20_000, ask: 20_000.25, asOf },
+          { symbol: 'NQ', bid: 20_000, ask: 20_000.25, asOf },
+          { symbol: 'XAUUSD', bid: 2_600, ask: 2_600.2, asOf },
+          ...FX_QUOTES.map((q) => ({ ...q, asOf })),
         ],
       },
     });

@@ -4,9 +4,14 @@
  * explicit non-OK observation — never a default value.
  */
 import {
+  applyFreshness,
+  commissionCurrency,
+  conversionPair,
+  conversionRate,
   newId,
   notObserved,
   observeWithTimeout,
+  valueInAccountCurrency,
   type AccountActivity,
   type AccountDefinition,
   type AccountSnapshot,
@@ -64,6 +69,8 @@ export interface DecisionConfigView {
   riskPolicy(id: string): RiskPolicy | undefined;
   strategy(id: string): StrategyDefinition | undefined;
   instrument(symbol: string): InstrumentSpec | undefined;
+  /** Every configured instrument (to find currency pairs for valuation). */
+  instrumentSymbols?(): readonly string[];
   sessions(): readonly SessionDefinition[];
 }
 
@@ -91,12 +98,12 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
   const profile = account ? (config.profile(account.propFirmProfileId) ?? null) : null;
   const riskPolicy = account ? (config.riskPolicy(account.riskPolicyId) ?? null) : null;
   const strategy = config.strategy(signal.strategyId) ?? null;
-  const instrument = config.instrument(signal.symbol) ?? null;
+  const rawInstrument = config.instrument(signal.symbol) ?? null;
 
-  const instruments: Record<string, InstrumentSpec> = {};
+  const rawInstruments: Record<string, InstrumentSpec> = {};
   for (const sym of new Set([signal.symbol, ...(account?.instruments ?? [])])) {
     const spec = config.instrument(sym);
-    if (spec) instruments[sym] = spec;
+    if (spec) rawInstruments[sym] = spec;
   }
 
   // Calendar window must cover the widest blackout of global, strategy and firm rules.
@@ -134,6 +141,23 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
       obs('duplicates', (s) => data.duplicates(acct, signal.id, signal.symbol, s)),
     ]);
 
+  // Money is computed in the account currency: specs quoted in another currency are converted
+  // with a fresh quote of a configured pair (the rate is frozen into the decision record).
+  const valued = await valueSpecs({
+    specs: rawInstruments,
+    accountCurrency: account?.currency ?? null,
+    symbols: config.instrumentSymbols?.() ?? Object.keys(rawInstruments),
+    candidateQuote: { symbol: signal.symbol, quote },
+    fetch: (symbol) => obs('market-data', (s) => data.quote(symbol, s)),
+    freshness: {
+      maxAgeMs: config.policy.freshness.quoteMaxAgeMs,
+      maxFutureSkewMs: config.policy.freshness.maxFutureSkewMs,
+    },
+    now: clock.now(),
+  });
+  const instrument = rawInstrument ? (valued[signal.symbol] ?? rawInstrument) : null;
+  const instruments = valued;
+
   return {
     decisionId: opts.decisionId ?? newId('decision'),
     // Decision time is taken AFTER gathering so freshness is judged at the moment of decision.
@@ -168,4 +192,39 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
     execution: state.execution(account),
     liveTradingEnvironmentAuthorized: state.liveTradingEnvironmentAuthorized(),
   };
+}
+
+async function valueSpecs(o: {
+  specs: Record<string, InstrumentSpec>;
+  accountCurrency: string | null;
+  symbols: readonly string[];
+  candidateQuote: { symbol: string; quote: Observed<Quote> };
+  fetch: (symbol: string) => Promise<Observed<Quote>>;
+  freshness: { maxAgeMs: number; maxFutureSkewMs: number };
+  now: Date;
+}): Promise<Record<string, InstrumentSpec>> {
+  const ccy = o.accountCurrency;
+  if (!ccy) return o.specs;
+  const foreign = new Set<string>();
+  for (const s of Object.values(o.specs)) {
+    for (const c of [s.quoteCurrency, commissionCurrency(s)]) if (c !== ccy) foreign.add(c);
+  }
+  if (foreign.size === 0) return o.specs;
+  const all = new Set([...o.symbols, ...Object.keys(o.specs)]);
+  const quotes = new Map<string, { bid: number; ask: number }>();
+  for (const from of foreign) {
+    const pair = conversionPair(from, ccy, all);
+    if (!pair || quotes.has(pair.symbol)) continue;
+    const raw =
+      pair.symbol === o.candidateQuote.symbol ? o.candidateQuote.quote : await o.fetch(pair.symbol);
+    const q = applyFreshness(raw, o.now, o.freshness);
+    if (q.status === 'OK') quotes.set(pair.symbol, q.value);
+  }
+  const out: Record<string, InstrumentSpec> = {};
+  for (const [sym, spec] of Object.entries(o.specs)) {
+    out[sym] = valueInAccountCurrency(spec, ccy, (from) =>
+      conversionRate(from, ccy, all, (s) => quotes.get(s) ?? null),
+    );
+  }
+  return out;
 }
