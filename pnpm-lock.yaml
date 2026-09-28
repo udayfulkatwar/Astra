@@ -92,6 +92,9 @@ importers:
       '@astra/safety':
         specifier: workspace:*
         version: link:../../packages/safety
+      '@astra/strategy-lsfvg':
+        specifier: workspace:*
+        version: link:../../packages/strategy-lsfvg
       '@fastify/cors':
         specifier: ^11.3.0
         version: 11.3.0
@@ -184,6 +187,9 @@ importers:
       '@astra/safety':
         specifier: workspace:*
         version: link:../../packages/safety
+      '@astra/strategy-lsfvg':
+        specifier: workspace:*
+        version: link:../../packages/strategy-lsfvg
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -480,6 +486,18 @@ importers:
       '@astra/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  packages/strategy-lsfvg:
+    dependencies:
+      '@astra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@astra/market-data':
+        specifier: workspace:*
+        version: link:../market-data
       zod:
         specifier: ^4.6.5
         version: 4.6.5

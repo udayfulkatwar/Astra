@@ -96,7 +96,9 @@ import {
   type KillSwitchScope,
 } from '@astra/safety';
 import type { AuditEntry, ClosedTrade, ModeInfo, SystemEvent } from '../api/types';
+import { ApiError } from '../api/client';
 import { loadDemoConfig, type DemoConfig } from './config';
+import { DemoStrategyRunner } from './strategy';
 
 type Level = SystemEvent['level'];
 
@@ -173,6 +175,9 @@ export class DemoRuntime {
   readonly paper: PaperBrokerAdapter;
   readonly store = new InMemoryExecutionStore();
   readonly gateway: ExecutionGateway;
+  /** The owner's rule-based strategies on the SIMULATED candles (ADR-0024). */
+  readonly strategies: DemoStrategyRunner;
+  private historyBuilt = false;
   readonly decisions: DemoDecisionRecord[] = [];
   /** Trade journal (newest first) and the excursion tracker feeding it. */
   readonly journal: JournalEntry[] = [];
@@ -229,6 +234,9 @@ export class DemoRuntime {
       maxBarsPerSeries: this.config.system.marketData?.maxBarsPerSeries,
       barCloseGraceMs: this.config.system.marketData?.barCloseGraceMs,
       observingSince: historyStart,
+      // Every completed bar (closed by time or by a newer quote) reaches the strategy engines;
+      // until the simulated history is built they only warm up.
+      onBars: (bars) => this.strategies?.onBars(bars, this.historyBuilt),
       onRejected: (source, reason) =>
         this.emit('WARN', 'market-data', 'QUOTE_REJECTED', `${source}: ${reason}`),
     });
@@ -278,7 +286,32 @@ export class DemoRuntime {
         }
       },
     });
+    this.strategies = new DemoStrategyRunner({
+      config: this.config,
+      now: () => this.clock.now().toISOString(),
+      evaluate: (candidate, autoExecute) => this.evaluate(candidate, autoExecute),
+      cancelForSignal: async (signalId, reason) => {
+        for (const o of this.store.orders.values()) {
+          if (o.signalId !== signalId || o.status !== 'ACCEPTED') continue;
+          await this.gateway.cancelWorking({
+            accountId: o.accountId,
+            clientOrderId: o.clientOrderId,
+            reason,
+          });
+          this.emit(
+            'WARN',
+            'execution',
+            'ORDER_CANCELLED',
+            `${o.symbol} LIMIT cancelled: ${reason}`,
+            o.accountId,
+          );
+        }
+      },
+      emit: (level, type, message, accountId) =>
+        this.emit(level, 'strategy', type, message, accountId ?? null),
+    });
     this.historyQuotes = this.simulateHistory(historyStart, start);
+    this.historyBuilt = true;
     this.clock.set(start);
     this.killSwitches = new KillSwitchRegistry(this.clock);
     this.killSwitches.load([]);
@@ -482,6 +515,22 @@ export class DemoRuntime {
     this.health.report('AUTOMATION', 'ONLINE', 'simulated n8n heartbeat (demo)');
   }
 
+  /** Resting LIMIT orders: record fills and expiries from the paper broker (as the server does). */
+  private async syncWorkingOrders(): Promise<void> {
+    for (const o of [...this.store.orders.values()]) {
+      if (o.status !== 'ACCEPTED') continue;
+      const r = await this.gateway.refresh(o);
+      if (r.changed && r.state)
+        this.emit(
+          'INFO',
+          'execution',
+          `ORDER_${r.state.status}`,
+          `${o.direction} LIMIT ${o.quantity} ${o.symbol} @ ${o.plannedEntry}: ${r.state.status}`,
+          o.accountId,
+        );
+    }
+  }
+
   /** SIMULATED random-walk quotes — a simulator, not market data — into the market-data engine. */
   private feed(): void {
     for (const quote of this.simulateQuotes(
@@ -491,6 +540,7 @@ export class DemoRuntime {
       this.excursions.onQuote(quote);
     }
     this.market.advance();
+    void this.syncWorkingOrders();
     const h = this.market.feedHealth(this.tradedSymbols);
     this.health.report('MARKET_DATA', h.status, `${h.detail} (SIMULATED demo feed)`);
     const cal = this.calendarService.health();
@@ -814,13 +864,25 @@ export class DemoRuntime {
       'SHADOW',
       'UNKNOWN',
     ]);
-    const tradesToday = [...this.store.orders.values()].filter(
+    const today = [...this.store.orders.values()].filter(
       (o) =>
         o.accountId === accountId &&
         counted.has(o.status) &&
         Date.parse(o.createdAt) >= w.start.getTime() &&
         Date.parse(o.createdAt) < w.end.getTime(),
-    ).length;
+    );
+    const tradesToday = today.length;
+    const entriesBySymbol: Record<string, number> = {};
+    for (const o of today) entriesBySymbol[o.symbol] = (entriesBySymbol[o.symbol] ?? 0) + 1;
+    // Net R of today's journaled trades, most recent first (as the server's activity query).
+    const closedTodayR = this.journal
+      .filter(
+        (e) =>
+          e.accountId === accountId &&
+          Date.parse(e.exit.at) >= w.start.getTime() &&
+          Date.parse(e.exit.at) < w.end.getTime(),
+      )
+      .map((e) => e.result.rMultiple);
     // Losing streak within the current trading day (it starts fresh at each reset).
     let streak = 0;
     for (const t of this.closedTrades.get(accountId) ?? []) {
@@ -829,7 +891,13 @@ export class DemoRuntime {
       if (t.realizedPnl < 0) streak++;
       else break;
     }
-    return { tradingDayKey: w.key, tradesToday, consecutiveLosses: streak };
+    return {
+      tradingDayKey: w.key,
+      tradesToday,
+      consecutiveLosses: streak,
+      entriesBySymbol,
+      closedTodayR,
+    };
   }
 
   private syncing = false;
@@ -1540,6 +1608,25 @@ export class DemoRuntime {
       execution = await this.execute(d.approval.approvalId);
     }
     return { decision: d, persisted: recorded.persisted, execution };
+  }
+
+  /** Operator cancel of a resting LIMIT entry (the server's ExecutionService.cancel). */
+  async cancelOrder(clientOrderId: string) {
+    const o = this.store.orders.get(clientOrderId);
+    if (!o) throw new ApiError(404, 'NOT_FOUND', `order ${clientOrderId} not found`);
+    const r = await this.gateway.cancelWorking({
+      accountId: o.accountId,
+      clientOrderId,
+      reason: 'cancelled by the operator (demo)',
+    });
+    this.emit(
+      'INFO',
+      'execution',
+      `ORDER_CANCEL_${r.outcome}`,
+      `${o.symbol}: ${r.reason}`,
+      o.accountId,
+    );
+    return r;
   }
 
   async execute(approvalId: string): Promise<ExecutionResult> {

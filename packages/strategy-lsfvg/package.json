@@ -1,0 +1,19 @@
+{
+  "name": "@astra/strategy-lsfvg",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The owner's Liquidity Structure FVG strategy v1.0: H1 bias, M15 sweep / displacement / CHoCH-BOS / FVG, M5 execution. Pure, isomorphic, closed candles only.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astra/core": "workspace:*",
+    "@astra/market-data": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

@@ -742,3 +742,107 @@ describe('DecisionEngine — LIMIT entries', () => {
     expect(u.reasons.join()).toMatch(/pending order\(s\) reported without details/);
   });
 });
+
+describe('DecisionEngine — strategy limits (owner rules)', () => {
+  const withLimits = (
+    limits: NonNullable<DecisionInputs['strategy']>['limits'],
+    overrides: Partial<DecisionInputs> = {},
+  ) => makeInputs({ strategy: { ...strategy, limits }, ...overrides });
+  const limitsCheck = (d: TradeDecision) => d.checks.find((c) => c.checkId === 'strategy.limits')!;
+  const activity = (a: Record<string, unknown>) =>
+    observed(
+      { tradingDayKey: '2026-09-28', tradesToday: 0, consecutiveLosses: 0, ...a },
+      { source: 'astra-db', sourceKind: 'SIMULATED', asOf: '2026-09-28T13:59:59.000Z' },
+    );
+
+  it('passes with no limits configured', () => {
+    expect(limitsCheck(decide(makeInputs())).verdict).toBe('PASS');
+  });
+
+  it('caps entries per symbol per day (working orders count); unknown counts mean no trade', () => {
+    const limits = { maxEntriesPerSymbolPerDay: 2 };
+    const full = decide(withLimits(limits, { activity: activity({ entriesBySymbol: { NQ: 2 } }) }));
+    expect(limitsCheck(full).verdict).toBe('FAIL');
+    expect(full.reasons.join()).toMatch(/2\/2 NQ entries already today/);
+    const ok = decide(withLimits(limits, { activity: activity({ entriesBySymbol: { NQ: 1 } }) }));
+    expect(limitsCheck(ok).verdict).toBe('PASS');
+    expect(limitsCheck(decide(withLimits(limits))).verdict).toBe('UNKNOWN');
+  });
+
+  it('stops the day at the realized-loss limit', () => {
+    const snap = makeInputs().accountSnapshot;
+    if (snap.status !== 'OK') throw new Error('fixture');
+    const at = (balance: number) =>
+      withLimits(
+        { dailyRealizedLossStopPercent: 1 },
+        {
+          accountSnapshot: observed(
+            { ...snap.value, balance, equity: balance },
+            { source: 't', sourceKind: 'SIMULATED', asOf: snap.asOf },
+          ),
+        },
+      );
+    expect(limitsCheck(decide(at(49_600))).verdict).toBe('PASS');
+    const stopped = decide(at(49_500)); // −500 = −1.00% of the 50,000 day start
+    expect(limitsCheck(stopped).verdict).toBe('FAIL');
+    expect(stopped.reasons.join()).toMatch(/−1% daily stop/);
+  });
+
+  it('stops the day after consecutive full-risk losses (a smaller loss or a win breaks the streak)', () => {
+    const limits = { fullRiskLosses: { atOrBelowR: -0.9, maxConsecutive: 3 } };
+    const run = (closedTodayR: (number | null)[]) =>
+      limitsCheck(decide(withLimits(limits, { activity: activity({ closedTodayR }) }))).verdict;
+    expect(run([-1, -0.95, -1.02])).toBe('FAIL');
+    expect(run([-1, -0.95, -0.5, -1])).toBe('PASS');
+    expect(run([-1, 1.8, -1, -1])).toBe('PASS');
+    expect(run([null, -1])).toBe('UNKNOWN');
+    expect(run([-1, -1, -1, null])).toBe('FAIL');
+  });
+
+  it('caps correlated positions (working orders count) and their combined open risk', () => {
+    const snap = makeInputs().accountSnapshot;
+    if (snap.status !== 'OK') throw new Error('fixture');
+    const group = {
+      id: 'usd',
+      symbols: ['NQ', 'MNQ'],
+      maxOpenPositions: 1,
+      maxOpenRiskPercent: 0.5,
+    };
+    const working = observed(
+      {
+        ...snap.value,
+        pendingOrders: 1,
+        workingOrders: [
+          {
+            clientOrderId: 'w1',
+            symbol: 'MNQ',
+            direction: 'LONG' as const,
+            quantity: 1,
+            limitPrice: 19_990,
+            stopPrice: 19_980,
+            targetPrice: 20_020,
+            placedAt: '2026-09-28T13:50:00.000Z',
+            expiresAt: '2026-09-28T15:00:00.000Z',
+          },
+        ],
+      },
+      { source: 't', sourceKind: 'SIMULATED', asOf: snap.asOf },
+    );
+    const instruments = { NQ, MNQ: { ...NQ, symbol: 'MNQ', tickValue: 0.5 } };
+    const busy = decide(
+      withLimits({ correlation: [group] }, { accountSnapshot: working, instruments }),
+    );
+    expect(limitsCheck(busy).verdict).toBe('FAIL');
+    expect(busy.reasons.join()).toMatch(
+      /usd: 1 correlated position\(s\) open or working \(max 1\)/,
+    );
+    // Open risk: the new trade's $209 alone is above 0.3% of $50,000 = $150.
+    const tight = decide(
+      withLimits({ correlation: [{ ...group, maxOpenPositions: 2, maxOpenRiskPercent: 0.3 }] }),
+    );
+    expect(limitsCheck(tight).verdict).toBe('FAIL');
+    expect(tight.reasons.join()).toMatch(
+      /usd: correlated open risk would be 209 > 0.3% of equity \(150\)/,
+    );
+  });
+});

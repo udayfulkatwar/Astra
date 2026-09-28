@@ -215,6 +215,7 @@ export async function handleDemoRequest(
       };
     }
     if (path === '/api/v1/market/quotes') return { quotes: rt.allQuotes() };
+    if (path === '/api/v1/strategies/runner') return rt.strategies.status();
     if (path === '/api/v1/market/scanner') return { snapshots: rt.snapshots() };
     if (path === '/api/v1/market/structure') {
       const timeframe = TimeframeSchema.safeParse(q.get('timeframe') ?? 'H1');
@@ -405,6 +406,8 @@ export async function handleDemoRequest(
         b.autoExecute === true,
       );
     }
+    const cancel = /^\/api\/v1\/orders\/([^/]+)\/cancel$/.exec(path);
+    if (cancel) return rt.cancelOrder(decodeURIComponent(cancel[1]!));
     if (path === '/api/v1/executions') {
       const { approvalId } = body<{ approvalId?: string }>(requestBody);
       if (!approvalId) throw new ApiError(400, 'VALIDATION', 'approvalId required');

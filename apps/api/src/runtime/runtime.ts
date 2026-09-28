@@ -56,6 +56,7 @@ import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
 import { marketValuation } from './valuation';
+import { StrategyRunner } from './strategy-runner';
 import { WorkingOrderService } from './working-orders';
 import { ExecutionService } from './execution-service';
 import { HealthService } from './health-service';
@@ -135,6 +136,8 @@ export class AstraRuntime {
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
+  /** The owner's rule-based strategies run on closed M5 candles (ADR-0024). */
+  readonly strategies: StrategyRunner;
   readonly simulation: SimulationAdapter | null;
   /** Economic-calendar provider poller (null: windows arrive by push only). */
   readonly calendarPoller: CalendarPoller | null;
@@ -204,7 +207,11 @@ export class AstraRuntime {
       suspectCooldownMs: md?.suspectCooldownMs,
       maxBarsPerSeries: md?.maxBarsPerSeries,
       barCloseGraceMs: md?.barCloseGraceMs,
-      onBars: (bars) => this.barPersister.enqueue(bars),
+      onBars: (bars) => {
+        this.barPersister.enqueue(bars);
+        // Assigned below; bars only complete after start().
+        this.strategies.onBars(bars);
+      },
       onRejected: (source, reason) => log.warn({ source, reason }, 'market-data quote rejected'),
       onListenerError: (err) =>
         log.error({ err: errorMessage(err) }, 'market-data quote listener failed'),
@@ -357,6 +364,16 @@ export class AstraRuntime {
       events: this.events,
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
     });
+    this.strategies = new StrategyRunner({
+      config,
+      clock,
+      market: this.market,
+      decisions: this.decisions,
+      execution: this.execution,
+      store: this.repos.execution,
+      events: this.events,
+      log,
+    });
     this.simulation = opts.simulation ? createSimulation(config, clock) : null;
     // Calendar provider: the SIMULATED schedule in simulation mode; real providers once chosen.
     const cal = config.system.calendar;
@@ -438,6 +455,7 @@ export class AstraRuntime {
     await this.execution.reconcileAll();
     const warmed = await this.market.warmUp(this.repos.marketBars);
     this.log.info({ bars: warmed }, 'market-data bars loaded from the database');
+    this.strategies.start();
     this.initialized = true;
     this.initError = null;
     await this.events.emit({

@@ -15,6 +15,7 @@ import { registerNewsRoutes } from './news';
 import { registerRecordRoutes } from './records';
 import { registerReportRoutes } from './reports';
 import { registerSafetyRoutes } from './safety';
+import { registerStrategyRoutes } from './strategies';
 import { registerSystemRoutes } from './system';
 
 export function registerRoutes(
@@ -36,5 +37,6 @@ export function registerRoutes(
   registerBacktestRoutes(app, runtime, auth);
   registerLearningRoutes(app, runtime, auth);
   registerAiRoutes(app, runtime, auth);
+  registerStrategyRoutes(app, runtime, auth);
   registerReportRoutes(app, runtime, auth);
 }

@@ -10,7 +10,7 @@ import {
   riskCapitalPreservation,
 } from './gates';
 import { marketEntry, marketSession, marketSpread } from './market';
-import { strategyEligibility, strategyLevels, strategySignal } from './strategy';
+import { strategyEligibility, strategyLevels, strategyLimits, strategySignal } from './strategy';
 import { systemComponentHealth, systemKillSwitches, systemMode } from './system';
 
 export * from './check';
@@ -30,6 +30,7 @@ export const STANDARD_CHECKS: readonly GateCheck[] = [
   strategyEligibility,
   strategySignal,
   strategyLevels,
+  strategyLimits,
   newsRisk,
   calendarEventBlackout,
   aiAnalysis,

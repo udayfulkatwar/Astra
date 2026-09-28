@@ -36,6 +36,7 @@ import type {
 } from '@astra/news';
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
+import type { DecisionRecord, LsfvgCounters } from '@astra/strategy-lsfvg';
 import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
 import type { MarketStructure } from '@astra/market-structure';
 import type { AccountState, AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
@@ -245,4 +246,29 @@ export interface AiReviewResult {
   status: AiCallRecord['status'];
   reason: string | null;
   call: AiCallRecord;
+}
+
+/** GET /api/v1/strategies/runner — the strategies ASTRA runs itself (ADR-0024). */
+export interface StrategyEngineStatus {
+  strategyId: string;
+  symbol: string;
+  source: string | null;
+  lastCandle: string | null;
+  bias: string;
+  counters: LsfvgCounters;
+}
+
+export interface StrategyRunRecord {
+  at: string;
+  strategyId: string;
+  accountId: string | null;
+  decisionId: string | null;
+  execution: string | null;
+  record: DecisionRecord;
+}
+
+export interface StrategyRunnerStatus {
+  enabled: boolean;
+  engines: StrategyEngineStatus[];
+  recent: StrategyRunRecord[];
 }

@@ -41,6 +41,37 @@ export const StrategyDefinitionSchema = z.object({
    * strategy engine defines typed rule schemas; never interpreted by the safety core.
    */
   rules: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * The strategy's own risk limits (owner rules), enforced by the gate's `strategy.limits`
+   * check on top of the account's risk policy. Every limit is optional.
+   */
+  limits: z
+    .object({
+      /** Entries per symbol per trading day (working orders count). */
+      maxEntriesPerSymbolPerDay: z.number().int().positive().optional(),
+      /** Stop new trades for the day once the realized loss today reaches this % of the day-start balance. */
+      dailyRealizedLossStopPercent: PercentSchema.optional(),
+      /** Stop new trades for the day after this many consecutive full-risk losses today. */
+      fullRiskLosses: z
+        .object({
+          /** A closed trade at or below this net R is a full-risk loss (e.g. −0.9). */
+          atOrBelowR: z.number().max(0),
+          maxConsecutive: z.number().int().positive(),
+        })
+        .optional(),
+      /** Correlated groups (e.g. USD pairs): caps on simultaneous positions and their open risk. */
+      correlation: z
+        .array(
+          z.object({
+            id: SlugSchema,
+            symbols: z.array(SymbolSchema).min(2),
+            maxOpenPositions: z.number().int().positive(),
+            maxOpenRiskPercent: PercentSchema,
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
   /** Session ids (config astra.yaml `sessions`) in which the strategy may trade. Empty = any. */
   sessions: z.array(SlugSchema).optional(),
 });

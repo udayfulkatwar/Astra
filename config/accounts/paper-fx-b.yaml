@@ -1,9 +1,9 @@
-# Paper account for the owner's FX strategy, Model A (EUR/USD, GBP/USD, USD/JPY). No real money,
-# no credentials. Model B runs on paper-fx-b so the two are measured separately (SPEC).
+# Paper account for the owner's FX strategy, Model B (EUR/USD, GBP/USD, USD/JPY). No real money,
+# no credentials. Model A runs on paper-fx so the two are measured separately (SPEC).
 # It uses the TEMPLATE prop-firm profile until the owner names the firm and account type; the
 # firm's real rules then replace it (they are never assumed).
-id: paper-fx
-name: Paper FX — LSFVG Model A (template profile)
+id: paper-fx-b
+name: Paper FX — LSFVG Model B (template profile)
 firm: TEMPLATE (not a real firm)
 propFirmProfileId: template-static-50k
 riskPolicyId: lsfvg-fx
@@ -11,7 +11,7 @@ currency: USD
 status: ACTIVE
 broker:
   adapterId: paper
-  accountRef: PAPER-FX-1
-strategies: [lsfvg-a]
+  accountRef: PAPER-FX-2
+strategies: [lsfvg-b]
 instruments: [EURUSD, GBPUSD, USDJPY]
 liveTradingAuthorized: false

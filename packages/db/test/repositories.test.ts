@@ -218,7 +218,14 @@ describe.skipIf(!available)('repositories', () => {
         start: '2026-09-27T21:00:00.000Z',
         end: '2026-09-28T21:00:00.000Z',
       });
-      expect(a).toEqual({ tradingDayKey: '2026-09-28', tradesToday: 1, consecutiveLosses: 2 });
+      expect(a).toEqual({
+        tradingDayKey: '2026-09-28',
+        tradesToday: 1,
+        consecutiveLosses: 2,
+        entriesBySymbol: { NQ: 1 },
+        // Two trades closed today but not journaled yet: their R is unknown (never assumed).
+        closedTodayR: [null, null],
+      });
       const previousDay = await repo.activity('acct-a', {
         key: '2026-09-27',
         start: '2026-09-26T21:00:00.000Z',

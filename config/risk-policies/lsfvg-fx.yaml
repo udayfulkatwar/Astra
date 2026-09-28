@@ -1,0 +1,36 @@
+# Internal risk policy for the owner's FX strategy (LSFVG v1.0). The per-trade risk, daily trade
+# count, position count and open-risk cap are the OWNER'S numbers (SPEC); the buffers, health
+# thresholds and survival amount are ASTRA defaults — review them, then set ownership: USER.
+# LIVE mode refuses TEMPLATE policies.
+id: lsfvg-fx
+name: LSFVG FX — owner limits with ASTRA buffers
+version: 1
+ownership: TEMPLATE
+perTrade:
+  riskPercentOfEquity: 0.25
+  maxRiskAmount: null
+  minRewardToRisk: 2
+buffers:
+  maxDailyBufferUsePct: 40
+  maxDrawdownBufferUsePct: 20
+  survivalBufferAmount: 150
+exposure:
+  # Combined open risk ≤ 0.50 % and at most 2 positions at once (all three pairs share USD).
+  maxOpenRiskPercentOfEquity: 0.5
+  maxOpenPositions: 2
+  maxPositionsPerInstrument: 1
+  allowPyramiding: false
+activity:
+  maxTradesPerDay: 4
+  # Losses of any size in a row within one trading day. The owner's rule counts full-risk losses
+  # (strategy limits); 3 here is at least as strict.
+  maxConsecutiveLosses: 3
+health:
+  cautionUsagePct: 40
+  restrictedUsagePct: 70
+  breachRiskUsagePct: 85
+  cautionSizeMultiplier: 0.5
+timing:
+  noNewTradesMinutesBeforeFlat: 15
+targets:
+  stopTradingWhenProfitTargetReached: true

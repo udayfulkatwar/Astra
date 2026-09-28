@@ -207,7 +207,12 @@ describe('runBacktest — FX quoted in another currency', () => {
     seed: 11,
   });
   const fxRun = (env = environment()) =>
-    runBacktest({ config: { ...BASE, symbol: 'USDJPY', accountId: 'paper-fx' }, bars, env });
+    runBacktest({
+      // The paper-fx policy requires 2R: the template aims a little further.
+      config: { ...BASE, symbol: 'USDJPY', accountId: 'paper-fx', strategy: { rewardToRisk: 2.5 } },
+      bars,
+      env,
+    });
 
   it('values USD/JPY in dollars with the replayed rate: a stop loses about the planned risk', async () => {
     const r = await fxRun();

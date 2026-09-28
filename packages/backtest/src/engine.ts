@@ -1,6 +1,6 @@
 /**
  * Backtest replay (ADR-0016). Replays M1 bars, in order, through the SAME components that run in
- * real time: the decision gate (all 21 checks, mode BACKTEST inside the simulator), position
+ * real time: the decision gate (all 22 checks, mode BACKTEST inside the simulator), position
  * sizing, prop-firm rules incl. the trailing path, account tracking, the position monitor and
  * automatic protection, and the trade journal.
  *

@@ -193,6 +193,13 @@ export class ExecutionRepository implements ExecutionStore {
     return rows.map(mapOrder);
   }
 
+  /** Orders placed for a signal (one per account that approved it). */
+  async ordersForSignal(signalId: string): Promise<OrderRecord[]> {
+    const rows = await this.sql<OrderRow[]>`
+      select * from orders where signal_id = ${signalId} order by created_at`;
+    return rows.map(mapOrder);
+  }
+
   async orderByClientId(clientOrderId: string): Promise<OrderRecord | null> {
     const rows = await this.sql<OrderRow[]>`
       select * from orders where client_order_id = ${clientOrderId}`;

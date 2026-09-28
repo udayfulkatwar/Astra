@@ -1,6 +1,6 @@
 /** Strategies, prop-firm rules, paper trading and configuration views. */
 import { Link } from 'react-router';
-import { useCancelOrder, useConfigSummary, useOrders } from '../api/hooks';
+import { useCancelOrder, useConfigSummary, useOrders, useStrategyRunner } from '../api/hooks';
 import { ConfirmButton } from '../components/ConfirmButton';
 import type { ConfigSummary } from '../api/types';
 import { Card, Empty, ErrorBox, KV, Loading, PageHeader, Pill } from '../components/ui';
@@ -23,6 +23,7 @@ export function Strategies() {
         title="Strategy Manager"
         subtitle="Strategies are configuration (config/strategies). ASTRA never invents or silently changes your rules."
       />
+      <StrategyRunnerCard />
       {error ? (
         <ErrorBox error={error} />
       ) : !data ? (
@@ -68,6 +69,43 @@ export function Strategies() {
                     ? `${s.eventBlackout.impactLevels.join('/')} −${s.eventBlackout.minutesAfter}/+${s.eventBlackout.minutesBefore} min`
                     : 'global default',
                 ],
+                [
+                  'Run by',
+                  typeof s.rules.engine === 'string'
+                    ? `ASTRA (${s.rules.engine}${
+                        typeof (s.rules.params as { model?: string } | undefined)?.model ===
+                        'string'
+                          ? `, Model ${(s.rules.params as { model: string }).model}`
+                          : ''
+                      })`
+                    : 'external signals (n8n / API)',
+                ],
+                ...(s.limits
+                  ? ([
+                      ['Entries / pair / day', s.limits.maxEntriesPerSymbolPerDay ?? '—'],
+                      [
+                        'Daily realized loss stop',
+                        s.limits.dailyRealizedLossStopPercent !== undefined
+                          ? `−${s.limits.dailyRealizedLossStopPercent}%`
+                          : '—',
+                      ],
+                      [
+                        'Full-risk loss stop',
+                        s.limits.fullRiskLosses
+                          ? `${s.limits.fullRiskLosses.maxConsecutive} in a row (≤ ${s.limits.fullRiskLosses.atOrBelowR}R)`
+                          : '—',
+                      ],
+                      [
+                        'Correlated groups',
+                        (s.limits.correlation ?? [])
+                          .map(
+                            (g) =>
+                              `${g.id}: ${g.symbols.join('/')} — max ${g.maxOpenPositions} open, ≤ ${g.maxOpenRiskPercent}% risk`,
+                          )
+                          .join('; ') || '—',
+                      ],
+                    ] as [string, string | number][])
+                  : []),
               ]}
             />
           </Card>
@@ -363,5 +401,78 @@ export function Configuration() {
         </table>
       </Card>
     </div>
+  );
+}
+
+/** The strategies ASTRA runs itself: engine state, the setup funnel and recent §26 records. */
+function StrategyRunnerCard() {
+  const { data, error } = useStrategyRunner();
+  if (error) return <ErrorBox error={error} />;
+  if (!data) return <Loading />;
+  if (!data.enabled || data.engines.length === 0) return null;
+  return (
+    <>
+      <Card title="Strategy engines (run by ASTRA)">
+        <table className="table compact">
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Pair</th>
+              <th>H1 bias</th>
+              <th>Last candle</th>
+              <th className="num">Sweeps</th>
+              <th className="num">Displacements</th>
+              <th className="num">FVGs</th>
+              <th className="num">Setups</th>
+              <th className="num">Refused (bias / target / RR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.engines.map((e) => (
+              <tr key={`${e.strategyId}:${e.symbol}`}>
+                <td>{e.strategyId}</td>
+                <td className="strong">{e.symbol}</td>
+                <td>
+                  <Pill status={e.bias === 'NEUTRAL' ? 'UNKNOWN' : 'ONLINE'} label={e.bias} />
+                </td>
+                <td className="mono">{e.lastCandle ? utcTime(e.lastCandle) : '—'}</td>
+                <td className="num">{e.counters.sweeps}</td>
+                <td className="num">{e.counters.displacements}</td>
+                <td className="num">{e.counters.fvgs}</td>
+                <td className="num">{e.counters.setups}</td>
+                <td className="num">
+                  {e.counters.rejectedBias} / {e.counters.rejectedTarget} /{' '}
+                  {e.counters.rejectedRewardToRisk}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted small">
+          A setup is only a signal: ASTRA&apos;s gate sizes it, checks news, limits and prop-firm
+          rules, and may refuse it. No result here is a performance claim.
+        </p>
+      </Card>
+      <Card title="Decision records (§26)">
+        {data.recent.length === 0 ? (
+          <Empty>No complete setup yet.</Empty>
+        ) : (
+          data.recent.map((r, i) => (
+            <details key={`${r.at}:${i}`} className="record">
+              <summary>
+                <span className="mono">{utcTime(r.at)}</span> {r.strategyId}{' '}
+                {r.accountId ? `· ${r.accountId} ` : ''}— {r.record.PAIR} {r.record.DIRECTION}{' '}
+                <Pill
+                  status={r.record.DECISION === 'TRADE' ? 'ONLINE' : 'REJECTED'}
+                  label={r.record.DECISION}
+                />
+              </summary>
+              <KV rows={Object.entries(r.record).map(([k, v]) => [k, v || '—'])} />
+              {r.execution && <div className="muted small">Execution: {r.execution}</div>}
+            </details>
+          ))
+        )}
+      </Card>
+    </>
   );
 }

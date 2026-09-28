@@ -37,6 +37,7 @@ import type {
   PositionMonitor,
   Quote,
   StatusBar,
+  StrategyRunnerStatus,
   SystemEvent,
   Timeframe,
   TradingMode,
@@ -109,6 +110,13 @@ export const useAudit = (category?: string) =>
       api<{ entries: AuditEntry[] }>(
         `/api/v1/audit?limit=200${category ? `&category=${encodeURIComponent(category)}` : ''}`,
       ),
+  });
+
+export const useStrategyRunner = () =>
+  useQuery({
+    queryKey: ['strategy-runner'],
+    queryFn: () => api<StrategyRunnerStatus>('/api/v1/strategies/runner'),
+    refetchInterval: 5_000,
   });
 
 export const useConfigSummary = () =>

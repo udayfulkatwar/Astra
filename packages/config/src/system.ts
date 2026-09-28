@@ -62,6 +62,17 @@ export const SystemConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Rule-based strategies run by ASTRA itself (ADR-0024): closed M5 candles → engine → gate.
+   * Omitted → not running (signals then come only from outside, e.g. n8n).
+   */
+  strategyRunner: z
+    .object({
+      enabled: z.boolean(),
+      /** Execute approvals immediately — still only in `execution.autoExecuteModes`, never LIVE. */
+      autoExecute: z.boolean(),
+    })
+    .optional(),
+  /**
    * Automatic protective closing (ADR-0014; owner-authorised). Omitted → DEFAULTS (enabled).
    */
   protection: ProtectionPolicySchema.optional(),

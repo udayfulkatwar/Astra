@@ -115,8 +115,16 @@ export type AccountSnapshot = z.infer<typeof AccountSnapshotSchema>;
  */
 export const AccountActivitySchema = z.object({
   tradingDayKey: z.string().min(1),
+  /** Entries today: filled, and still working (a resting order counts before it fills). */
   tradesToday: z.number().int().nonnegative(),
   consecutiveLosses: z.number().int().nonnegative(),
+  /** `tradesToday` per symbol (needed by per-symbol strategy limits; absent → unknown). */
+  entriesBySymbol: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  /**
+   * Net R multiple of each trade closed today, most recent first (null: R unknown). Needed by
+   * the full-risk-loss limit; absent → unknown.
+   */
+  closedTodayR: z.array(z.number().nullable()).optional(),
 });
 export type AccountActivity = z.infer<typeof AccountActivitySchema>;
 

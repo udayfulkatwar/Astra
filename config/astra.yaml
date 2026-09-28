@@ -108,6 +108,13 @@ execution:
 tracking:
   lateObservationThresholdMs: 300000
 
+# The owner's rule-based strategies (strategies whose rules.engine ASTRA implements, e.g.
+# lsfvg-v1) run on closed M5 candles and submit their setups to the gate (ADR-0024). Approvals
+# execute automatically only in execution.autoExecuteModes (never LIVE).
+strategyRunner:
+  enabled: true
+  autoExecute: true
+
 monitors:
   haltMonitorIntervalMs: 2000
   snapshotPersistIntervalMs: 60000

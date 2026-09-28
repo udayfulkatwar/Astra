@@ -60,6 +60,7 @@ export default tseslint.config(
     files: [
       'packages/market-data/src/**/*.ts',
       'packages/market-structure/src/**/*.ts',
+      'packages/strategy-lsfvg/src/**/*.ts',
       'packages/calendar/src/**/*.ts',
       'packages/journal/src/**/*.ts',
       'packages/learning/src/**/*.ts',

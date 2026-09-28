@@ -133,10 +133,17 @@ export class AccountRepository {
     accountId: string,
     window: { key: string; start: string; end: string },
   ): Promise<AccountActivity> {
-    const [count] = await this.sql<{ n: string }[]>`
-      select count(*) as n from orders
+    const bySymbol = await this.sql<{ symbol: string; n: string }[]>`
+      select symbol, count(*) as n from orders
        where account_id = ${accountId} and created_at >= ${window.start} and created_at < ${window.end}
-         and status in ${this.sql(COUNTED)}`;
+         and status in ${this.sql(COUNTED)}
+       group by symbol`;
+    const entriesBySymbol = Object.fromEntries(bySymbol.map((r) => [r.symbol, Number(r.n)]));
+    // Net R of today's journaled trades, most recent first (journal R is null when unknown).
+    const journaled = await this.sql<{ r: string | null }[]>`
+      select entry->'result'->>'rMultiple' as r from trade_journal
+       where account_id = ${accountId} and closed_at >= ${window.start} and closed_at < ${window.end}
+       order by closed_at desc limit 100`;
     const recent = await this.sql<{ realized_pnl: string }[]>`
       select realized_pnl from closed_trades
        where account_id = ${accountId} and closed_at >= ${window.start} and closed_at < ${window.end}
@@ -148,8 +155,14 @@ export class AccountRepository {
     }
     return {
       tradingDayKey: window.key,
-      tradesToday: Number(count?.n ?? 0),
+      tradesToday: Object.values(entriesBySymbol).reduce((a, b) => a + b, 0),
       consecutiveLosses: streak,
+      entriesBySymbol,
+      // A trade closed but not yet journaled has an unknown R (it is the most recent).
+      closedTodayR: [
+        ...Array<null>(Math.max(0, recent.length - journaled.length)).fill(null),
+        ...journaled.map((j) => (j.r === null ? null : Number(j.r))),
+      ],
     };
   }
 }

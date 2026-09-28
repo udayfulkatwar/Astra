@@ -28,6 +28,7 @@
     "@astra/prop-firm": "workspace:*",
     "@astra/risk": "workspace:*",
     "@astra/safety": "workspace:*",
+    "@astra/strategy-lsfvg": "workspace:*",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",

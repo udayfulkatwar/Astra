@@ -141,6 +141,7 @@ astra/
 │   ├── safety/              Kill switches, component health registry, halt monitor
 │   ├── market-data/         Market-data adapter port, quote quality, OHLC bars, market snapshots
 │   ├── market-structure/    Swings, BOS/CHoCH, liquidity, fair value gaps from complete bars (ADR-0010)
+│   ├── strategy-lsfvg/      The owner's LSFVG v1.0 strategy: engine, §26 records, signals (ADR-0024)
 │   ├── calendar/            Calendar provider port + poller, validation, currency mapping, event risk (ADR-0011)
 │   ├── news/                News provider port + poller, rules classifier, news risk, sentiment (ADR-0019)
 │   ├── ai/                  AI orchestrator: provider port, routing, budgets, call log, tasks; Claude adapter (ADR-0020)
@@ -166,6 +167,7 @@ risk        → core, prop-firm
 safety      → core
 market-data → core   (pure and isomorphic: also runs in the browser)
 market-structure → core, market-data   (pure and isomorphic; no lookahead)
+strategy-lsfvg → core, market-data   (pure and isomorphic; closed candles only; decides nothing)
 calendar    → core   (pure and isomorphic)
 news        → core   (pure and isomorphic; CONTEXT only)
 ai          → core, journal, market-data, market-structure, news   (isomorphic core; CONTEXT only;

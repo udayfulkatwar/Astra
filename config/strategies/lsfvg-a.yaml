@@ -1,0 +1,50 @@
+# THE OWNER'S STRATEGY: Liquidity Structure FVG v1.0 (received 2026-09-28), Model A.
+# Rules are code in @astra/strategy-lsfvg (ADR-0024); the numbers below are the owner's (SPEC) or
+# the defaults the owner accepted ("use your defaults"). It has NOT been validated on real
+# history yet: research first (S4), then paper. LIVE also needs the six live factors (ADR-0008).
+id: lsfvg-a
+name: LSFVG v1.0 — Model A (2R)
+version: 1
+ownership: USER
+status: ACTIVE
+description: >-
+  H1 bias, M15 liquidity sweep + displacement + CHoCH/BOS + FVG, LIMIT entry at the FVG
+  midpoint (M5 execution). Model A: fixed 2R target.
+instruments: [EURUSD, GBPUSD, USDJPY]
+timeframes: [H1, M15, M5]
+direction: BOTH
+minRewardToRisk: 2
+# 0.25 % risk per trade (SPEC).
+maxRiskPercentPerTrade: 0.25
+# At most 4 trades per day in total (SPEC); working orders count.
+maxTradesPerDay: 4
+# The runner submits the setup at the close of the FVG's third M15 candle.
+signalTtlSeconds: 120
+requiresAiAnalysis: false
+# No new trades from 30 min before to 30 min after HIGH-impact events of either currency (SPEC).
+# A resting LIMIT order is covered until it expires (ADR-0023).
+eventBlackout:
+  impactLevels: [HIGH]
+  minutesBefore: 30
+  minutesAfter: 30
+limits:
+  # At most 2 trades per pair per day (SPEC).
+  maxEntriesPerSymbolPerDay: 2
+  # Daily realized loss of 1.00 % stops the day (SPEC).
+  dailyRealizedLossStopPercent: 1
+  # 3 consecutive full-risk losses stop the day (SPEC); full-risk = −0.9R or worse (DEFAULT).
+  fullRiskLosses:
+    atOrBelowR: -0.9
+    maxConsecutive: 3
+  # Correlated USD exposure: at most 2 positions at once, combined open risk ≤ 0.50 % (SPEC).
+  # Priority when both cannot be taken: first come, first served (the runner evaluates pairs in
+  # the order EURUSD, GBPUSD, USDJPY when setups complete on the same candle).
+  correlation:
+    - id: usd
+      symbols: [EURUSD, GBPUSD, USDJPY]
+      maxOpenPositions: 2
+      maxOpenRiskPercent: 0.5
+rules:
+  engine: lsfvg-v1
+  params:
+    model: A
