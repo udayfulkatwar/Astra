@@ -68,3 +68,33 @@ The existing single-instrument backtest (ADR-0016) replays one symbol and uses m
   rules entered and verified, the same replay simulates the real account.
 - Headline news is not modelled historically; only a supplied economic calendar is. Every
   report states which.
+
+## Amendment (2026-09-29)
+
+- **Strategy study by default.** Replaying the TEMPLATE account's rules stopped trading at the
+  profit target (+6 %) or a breach, so a six-year study would have covered only its first few
+  months. `runResearch` now defaults to `propFirm: 'STRATEGY'`. That replaces the account's
+  profile with `strategyStudyProfile`:
+  - no daily loss limit, a 100 % static drawdown, no position caps, no firm news rule, no
+    per-trade cap and no profit target;
+  - the same trading day and holding rules.
+
+  `'ACCOUNT'` (CLI `--prop-firm`) keeps the old behaviour: one evaluation attempt of the
+  account's profile. Every report states which mode it used.
+
+- **Conversions in the research broker.** The broker converts money with the last uncrossed
+  quote. A candle whose bid and ask series disagree (ask below bid) used to crash the replay
+  while a USD/JPY position was open. The gate still sees the raw quote and refuses new risk on
+  it (no valuation, so no size).
+- **Standalone kit** (`packages/research/kit/`): a Python copy of the study for the owner to run
+  where the data is. It stays faithful through a parity test against ASTRA's code:
+  - engine events, gate decisions, trades, ending balance and protective closes on synthetic
+    test data;
+  - a scripted dense-setup run that exercises every owner limit;
+  - its configuration compared with `config/`.
+
+  The kit runs the strategy study only; prop-firm evaluations are replayed in ASTRA from its
+  daily equity once the firm is known.
+
+- `runResearch` accepts an `engineFactory` (the parity test replays scripted setups through
+  the real gate), and `loadSide` (file text to M5 bars) moved from the CLI into the library.

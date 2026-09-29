@@ -65,7 +65,15 @@ pnpm --filter @astra/research research -- --manifest research-data/manifest.json
 
 `--oos` is where the untouched out-of-sample part starts. `--models A` runs one model.
 `--sensitivity` adds eleven harsher or neighbouring runs per model. It needs a few minutes for
-six years.
+six years. Data files may be gzip-compressed (`.gz`).
+
+By default the run is a **strategy study**. The accounts' prop-firm profile is replaced by one
+without firm limits: no daily loss limit, no drawdown limit short of a lost account, no position
+caps and no profit target. The whole history is therefore traded, at 0.25 % of equity per trade
+with the owner's strategy limits. The trading day (17:00 New York) and flat-before-the-weekend
+are kept. `--prop-firm` runs the accounts' own profile instead: one evaluation attempt, which
+stops at a breach or at the profit target. That is only meaningful once the owner's firm is
+configured and verified.
 
 ## 4. Read the report (`research-out/report.md`, raw data in `study.json`)
 
@@ -78,7 +86,26 @@ For each model, the report gives:
 - Monte Carlo drawdown odds;
 - robustness: without the best year, pair or session, and without the 5 largest winners;
 - sensitivity;
-- the strategy funnel, the gate's refusals and the prop-firm (TEMPLATE) simulation.
+- the strategy funnel and the gate's refusals;
+- the prop-firm section: a strategy study says that no firm limits were applied.
 
 Fewer than 30 trades is reported as **INSUFFICIENT DATA**. The rules are frozen before the
 run: the numbers are never used to pick parameters, and a poor result is reported as poor.
+
+## 5. Run it somewhere else: the standalone kit
+
+`packages/research/kit/lsfvg_kit.py` is the same study in one Python file (Python 3.9+, no
+packages, no internet), for running on your own computer or with another tool.
+`packages/research/kit/README.md` explains it step by step, including the exact instruction to
+give another AI model.
+
+- **Checked against ASTRA.** `packages/research/test/kit-parity.test.ts` runs the kit and ASTRA
+  on the same synthetic test data. It requires identical engine events and identical trades to
+  the cent: after costs, before costs, under sensitivity, and with dense scripted setups that hit
+  every owner limit and the weekend close.
+- **Selftest.** `python3 lsfvg_kit.py selftest` repeats that check on the user's machine.
+- **Results.** Its results folder holds the report, every trade and setup, the daily equity,
+  checksums of the input files, and a one-month data sample. ASTRA re-runs its own engine on
+  that sample to cross-check.
+- **Smaller data.** `compact` turns M1 files into M5 files (about 40 MB for all three pairs)
+  that give identical results. ASTRA's CLI reads them too.

@@ -36,6 +36,7 @@ import {
   initAccountTracking,
   updateAccountTracking,
   type AccountTracking,
+  type PropFirmRuleProfile,
 } from '@astra/prop-firm';
 import {
   ProtectionEvaluator,
@@ -50,8 +51,10 @@ import {
   decisionRecord,
   gateOutcome,
   toSignal,
+  type Candle,
   type DecisionRecord,
   type LsfvgCounters,
+  type LsfvgEvent,
   type LsfvgParams,
   type LsfvgParamsInput,
   type LsfvgSetup,
@@ -82,6 +85,56 @@ export type CalendarSource =
       readonly events: readonly EconomicEvent[];
     };
 
+/**
+ * STRATEGY: the strategy study (SPEC §23) — the account's prop-firm profile is replaced by
+ * `strategyStudyProfile`, so the whole history is traded. ACCOUNT: the account's own profile, as
+ * paper trading applies it — one evaluation attempt, which ends at a breach or stops at the
+ * profit target.
+ */
+export type PropFirmMode = 'STRATEGY' | 'ACCOUNT';
+
+/**
+ * The account's profile without the firm's limits: no daily loss limit, a 100 % static drawdown
+ * (only a lost account stops it), no position caps, no firm news rule, no per-trade cap, no profit
+ * target. The trading day and the holding rules (flat before a prohibited weekend) are kept. Not
+ * a firm's rules — a research assumption, stated in every report.
+ */
+export function strategyStudyProfile(profile: PropFirmRuleProfile): PropFirmRuleProfile {
+  return {
+    ...profile,
+    id: `${profile.id}-study`,
+    name: `Strategy study (no prop-firm limits) — based on ${profile.name}`,
+    firm: 'NONE — strategy study',
+    dailyLoss: null,
+    maxDrawdown: {
+      type: 'STATIC',
+      limit: { kind: 'PERCENT_OF_INITIAL', value: 100 },
+      measure: 'EQUITY',
+      trailingStopsAt: { kind: 'NEVER' },
+    },
+    positionLimits: {
+      maxContracts: null,
+      maxLots: null,
+      quantityWeights: {},
+      maxOpenPositions: null,
+      perInstrumentMaxQuantity: {},
+      maxLeverage: null,
+    },
+    scaling: null,
+    consistency: null,
+    news: null,
+    trading: { ...profile.trading, maxRiskPerTrade: null },
+    objectives: { profitTarget: null, minTradingDays: null },
+    payout: null,
+  };
+}
+
+/** What the replay needs of an engine: closed M5 candles in, events out, and its funnel. */
+export interface ResearchEngine {
+  onM5(candle: Candle): LsfvgEvent[];
+  readonly counters: LsfvgCounters;
+}
+
 export interface ResearchParams {
   readonly env: ResearchEnvironment;
   readonly accountId: string;
@@ -94,6 +147,14 @@ export interface ResearchParams {
   readonly to: string;
   /** Engine parameter overrides — sensitivity analysis only (the frozen rules are the config's). */
   readonly paramOverrides?: Partial<LsfvgParamsInput>;
+  /** Default STRATEGY (the whole history); ACCOUNT runs one evaluation attempt of the profile. */
+  readonly propFirm?: PropFirmMode;
+  /** Another engine with the same contract (tests replay scripted setups through the gate). */
+  readonly engineFactory?: (
+    symbol: string,
+    tickSize: number,
+    params: LsfvgParams,
+  ) => ResearchEngine;
   readonly label?: string;
   readonly yieldControl?: () => Promise<void>;
 }
@@ -135,6 +196,11 @@ export interface ResearchRun {
   readonly model: 'A' | 'B';
   readonly params: LsfvgParams;
   readonly costs: CostModel;
+  readonly propFirm: {
+    readonly mode: PropFirmMode;
+    readonly profileId: string;
+    readonly name: string;
+  };
   readonly calendar: { readonly kind: CalendarSource['kind']; readonly source: string | null };
   readonly window: { readonly from: string; readonly to: string };
   readonly coverage: readonly Coverage[];
@@ -176,8 +242,11 @@ export async function runResearch(p: ResearchParams): Promise<ResearchRun> {
     throw new Error(`strategy ${p.strategyId} is not an lsfvg-v1 strategy`);
   if (!account.strategies.includes(configured.id))
     throw new Error(`strategy ${p.strategyId} is not enabled for account ${p.accountId}`);
-  const profile = base.profile(account.propFirmProfileId);
-  if (!profile) throw new Error(`prop-firm profile ${account.propFirmProfileId} not found`);
+  const accountProfile = base.profile(account.propFirmProfileId);
+  if (!accountProfile) throw new Error(`prop-firm profile ${account.propFirmProfileId} not found`);
+  const propFirmMode = p.propFirm ?? 'STRATEGY';
+  const profile =
+    propFirmMode === 'STRATEGY' ? strategyStudyProfile(accountProfile) : accountProfile;
   const fromMs = Date.parse(p.from);
   const toMs = Date.parse(p.to);
   if (!(toMs > fromMs)) throw new Error('the research window is empty');
@@ -193,6 +262,7 @@ export async function runResearch(p: ResearchParams): Promise<ResearchRun> {
   const view: DecisionConfigView = {
     ...base,
     strategy: (id) => (id === strategy.id ? strategy : base.strategy(id)),
+    profile: (id) => (id === account.propFirmProfileId ? profile : base.profile(id)),
   };
   const symbols = strategy.instruments.filter((s) => p.data.has(s));
   if (symbols.length === 0) throw new Error('no data for any of the strategy’s instruments');
@@ -202,8 +272,10 @@ export async function runResearch(p: ResearchParams): Promise<ResearchRun> {
     if (spec) specs.set(s, spec);
   }
 
+  const makeEngine =
+    p.engineFactory ?? ((s: string, tick: number, x: LsfvgParams) => new LsfvgEngine(s, tick, x));
   const engines = new Map(
-    symbols.map((s) => [s, new LsfvgEngine(s, specs.get(s)!.tickSize, params)] as const),
+    symbols.map((s) => [s, makeEngine(s, specs.get(s)!.tickSize, params)] as const),
   );
   const broker = new ResearchBroker({
     accountId: account.id,
@@ -628,6 +700,7 @@ export async function runResearch(p: ResearchParams): Promise<ResearchRun> {
     model: params.model,
     params,
     costs,
+    propFirm: { mode: propFirmMode, profileId: profile.id, name: profile.name },
     calendar: {
       kind: p.calendar.kind,
       source: p.calendar.kind === 'HISTORICAL' ? p.calendar.source : null,

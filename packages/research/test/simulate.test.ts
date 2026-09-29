@@ -8,6 +8,7 @@ import {
   REALISTIC_COSTS,
   pairSides,
   runResearch,
+  strategyStudyProfile,
   type ResearchBar,
   type ResearchEnvironment,
 } from '../src';
@@ -148,6 +149,44 @@ describe('research replay (real engine, real gate, pessimistic broker)', () => {
     expect(r.gate.setups).toBe(0);
     expect(r.trades).toEqual([]);
     expect(r.funnel.EURUSD!.setups).toBe(1); // the engine saw it; nothing was traded on it
+  });
+
+  it('the strategy study ignores the firm limits; ACCOUNT mode applies them', async () => {
+    // A profile whose daily loss limit (50 USD) is smaller than one trade's risk (≈ 125 USD).
+    const tight = (id: string) => {
+      const p = env.config.profile(id);
+      return p?.dailyLoss
+        ? { ...p, dailyLoss: { ...p.dailyLoss, limit: { kind: 'AMOUNT' as const, value: 50 } } }
+        : p;
+    };
+    const tightEnv = { ...env, config: { ...env.config, profile: tight } };
+    const study = await run({ env: tightEnv });
+    expect(study.propFirm).toMatchObject({
+      mode: 'STRATEGY',
+      profileId: 'template-static-50k-study',
+    });
+    expect(study.trades).toHaveLength(1);
+    const account = await run({ env: tightEnv, propFirm: 'ACCOUNT' });
+    expect(account.propFirm).toMatchObject({ mode: 'ACCOUNT', profileId: 'template-static-50k' });
+    expect(account.gate).toMatchObject({ setups: 1, approved: 0 });
+    expect(account.gate.blockedBy.map((b) => b.checkId)).toContain('prop-firm.rules');
+    expect(account.trades).toEqual([]);
+  });
+
+  it('the study profile keeps the trading day and the weekend rule, and drops every firm limit', () => {
+    const p = env.config.profile('template-static-50k')!;
+    const s = strategyStudyProfile(p);
+    expect(s).toMatchObject({
+      tradingDayReset: p.tradingDayReset,
+      holding: p.holding,
+      dailyLoss: null,
+      news: null,
+      consistency: null,
+      objectives: { profitTarget: null },
+      maxDrawdown: { type: 'STATIC', limit: { kind: 'PERCENT_OF_INITIAL', value: 100 } },
+      positionLimits: { maxContracts: null, maxLots: null, maxOpenPositions: null },
+    });
+    expect(s.accountSize).toBe(p.accountSize);
   });
 
   it('refuses a strategy that is not an lsfvg engine or not on the account', async () => {

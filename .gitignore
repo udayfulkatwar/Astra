@@ -32,3 +32,6 @@ Thumbs.db
 
 # Agent worktrees (local only)
 .claude/worktrees/
+
+# Python bytecode (research scripts and kit)
+__pycache__/

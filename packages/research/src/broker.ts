@@ -103,6 +103,8 @@ export class ResearchBroker {
   private readonly positions = new Map<string, ResearchPosition>();
   private readonly pendingCloses = new Set<string>();
   private readonly last = new Map<string, { bid: number; ask: number }>();
+  /** Latest uncrossed quote per symbol: the broker's own money conversions use it. */
+  private readonly rates = new Map<string, { bid: number; ask: number }>();
   private readonly fillBar = new Set<string>();
 
   constructor(
@@ -123,14 +125,24 @@ export class ResearchBroker {
     return s;
   }
 
-  /** Spec valued in the account currency with the latest mids (throws if it cannot be). */
+  /**
+   * Spec valued in the account currency with the latest uncrossed mids (throws if it cannot be).
+   * A candle whose bid and ask series disagree (ask below bid) must not stop the accounting of a
+   * trade already open, so the broker converts with the last uncrossed quote; the gate sees the
+   * raw quote and refuses new risk on it.
+   */
   valued(symbol: string): ValuedInstrumentSpec {
     const cur = this.opts.currency;
     const v = valueInAccountCurrency(this.spec(symbol), cur, (from) =>
-      conversionRate(from, cur, this.opts.specs.keys(), (s) => this.last.get(s) ?? null),
+      conversionRate(from, cur, this.opts.specs.keys(), (s) => this.rates.get(s) ?? null),
     );
     if (v.conversionError) throw new Error(v.conversionError);
     return v;
+  }
+
+  private mark(symbol: string, bid: number, ask: number): void {
+    this.last.set(symbol, { bid, ask });
+    if (bid > 0 && ask >= bid) this.rates.set(symbol, { bid, ask });
   }
 
   /** The candle as this cost model sees it (spread scaled around the mid). */
@@ -192,7 +204,7 @@ export class ResearchBroker {
     const missed: ResearchOrder[] = [];
     this.fillBar.clear();
     // Conversion rates first (USD/JPY values its own P&L with this candle).
-    this.last.set(symbol, { bid: bid.o, ask: ask.o });
+    this.mark(symbol, bid.o, ask.o);
 
     for (const id of [...this.pendingCloses]) {
       const p = this.positions.get(id);
@@ -238,7 +250,7 @@ export class ResearchBroker {
         closed.push(this.settle(p, target, 'TARGET', closeMs));
       }
     }
-    this.last.set(symbol, { bid: bid.c, ask: ask.c });
+    this.mark(symbol, bid.c, ask.c);
     return { filled, closed, missed };
   }
 

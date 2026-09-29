@@ -241,14 +241,24 @@ export function renderStudy(s: Study): string {
     out.push('');
     out.push('### Prop-firm simulation (§25)');
     out.push('');
-    out.push(
-      run.breach
-        ? `The account's hard limit was crossed at ${run.breach.at}: ${run.breach.detail}. Trading stopped there.`
-        : 'No hard limit of the configured profile was crossed.',
-    );
-    out.push(
-      '\nThe profile is the TEMPLATE in config/prop-firm-profiles — not a real firm. No firm pass/fail is claimed until the owner names the firm and its current rules are entered and verified.',
-    );
+    if (run.propFirm.mode === 'STRATEGY') {
+      out.push(
+        `Strategy study: no prop-firm limits were applied (${run.propFirm.name}) — no daily loss limit, no drawdown limit short of a lost account, no position caps, no profit target — so the whole history was traded at 0.25 % risk per trade with the owner's strategy limits. The trading day (17:00 New York) and flat-before-the-weekend were kept.`,
+      );
+      if (run.breach) out.push(`\nThe account was lost at ${run.breach.at}: ${run.breach.detail}.`);
+      out.push(
+        '\nA prop-firm pass/fail needs the firm: once the owner names it and its current rules are entered and verified, the replay runs as that account (`--prop-firm`).',
+      );
+    } else {
+      out.push(
+        run.breach
+          ? `The account's hard limit was crossed at ${run.breach.at}: ${run.breach.detail}. Trading stopped there.`
+          : 'No hard limit of the configured profile was crossed.',
+      );
+      out.push(
+        `\nProfile: ${run.propFirm.name} (${run.propFirm.profileId}). A TEMPLATE profile is not a real firm: no firm pass/fail is claimed until the owner names the firm and its current rules are entered and verified.`,
+      );
+    }
     out.push('');
   }
   return out.join('\n');

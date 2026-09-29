@@ -261,6 +261,36 @@ function finish(c: {
   };
 }
 
+/**
+ * M5 candles of one side (bid, ask …) from several files' text: each file is parsed, aggregated
+ * to M5 unless it already is M5, and a period split across two files is merged, never duplicated.
+ */
+export function loadSide(
+  files: readonly { readonly name: string; readonly text: string }[],
+  opts: ParseOptions,
+): { bars: RawBar[]; reports: ParseReport[]; minutes: (number | null)[] } {
+  const byT = new Map<number, RawBar>();
+  const reports: ParseReport[] = [];
+  const minutes: (number | null)[] = [];
+  for (const file of files) {
+    const { bars, report } = parseBars(file.text, opts);
+    reports.push(report);
+    const m = detectMinutes(bars);
+    minutes.push(m);
+    const m5 = m === 5 ? bars : toM5(bars);
+    for (const b of m5) {
+      const prev = byT.get(b.t);
+      byT.set(
+        b.t,
+        prev
+          ? { t: b.t, o: prev.o, h: Math.max(prev.h, b.h), l: Math.min(prev.l, b.l), c: b.c }
+          : b,
+      );
+    }
+  }
+  return { bars: [...byT.values()].sort((a, b) => a.t - b.t), reports, minutes };
+}
+
 /** A research candle: both sides of the market for one M5 period. */
 export interface ResearchBar {
   readonly t: number;

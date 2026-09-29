@@ -119,6 +119,7 @@ describe('§23 metrics', () => {
       model: 'A',
       params: {},
       costs: { slippageTicks: 2, limitThroughTicks: 1, commission: true, spreadMultiplier: 1 },
+      propFirm: { mode: 'STRATEGY', profileId: 'template-static-50k-study', name: 'study' },
       calendar: { kind: 'NOT_MODELLED', source: null },
       window: { from: '2024-01-01T00:00:00Z', to: '2024-12-31T00:00:00Z' },
       coverage: [],
@@ -158,8 +159,9 @@ describe('§23 metrics', () => {
       ],
     });
     expect(md).toMatch(/INSUFFICIENT DATA — 1 trade/);
+    expect(md).toMatch(/Strategy study: no prop-firm limits were applied/);
     expect(md).toMatch(/NOT MODELLED/);
-    expect(md).toMatch(/TEMPLATE in config\/prop-firm-profiles — not a real firm/);
+    expect(md).toMatch(/A prop-firm pass\/fail needs the firm/);
     expect(md).not.toMatch(/profitable/i);
   });
 });

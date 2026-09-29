@@ -23,6 +23,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import { decisionConfigView, loadAstraConfig } from '@astra/config';
 import type { EconomicEvent } from '@astra/core';
 import { DEFAULT_MONITOR_POLICY, DEFAULT_PROTECTION_POLICY } from '@astra/risk';
@@ -31,13 +32,11 @@ import {
   REALISTIC_COSTS,
   analyse,
   coverage,
-  detectMinutes,
+  loadSide,
   metrics,
   pairSides,
-  parseBars,
   renderStudy,
   runResearch,
-  toM5,
   type CalendarSource,
   type CostModel,
   type DataFormat,
@@ -76,7 +75,7 @@ function expand(base: string, entries: readonly string[]): string[] {
     if (statSync(p).isDirectory()) {
       out.push(
         ...readdirSync(p)
-          .filter((f) => /\.(csv|txt)$/i.test(f))
+          .filter((f) => /\.(csv|txt)(\.gz)?$/i.test(f))
           .sort()
           .map((f) => join(p, f)),
       );
@@ -85,36 +84,26 @@ function expand(base: string, entries: readonly string[]): string[] {
   return out;
 }
 
-/** M5 candles of several files; a period split across two files is merged, never duplicated. */
-function loadSide(
+/** M5 candles of several files (gzip allowed); a period split across two files is merged. */
+function loadFiles(
   files: readonly string[],
   format: DataFormat,
   serverTime: ServerTime | undefined,
 ): { bars: RawBar[]; reports: ParseReport[] } {
-  const byT = new Map<number, RawBar>();
-  const reports: ParseReport[] = [];
-  for (const file of files) {
-    const { bars, report } = parseBars(readFileSync(file, 'utf8'), {
-      format,
-      ...(serverTime ? { serverTime } : {}),
-    });
-    reports.push(report);
-    const minutes = detectMinutes(bars);
-    const m5 = minutes === 5 ? bars : toM5(bars);
-    for (const b of m5) {
-      const prev = byT.get(b.t);
-      byT.set(
-        b.t,
-        prev
-          ? { t: b.t, o: prev.o, h: Math.max(prev.h, b.h), l: Math.min(prev.l, b.l), c: b.c }
-          : b,
-      );
-    }
+  const texts = files.map((name) => {
+    const raw = readFileSync(name);
+    return { name, text: (name.endsWith('.gz') ? gunzipSync(raw) : raw).toString('utf8') };
+  });
+  const { bars, reports, minutes } = loadSide(texts, {
+    format,
+    ...(serverTime ? { serverTime } : {}),
+  });
+  files.forEach((file, i) =>
     console.log(
-      `  ${file}: ${report.parsed} rows (${minutes ?? '?'} min), ${report.invalid} invalid`,
-    );
-  }
-  return { bars: [...byT.values()].sort((a, b) => a.t - b.t), reports };
+      `  ${file}: ${reports[i]!.parsed} rows (${minutes[i] ?? '?'} min), ${reports[i]!.invalid} invalid`,
+    ),
+  );
+  return { bars, reports };
 }
 
 function loadCalendar(base: string, c: NonNullable<Manifest['calendar']>): CalendarSource {
@@ -152,11 +141,13 @@ async function main(): Promise<void> {
       config: { type: 'string' },
       models: { type: 'string', default: 'A,B' },
       sensitivity: { type: 'boolean', default: false },
+      // Run as the account's prop-firm profile (one evaluation attempt) instead of the study.
+      'prop-firm': { type: 'boolean', default: false },
     },
   });
   if (!values.manifest || !values.from || !values.to || !values.oos) {
     console.error(
-      'usage: research --manifest m.json --from YYYY-MM-DD --to YYYY-MM-DD --oos YYYY-MM-DD [--out dir] [--models A,B] [--sensitivity]',
+      'usage: research --manifest m.json --from YYYY-MM-DD --to YYYY-MM-DD --oos YYYY-MM-DD [--out dir] [--models A,B] [--sensitivity] [--prop-firm]',
     );
     process.exit(2);
   }
@@ -185,9 +176,9 @@ async function main(): Promise<void> {
     if (!spec) throw new Error(`${symbol} is not a configured instrument`);
     console.log(`${symbol}:`);
     const files = expand(base, p.files);
-    const primary = loadSide(files, p.format, manifest.serverTime);
+    const primary = loadFiles(files, p.format, manifest.serverTime);
     const askFiles = expand(base, p.askFiles ?? []);
-    const ask = askFiles.length ? loadSide(askFiles, p.format, manifest.serverTime) : null;
+    const ask = askFiles.length ? loadFiles(askFiles, p.format, manifest.serverTime) : null;
     const spreadTicks = p.assumedSpreadTicks ?? 8;
     const bars = pairSides(
       { side: p.side ?? 'BID', bars: primary.bars },
@@ -220,9 +211,11 @@ async function main(): Promise<void> {
     );
   assumptions.push(
     `Costs after costs: spread from the data (or as above), ${REALISTIC_COSTS.slippageTicks} ticks slippage on stops and protective closes, LIMIT fills only ${REALISTIC_COSTS.limitThroughTicks} tick through the limit, commission from the instrument files (7 USD per lot round turn — UNVERIFIED template). Before costs: mid prices, touch fills, no slippage, no commission.`,
-    'Instrument specs are UNVERIFIED templates (100k lots, 5/3 digits). Prop-firm rules are the TEMPLATE profile, not a real firm.',
-    'Positions are closed before the template profile’s weekly close (weekend holding prohibited) by ASTRA’s automatic protection, as in paper trading.',
-    'Signals are sized and filtered by ASTRA’s real gate (0.25 % risk, owner limits, template prop-firm rules).',
+    'Instrument specs are UNVERIFIED templates (100k lots, 5/3 digits).',
+    values['prop-firm']
+      ? 'Prop-firm: the accounts’ own profile (TEMPLATE, not a real firm) — one evaluation attempt: trading stops at a breach or at the profit target.'
+      : 'Prop-firm: NOT applied (strategy study) — no firm loss limits, position caps or profit target, so the whole history is traded. Positions are still closed before the weekly close (Fri 16:00 New York; no weekend holding) by ASTRA’s automatic protection.',
+    'Signals are sized and filtered by ASTRA’s real gate (0.25 % of equity per trade, compounding; the owner’s strategy limits; the risk policy’s exposure and activity limits).',
   );
 
   const models: ModelStudy[] = [];
@@ -238,6 +231,7 @@ async function main(): Promise<void> {
         calendar,
         from,
         to,
+        propFirm: values['prop-firm'] ? 'ACCOUNT' : 'STRATEGY',
         ...extra,
       });
     console.log(`Model ${m.model}: after costs …`);
