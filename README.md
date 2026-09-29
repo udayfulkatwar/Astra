@@ -16,11 +16,17 @@ an AI response to an order.
 
 ## Status
 
-Foundation and deterministic safety core are built and tested (269 tests, incl. property-based
-risk invariants and integration tests against PostgreSQL). Paper trading works end to end.
-See **[docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)** for what exists, what's next and what
-input is needed from the owner. **Live trading is not enabled** and requires explicit owner
-authorization (ADR-0008).
+Phases 0, 1, 3, 6 and 7 are done. Phases 2, 4 and 8 are done except the parts that need the
+owner's platform and sources. There are 659 automated tests, including property-based risk
+invariants and PostgreSQL integration tests. Paper trading works end to end, and free live
+charts are available (ADR-0026). The owner's LSFVG strategy showed no edge on 2010–2019
+history, so no strategy is selected for trading.
+
+- **Start here:** [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md), a self-contained
+  briefing for reviewers.
+- **Details:** [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md).
+
+**Live trading is not enabled** and requires explicit owner authorization (ADR-0008).
 
 ## Quick start (paper sandbox)
 
@@ -35,22 +41,31 @@ see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Repository
 
-| Path                   | Purpose                                                                           |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `packages/core`        | Domain primitives: `Observed<T>`, modes, health, time, decimal math, schemas      |
-| `packages/prop-firm`   | Rule profiles, account state engine, `canTrade` rule engine                       |
-| `packages/risk`        | Capital preservation engine: sizing, policy limits, account health                |
-| `packages/safety`      | Kill switches, health registry, halt conditions                                   |
-| `packages/market-data` | Market-data adapter port, quote quality, OHLC bars, market snapshots (isomorphic) |
-| `packages/decision`    | Fail-closed gate pipeline and decision records                                    |
-| `packages/execution`   | Broker adapter interface, paper broker, execution gateway                         |
-| `packages/db`          | SQL migrations, hash-chained audit log, repositories                              |
-| `packages/config`      | Versioned YAML configuration loader                                               |
-| `apps/api`             | ASTRA Core service (Fastify) — composition root                                   |
-| `apps/dashboard`       | Operator command center (React)                                                   |
-| `config/`              | Rule profiles, risk policies, instruments, strategies, accounts (**templates**)   |
-| `automation/n8n`       | n8n workflows                                                                     |
-| `docs/`                | Architecture, ADRs, deployment, project state                                     |
+| Path                        | Purpose                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `packages/core`             | Domain primitives: `Observed<T>`, modes, health, time, decimal math, schemas    |
+| `packages/prop-firm`        | Rule profiles, account state engine, `canTrade` rule engine                     |
+| `packages/risk`             | Capital preservation engine: sizing, policy limits, account health              |
+| `packages/safety`           | Kill switches, health registry, halt conditions                                 |
+| `packages/market-data`      | Market-data adapter port, quote quality, OHLC bars, snapshots, free chart feed  |
+| `packages/market-structure` | Swings, BOS/CHoCH, liquidity, fair value gaps (complete bars only)              |
+| `packages/calendar`         | Economic-calendar provider port, validation, event risk                         |
+| `packages/news`             | News provider port, rules classifier, news risk                                 |
+| `packages/ai`               | AI orchestrator (veto-only context), budget, call log, Claude adapter           |
+| `packages/strategy-lsfvg`   | The owner's LSFVG v1.0 strategy engine                                          |
+| `packages/journal`          | Trade journal (plan vs actual, R, excursions)                                   |
+| `packages/learning`         | Learning metrics (descriptive only)                                             |
+| `packages/backtest`         | Backtests through the real gate                                                 |
+| `packages/research`         | Research on genuine history (+ standalone Python kit)                           |
+| `packages/decision`         | Fail-closed gate pipeline and decision records                                  |
+| `packages/execution`        | Broker adapter interface, paper broker, execution gateway                       |
+| `packages/db`               | SQL migrations, hash-chained audit log, repositories                            |
+| `packages/config`           | Versioned YAML configuration loader                                             |
+| `apps/api`                  | ASTRA Core service (Fastify) — composition root                                 |
+| `apps/dashboard`            | Operator command center (React)                                                 |
+| `config/`                   | Rule profiles, risk policies, instruments, strategies, accounts (**templates**) |
+| `automation/n8n`            | n8n workflows                                                                   |
+| `docs/`                     | Architecture, ADRs, deployment, project state                                   |
 
 ## Development
 
