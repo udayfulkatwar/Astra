@@ -497,6 +497,19 @@ describe('the Python kit computes exactly what ASTRA computes', () => {
     expect(profile.tradingDayReset).toEqual({ timeZone: 'America/New_York', time: '17:00' });
   });
 
+  it('refuses a file whose prices are not the pair it is listed as', () => {
+    const wrong = join(dir, 'wrong.json');
+    writeFileSync(
+      wrong,
+      JSON.stringify({
+        pairs: { EURUSD: { format: 'dukascopy', side: 'BID', files: ['usdjpy-bid.csv'] } },
+      }),
+    );
+    expect(() => python('parity', '--manifest', wrong, '--from', FROM, '--to', TO)).toThrow(
+      /EURUSD: the prices in .*usdjpy-bid\.csv have a median of .*which is not EURUSD/,
+    );
+  });
+
   it('its selftest recognises ASTRA’s result on the synthetic data', () => {
     const out = python('selftest');
     expect(out).toMatch(/Model A: .* = ASTRA ✓/);

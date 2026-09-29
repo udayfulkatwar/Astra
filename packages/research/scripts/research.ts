@@ -62,6 +62,29 @@ interface Manifest {
   readonly calendar?: { file: string; source: string; from: string; to: string };
 }
 
+/** Where each pair's price has plausibly been: a guard against mislabelled files, not a filter. */
+const PLAUSIBLE: Record<string, readonly [number, number]> = {
+  EURUSD: [0.5, 2.5],
+  GBPUSD: [0.8, 3],
+  USDJPY: [50, 300],
+};
+
+function checkPlausible(
+  symbol: string,
+  label: string,
+  files: readonly string[],
+  bars: readonly RawBar[],
+) {
+  const range = PLAUSIBLE[symbol];
+  if (!range || bars.length === 0) return;
+  const closes = bars.map((b) => b.c).sort((a, b) => a - b);
+  const median = closes[Math.floor(closes.length / 2)]!;
+  if (median < range[0] || median > range[1])
+    throw new Error(
+      `${symbol}: the ${label} in ${files.join(', ')} have a median of ${median}, which is not ${symbol} (expected ${range[0]}–${range[1]}). Wrong file for this pair?`,
+    );
+}
+
 const MODELS = [
   { model: 'A', strategyId: 'lsfvg-a', accountId: 'paper-fx' },
   { model: 'B', strategyId: 'lsfvg-b', accountId: 'paper-fx-b' },
@@ -180,6 +203,8 @@ async function main(): Promise<void> {
     const askFiles = expand(base, p.askFiles ?? []);
     const ask = askFiles.length ? loadFiles(askFiles, p.format, manifest.serverTime) : null;
     const spreadTicks = p.assumedSpreadTicks ?? 8;
+    checkPlausible(symbol, 'prices', files, primary.bars);
+    if (ask) checkPlausible(symbol, 'ask prices', askFiles, ask.bars);
     const bars = pairSides(
       { side: p.side ?? 'BID', bars: primary.bars },
       ask?.bars ?? null,

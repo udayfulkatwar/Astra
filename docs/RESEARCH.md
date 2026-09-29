@@ -18,8 +18,14 @@ ASSUMPTION, and the report says so on every line it affects.
 
 Put the files where ASTRA runs (for example `research-data/`, which Git ignores). In a cloud
 session the host `datafeed.dukascopy.com` must be allowed in the environment's network settings
-for the downloader to work. The downloader records every weekday the feed has no data for and
-every failed download in `download-log.json`; it never fills a gap.
+for the downloader to work.
+
+The downloader is resumable. Each day file is cached as soon as it arrives, so re-running the
+same command continues after a stop. `--max-minutes N` stops cleanly for tools that limit how
+long a command runs. It assembles the CSVs and `manifest.json` only when every day is there
+(exit code 0 = complete, 3 = run it again). It records every weekday the feed has no data for,
+and every candle with inconsistent OHLC, in `download-log.json`; it never fills or repairs
+anything.
 
 ## 2. Describe the files (manifest)
 

@@ -59,6 +59,8 @@ INSTRUMENTS = {
                "minQuantity": 0.01, "eventCurrencies": ["USD", "JPY"]},
 }
 SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY"]  # the strategy's order (same-candle priority)
+# Where each pair's price has plausibly been (a guard against mislabelled files, not a filter).
+PLAUSIBLE = {"EURUSD": (0.5, 2.5), "GBPUSD": (0.8, 3.0), "USDJPY": (50.0, 300.0)}
 ACCOUNT_CURRENCY = "USD"
 STARTING_BALANCE = 50_000  # the account size of the template profile the accounts use
 
@@ -1933,13 +1935,23 @@ def load_manifest(path, log):
     data, sources, assumptions, files_seen = {}, [], [], []
     for sym, p in man["pairs"].items():
         if sym not in INSTRUMENTS:
-            raise SystemExit(f"{sym} is not one of the strategy's pairs ({', '.join(SYMBOLS)})")
+            raise SystemExit(f"{sym} is not one of the strategy's pairs ({', '.join(SYMBOLS)}): the strategy, its "
+                             "limits and costs are defined for these three only")
         log(f"{sym}:")
         files = expand(base, p["files"])
         primary, rep1 = load_side(files, p["format"], server, log)
         ask_files = expand(base, p.get("askFiles", []))
         ask, rep2 = load_side(ask_files, p["format"], server, log) if ask_files else (None, [])
         spread_ticks = p.get("assumedSpreadTicks", 8)
+        for label, side_bars in (("prices", primary), ("ask prices", ask or [])):
+            if side_bars:
+                closes = sorted(b[4] for b in side_bars)
+                median = closes[len(closes) // 2]
+                lo, hi = PLAUSIBLE[sym]
+                if not lo <= median <= hi:
+                    raise SystemExit(f"{sym}: the {label} in {', '.join(files if label == 'prices' else ask_files)} "
+                                     f"have a median of {js_str(median)}, which is not {sym} (expected {lo}–{hi}). "
+                                     "Wrong file for this pair?")
         bars = pair_sides(p.get("side", "BID"), primary, ask, INSTRUMENTS[sym]["tickSize"], spread_ticks)
         data[sym] = bars
         cov = coverage(sym, bars)

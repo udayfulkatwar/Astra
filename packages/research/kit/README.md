@@ -18,7 +18,10 @@ that you send back.
 python3 lsfvg_kit.py selftest
 
 # 1. Price data: EUR/USD, GBP/USD, USD/JPY, M1 bid + ask, 2020 → today (free, no account).
-#    Takes a while and needs about 1 GB of disk. Writes research-data/manifest.json too.
+#    About 15,000 day files, 20–60 minutes and about 1 GB of disk. It resumes: run the same
+#    command again after any stop until it prints "COMPLETE" (it then writes
+#    research-data/manifest.json). Where a command may only run a few minutes, add
+#    --max-minutes 4 and repeat it.
 python3 dukascopy_download.py --from 2020-01-01 --to 2026-09-27 --out research-data
 
 # 2. The test (a few minutes; about 15–30 minutes with --sensitivity)
@@ -31,6 +34,10 @@ python3 lsfvg_kit.py run --manifest research-data/manifest.json \
 `dukascopy_download.py` is in `packages/research/scripts/`. If you already have data from
 HistData.com or MetaTrader 5, skip step 1 and write a manifest (section 5).
 
+**Only these three pairs.** The strategy, its limits and its costs are defined for EUR/USD,
+GBP/USD and USD/JPY. The kit refuses any other instrument (indices, gold, crypto): testing
+those would be a different study, with contract specs the owner has to supply first.
+
 **Too big to upload?** The M1 files come to about 1 GB. `compact` turns them into M5 files of
 about 40 MB in total that give identical results:
 
@@ -41,12 +48,18 @@ python3 lsfvg_kit.py compact --manifest research-data/manifest.json --out resear
 
 ## 2. Running it with another AI model
 
-Give the model three things: `lsfvg_kit.py`, this README, and the data (the `research-m5`
-folder is the easiest to upload). Paste this instruction exactly:
+Give the model `lsfvg_kit.py`, `dukascopy_download.py` and this README. Also give it the data
+(the `research-m5` folder is the easiest to upload), or let it download the data itself if it
+has internet access. Paste this instruction exactly:
 
 > Run `python3 lsfvg_kit.py selftest`. It must print "selftest OK"; if it does not, stop and
-> show me the full output. Then run
-> `python3 lsfvg_kit.py run --manifest research-m5/manifest.json --from 2020-01-01 --to 2026-09-27 --oos 2024-01-01 --out lsfvg-results --sensitivity`.
+> show me the full output. If no EUR/USD, GBP/USD and USD/JPY data folder with a
+> `manifest.json` was uploaded, download it:
+> `python3 dukascopy_download.py --from 2020-01-01 --to 2026-09-27 --out research-data --max-minutes 4`.
+> Repeat that exact command until it prints "COMPLETE"; each run continues where the last one
+> stopped, and there may be many runs. Then run
+> `python3 lsfvg_kit.py run --manifest research-data/manifest.json --from 2020-01-01 --to 2026-09-27 --oos 2024-01-01 --out lsfvg-results --sensitivity`
+> (use `research-m5/manifest.json` instead if that folder was uploaded).
 > Do **not** edit, rewrite, re-implement, optimise or "improve" the script. Do not change any
 > parameter, and do not clean, fill or resample the data. If anything fails, show me the exact
 > error text. When it finishes, give me the folder `lsfvg-results` as a zip file.
