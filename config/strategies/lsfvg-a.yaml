@@ -1,7 +1,8 @@
 # THE OWNER'S STRATEGY: Liquidity Structure FVG v1.0 (received 2026-09-28), Model A.
 # Rules are code in @astra/strategy-lsfvg (ADR-0024); the numbers below are the owner's (SPEC) or
-# the defaults the owner accepted ("use your defaults"). It has NOT been validated on real
-# history yet: research first (S4), then paper. LIVE also needs the six live factors (ADR-0008).
+# the defaults the owner accepted ("use your defaults"). RESEARCH 2010–2019 (genuine HistData):
+# NO EDGE — negative after costs in-sample and out-of-sample (docs/research/RESULTS-2026-09-29.md).
+# Paper only. LIVE also needs the six live factors (ADR-0008); this result argues against it.
 id: lsfvg-a
 name: LSFVG v1.0 — Model A (2R)
 version: 1

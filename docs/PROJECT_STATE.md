@@ -18,8 +18,10 @@ handler, news and calendar ingestion, signal webhook, alerts, daily / weekly rep
 generated from tested code and run in a real n8n 2.40.7.
 **Phase 8 in progress:** position monitor, automatic protective closing (owner-authorised), the
 trade journal, **backtesting** and **learning metrics** are done; the gate prices the
-trailing-drawdown path and the losing-streak limit is daily (owner decisions). An extended paper
-run remains.
+trailing-drawdown path and the losing-streak limit is daily (owner decisions). **Research on
+genuine history is done** for the owner's LSFVG v1.0 (HistData 2010–2019): **no edge**. Neither
+model passes the protocol that was committed before the result, so nothing is selected for
+trading (`docs/research/RESULTS-2026-09-29.md`). An extended paper run on a live feed remains.
 Paper trading runs end to end on simulated or ingested data, with bars, a market scanner,
 market structure, a quote-quality guard and event blackouts.
 
@@ -216,16 +218,16 @@ Remaining:
 
 ## Remaining (by phase)
 
-| Phase | Scope                                                                                                                                             |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                    |
-| 4     | Real economic-calendar and news provider adapters (owner's choice); news-driven strategies and §57 actions (reduce size / close / halt)           |
-| 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation |
-| 6     | Done (ADR-0020). Owner: API key + budget; optional second provider adapter; AI news classification / sentiment if wanted                          |
-| 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                    |
-| 8     | Extended paper run; backtests on real recorded / provider history                                                                                 |
-| 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                          |
-| 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                               |
+| Phase | Scope                                                                                                                                                     |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                            |
+| 4     | Real economic-calendar and news provider adapters (owner's choice); news-driven strategies and §57 actions (reduce size / close / halt)                   |
+| 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation         |
+| 6     | Done (ADR-0020). Owner: API key + budget; optional second provider adapter; AI news classification / sentiment if wanted                                  |
+| 7     | n8n workflows: ingestion, cycles, notifications (Telegram/Discord/email), daily/weekly reports                                                            |
+| 8     | Extended paper run on a live feed. Backtests on real history: done (HistData 2010–2019; LSFVG v1.0 shows no edge — `docs/research/RESULTS-2026-09-29.md`) |
+| 9     | Shadow mode on LIVE data; decision-vs-outcome comparison                                                                                                  |
+| 10    | LIVE broker adapter for the owner's platform; controlled live with strict limits — **owner authorization required**                                       |
 
 ## Owner inputs needed (not blocking current work)
 
@@ -257,8 +259,9 @@ Remaining:
     NEUTRAL when the structure breaks after the last swing; Model B targets the nearest level
     giving ≥ 2R (not only the nearest level); one sweep taking several levels is recorded
     against the strongest (previous day > Asian > equal > swing, then the deepest).
-13. **Historical data for research** — EUR/USD, GBP/USD, USD/JPY 2020–2026 (M1 or M5, bid/ask
-    if possible). Either run the standalone kit yourself (`packages/research/kit/README.md`) and
+13. **Historical data for research** — 2010–2019 is done (HistData, via a public GitHub
+    repository; no edge found). Still wanted: EUR/USD, GBP/USD, USD/JPY 2020–2026 (M1 or M5,
+    bid/ask if possible), the untouched confirmation period. Either run the standalone kit yourself (`packages/research/kit/README.md`) and
     send back its results folder, or allow `datafeed.dukascopy.com` in the environment's network
     settings (the setting was not active in two fresh sessions on 2026-09-29: HTTP 403). First
     attempt (2026-09-29, another AI model): the kit's selftest passed. The uploaded files were
@@ -330,12 +333,17 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
-**Run the LSFVG research on real history** — the tool is built (ADR-0025, `docs/RESEARCH.md`)
-and so is a standalone Python kit the owner can run anywhere (`packages/research/kit/`, checked
-trade-for-trade against ASTRA). Waiting for the kit's results folder or for the data (or
-`datafeed.dukascopy.com` allowed), ideally with a historical economic calendar. When the results
-arrive: re-run ASTRA on the verification sample, recompute the metrics from the trade lists,
-report them as they are.
+**No strategy is selected for trading.** LSFVG v1.0 showed no edge on 2010–2019
+(`docs/research/RESULTS-2026-09-29.md`). Before costs Model A makes +0.02 R per trade and after
+costs −0.11 R; Model B is negative even before costs.
+
+What can change this, all needing the owner:
+
+- the SPEC's 2020–2026 period, via the standalone kit or with `datafeed.dukascopy.com` allowed;
+- new strategy rules, tested under a protocol written before any result.
+
+The rest of the roadmap needs the owner's platform (Phase 2/9 live data, Phase 10 broker
+adapter), firm rules and, for live trading, the six live factors (ADR-0008).
 Then: the paper run on a real feed (the market-data adapter for the owner's platform), and the
 prop-firm simulation once the owner names the firm and account and its current rules are
 verified.
