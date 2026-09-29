@@ -333,6 +333,11 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
+**Owner decision (2026-09-29): Phase 5 strategy research is paused** until the owner supplies a
+strategy with a real edge. LSFVG stays paper-only, and the trend-breakout candidate was not
+started beyond the inventory. **Current focus: real market-data feeds (Phase 2 → shadow mode,
+Phase 9) and the owner's news websites (Phase 4, via the n8n RSS/Atom ingestion).**
+
 **No strategy is selected for trading.** LSFVG v1.0 showed no edge on 2010–2019
 (`docs/research/RESULTS-2026-09-29.md`). Before costs Model A makes +0.02 R per trade and after
 costs −0.11 R; Model B is negative even before costs.
