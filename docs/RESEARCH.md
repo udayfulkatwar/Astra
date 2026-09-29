@@ -10,15 +10,16 @@ generates or repairs prices: it reads the files you give it.
 Any one of these works. Bid **and** ask are best: without ask data the spread is an
 ASSUMPTION, and the report says so on every line it affects.
 
-| Source                     | What you get                        | How                                                                                                                                               |
-| -------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dukascopy (free)           | M1 bid and ask, UTC                 | `npx dukascopy-node -i eurusd -from 2020-01-01 -to 2026-09-01 -t m1 -p bid -f csv`, then the same with `-p ask` (see `npx dukascopy-node --help`) |
-| HistData.com (free)        | M1 bid, EST without daylight saving | Download "Generic ASCII / 1 minute" per year and pair                                                                                             |
-| MetaTrader 5 (your broker) | M1 bid with spread                  | Symbols → Bars → Export; note your server's time zone                                                                                             |
+| Source                     | What you get                        | How                                                                                                                                                                                     |
+| -------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dukascopy (free)           | M1 bid and ask, UTC                 | `python3 packages/research/scripts/dukascopy_download.py --from 2020-01-01 --to 2026-09-01 --out research-data` (Python standard library only; writes the CSVs **and** `manifest.json`) |
+| HistData.com (free)        | M1 bid, EST without daylight saving | Download "Generic ASCII / 1 minute" per year and pair                                                                                                                                   |
+| MetaTrader 5 (your broker) | M1 bid with spread                  | Symbols → Bars → Export; note your server's time zone                                                                                                                                   |
 
-This cloud environment cannot reach those sites. Put the files where ASTRA runs (for example
-`research-data/`, which Git ignores), or allow `datafeed.dukascopy.com` in the environment's
-network settings so ASTRA can download them itself.
+Put the files where ASTRA runs (for example `research-data/`, which Git ignores). In a cloud
+session the host `datafeed.dukascopy.com` must be allowed in the environment's network settings
+for the downloader to work. The downloader records every weekday the feed has no data for and
+every failed download in `download-log.json`; it never fills a gap.
 
 ## 2. Describe the files (manifest)
 
