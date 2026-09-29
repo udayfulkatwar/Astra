@@ -29,6 +29,8 @@ tradingHours:
 maxEntryDeviationTicks: 50
 # Data-quality guard: a quote-to-quote move above 2000 ticks ($20) is treated as abnormal.
 maxQuoteJumpTicks: 2000
+# No free chart feed: Yahoo has no spot gold symbol (XAUUSD=X does not exist there). Its GC=F is
+# COMEX gold FUTURES, a different price (basis) — not mapped, so no chart rather than a proxy.
 verification:
   status: UNVERIFIED
   note: Contract size assumed 100 oz/lot — broker-specific, must be confirmed.

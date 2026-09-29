@@ -27,6 +27,24 @@ Trading stays disabled until every required component (`DATABASE`, `MARKET_DATA`
 `EXECUTION`, `AUTOMATION`) is ONLINE — the heartbeat above stands in for n8n. `MARKET_DATA` is
 ONLINE only while every instrument traded by an ACTIVE account has a fresh, valid quote.
 
+### Free live charts (no account, no key)
+
+```sh
+ASTRA_FEEDS=yahoo pnpm dev            # real prices 24/7 for charts — needs outbound internet
+```
+
+Then open **Charts** in the dashboard. ASTRA loads the last 5 days of 1-minute candles and then
+streams prices for every instrument with a `providerSymbols.yahoo` entry (EURUSD, GBPUSD, USDJPY,
+NQ, MNQ — not XAUUSD; see ADR-0026). The page shows each symbol's measured delay, and
+`GET /api/v1/market/feeds` shows the same data. These are **prices only**: they never count as a
+tradable quote, so `MARKET_DATA` stays not ONLINE and the gate says NO TRADE until your
+platform's quotes arrive. `ASTRA_FEEDS` cannot be combined with `ASTRA_SIMULATION`. Docker Compose
+runs the feed by default; set `ASTRA_FEEDS=` (empty) in `.env` to turn it off.
+
+The feed needs outbound HTTPS/WSS to `query2.finance.yahoo.com` and `streamer.finance.yahoo.com`.
+Node's built-in `fetch` and `WebSocket` do not use `HTTP(S)_PROXY` by default. Behind a
+corporate proxy, set `NODE_USE_ENV_PROXY=1` (Node ≥ 22.21) or allow those hosts directly.
+
 ## 2. Full stack with Docker (Linux, macOS, Windows/WSL2)
 
 ```sh

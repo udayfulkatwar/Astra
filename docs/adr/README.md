@@ -30,3 +30,4 @@ ADRs are immutable once accepted; a changed decision gets a new ADR that superse
 | [0023](0023-limit-entries.md)                    | LIMIT entries: resting orders that stay inside the gate's guarantees   | Accepted |
 | [0024](0024-lsfvg-strategy-engine.md)            | The owner's LSFVG v1.0 strategy as code, run by ASTRA through the gate | Accepted |
 | [0025](0025-research-backtest.md)                | Research backtests on genuine history through the real gate            | Accepted |
+| [0026](0026-free-chart-feed.md)                  | Free chart feed: Yahoo's public price stream, prices only              | Accepted |

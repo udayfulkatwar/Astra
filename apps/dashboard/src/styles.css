@@ -1339,3 +1339,25 @@ select:focus {
 .news-headline a {
   color: inherit;
 }
+
+/* Charts page */
+.chart-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.chart-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-bottom: 10px;
+}
+.candle-chart {
+  width: 100%;
+  height: clamp(320px, 60vh, 620px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}

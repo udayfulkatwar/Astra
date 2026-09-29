@@ -16,6 +16,7 @@ import type {
   AuditEntry,
   Bar,
   CalendarWindow,
+  ChartFeedStatus,
   ComponentHealth,
   ConfigSummary,
   DecisionDetail,
@@ -28,6 +29,7 @@ import type {
   NewsContextView,
   NewsFeedResponse,
   KillSwitchState,
+  LastPrice,
   MarketSnapshot,
   MarketStructure,
   TradeDecision,
@@ -152,7 +154,12 @@ export const useStructure = (timeframe: Timeframe) =>
     placeholderData: keepPreviousData,
   });
 
-export const useBars = (symbol: string | null, timeframe: Timeframe, limit: number) =>
+export const useBars = (
+  symbol: string | null,
+  timeframe: Timeframe,
+  limit: number,
+  refetchMs = 5_000,
+) =>
   useQuery({
     queryKey: ['bars', symbol, timeframe, limit],
     queryFn: () =>
@@ -160,8 +167,24 @@ export const useBars = (symbol: string | null, timeframe: Timeframe, limit: numb
         `/api/v1/market/bars?symbol=${encodeURIComponent(symbol ?? '')}&timeframe=${timeframe}&limit=${limit}`,
       ),
     enabled: symbol !== null,
-    refetchInterval: 5_000,
+    refetchInterval: refetchMs,
     placeholderData: keepPreviousData,
+  });
+
+/** Free chart feeds: connection, per-symbol delay, history load (ADR-0026). */
+export const useFeeds = () =>
+  useQuery({
+    queryKey: ['feeds'],
+    queryFn: () => api<{ feeds: ChartFeedStatus[] }>('/api/v1/market/feeds'),
+    refetchInterval: 2_000,
+  });
+
+/** Latest bid/ask-less prices (charts only; never a tradable quote). */
+export const usePrices = () =>
+  useQuery({
+    queryKey: ['prices'],
+    queryFn: () => api<{ prices: LastPrice[] }>('/api/v1/market/prices'),
+    refetchInterval: 2_000,
   });
 
 export const useCalendar = (hours = 24) =>

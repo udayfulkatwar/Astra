@@ -11,6 +11,7 @@
  */
 import {
   AstraError,
+  IsoDateTimeSchema,
   QuoteSchema,
   applyFreshness,
   errorMessage,
@@ -26,7 +27,14 @@ import {
   type SessionDefinition,
 } from '@astra/core';
 import { z } from 'zod';
-import type { AdapterHealth, MarketDataAdapter, QuoteSink, RawQuote } from './adapter';
+import type {
+  AdapterHealth,
+  MarketDataAdapter,
+  PriceSink,
+  QuoteSink,
+  RawPrice,
+  RawQuote,
+} from './adapter';
 import { BarAggregator, DEFAULT_MAX_BARS, type AggregatorStats } from './aggregator';
 import type { Bar, BarStore } from './bar';
 import { feedHealth } from './health';
@@ -80,8 +88,24 @@ export interface MarketDataStats extends AggregatorStats {
   readonly abnormalJumps: number;
 }
 
+/** The latest bid/ask-less price of a symbol (charts only; never a tradable quote). */
+export interface LastPrice {
+  readonly symbol: string;
+  readonly price: number;
+  readonly asOf: string;
+  readonly source: string;
+  readonly sourceKind: DataSourceKind;
+}
+
+const RawPriceSchema = z.object({
+  symbol: z.string().min(1),
+  price: z.number().positive().finite(),
+  asOf: IsoDateTimeSchema,
+});
+
 export class MarketDataService {
   private readonly quotes = new Map<string, ObservedOk<Quote>>();
+  private readonly prices = new Map<string, LastPrice>();
   private readonly listeners = new Set<(q: Quote) => void>();
   /** adapter id → provider symbol → ASTRA symbol. */
   private readonly providerIndex = new Map<string, Map<string, string>>();
@@ -163,6 +187,70 @@ export class MarketDataService {
       }
     }
     return { status: 'ACCEPTED', symbol, abnormalJump, aggregated: tick.accepted };
+  }
+
+  /**
+   * Ingests a bid/ask-less price: bars (and so charts, structure, the scanner's bar metrics) only.
+   * It never becomes the latest QUOTE — the gate and everything that needs a spread keep seeing
+   * UNAVAILABLE unless a bid/ask source delivers. Same symbol mapping, source-kind binding, clock
+   * skew and ordering rules as quotes.
+   */
+  ingestPrice(raw: RawPrice, source: string, sourceKind: DataSourceKind): IngestOutcome {
+    const symbol = this.resolveSymbol(raw.symbol, source);
+    const parsed = RawPriceSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.reject(`invalid price for ${symbol} from ${source}: ${z.prettifyError(parsed.error)}`);
+    }
+    const bound = this.sourceKinds.get(source);
+    if (bound !== undefined && bound !== sourceKind) {
+      this.reject(`source ${source} delivers ${bound} data; refusing ${sourceKind}`);
+    }
+    this.sourceKinds.set(source, sourceKind);
+    const nowMs = this.opts.clock.now().getTime();
+    const atMs = Date.parse(parsed.data.asOf);
+    if (atMs - nowMs > this.opts.freshness.maxFutureSkewMs) {
+      return this.ignore(symbol, `timestamp ${parsed.data.asOf} is in the future (clock skew?)`);
+    }
+    const key = `${symbol}\u0000${source}`;
+    const previous = this.prices.get(key);
+    if (previous && atMs < Date.parse(previous.asOf)) {
+      return this.ignore(symbol, `older than the latest price (${previous.asOf})`);
+    }
+    const asOf = new Date(atMs).toISOString();
+    this.prices.set(key, { symbol, price: parsed.data.price, asOf, source, sourceKind });
+    const tick = this.aggregator.ingest({
+      symbol,
+      price: parsed.data.price,
+      atMs,
+      source,
+      sourceKind,
+    });
+    if (tick.accepted) this.emitBars(tick.completed);
+    return { status: 'ACCEPTED', symbol, abnormalJump: false, aggregated: tick.accepted };
+  }
+
+  /** A price sink for an adapter (bid/ask-less prices), labelled with its id and kind. */
+  priceSink(adapter: Pick<MarketDataAdapter, 'id' | 'kind'>): PriceSink {
+    return (raw) => {
+      try {
+        this.ingestPrice(raw, adapter.id, adapter.kind);
+      } catch (err) {
+        this.opts.onRejected?.(adapter.id, errorMessage(err));
+      }
+    };
+  }
+
+  /** Latest bid/ask-less price per symbol and source (charts, feed monitoring). */
+  lastPrices(): LastPrice[] {
+    return [...this.prices.values()];
+  }
+
+  /**
+   * Completed bars from a provider's own history (a backfill before its stream starts). Only
+   * complete, window-aligned bars are accepted (the aggregator's seeding rules); returns how many.
+   */
+  seedBars(bars: readonly Bar[]): number {
+    return this.aggregator.seed(bars);
   }
 
   /** A sink for an adapter: quotes are labelled with the adapter's id and kind. */

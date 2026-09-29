@@ -24,6 +24,11 @@ model passes the protocol that was committed before the result, so nothing is se
 trading (`docs/research/RESULTS-2026-09-29.md`). An extended paper run on a live feed remains.
 Paper trading runs end to end on simulated or ingested data, with bars, a market scanner,
 market structure, a quote-quality guard and event blackouts.
+**Free live charts (ADR-0026):** with `ASTRA_FEEDS=yahoo`, ASTRA streams real prices 24/7 from
+Yahoo's public stream, with no account and no key. It loads the last 5 days of 1-minute history
+and measures each symbol's delay. The dashboard **Charts** page draws interactive candles
+(TradingView Lightweight Charts). These are prices only: they never count as a tradable quote,
+so the gate still says NO TRADE until the platform's quotes arrive.
 
 ## Completed
 
@@ -54,9 +59,10 @@ market structure, a quote-quality guard and event blackouts.
 | LIMIT entries       | ADR-0023: resting LIMIT orders with expiry — gate checks the whole window (news, calendar, close, firm flat time), exposure counted before the fill, paper broker and backtest fills (pessimistic, missed entries reported), cancel on kill switch / news / stale feeds, operator cancel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 19                                          |
 | LSFVG v1.0 strategy | `@astra/strategy-lsfvg` (pure; ADR-0024): the owner's Liquidity Structure FVG strategy — H1 bias, M15 sweep / displacement / CHoCH-BOS / FVG, LIMIT at the FVG midpoint, Model A (2R) and B (liquidity target), §26 decision records; owner risk rules as the gate's `strategy.limits`; server runner + demo runner; configs `lsfvg-a` / `lsfvg-b` on `paper-fx` / `paper-fx-b`                                                                                                                                                                                                                                                                                                                                                                                                                                            | 17 + 5 (gate) + 2 API                       |
 | Research backtests  | `@astra/research` (ADR-0025, `docs/RESEARCH.md`): Dukascopy / HistData / MT5 / generic CSV import (gzip too) with explicit time zones, validation and bid/ask pairing; multi-pair replay through the LSFVG engine, the real gate and protection — a strategy study by default (no template prop-firm stop), `--prop-firm` for one evaluation attempt; pessimistic LIMIT fills; §23 metrics before/after costs, OOS split, walk-forward, Monte Carlo, robustness, sensitivity; INSUFFICIENT DATA below 30 trades; CLI → report.md / study.json. **Standalone Python kit** (`packages/research/kit/`) for the owner to run anywhere, checked trade-for-trade against ASTRA (parity test incl. dense scripted setups), with selftest and M1→M5 compaction; resumable, time-boxed Dukascopy downloader; wrong-instrument guard | 30                                          |
+| Free chart feed     | ADR-0026: `YahooStreamAdapter` (protobuf decoder checked on a genuine yfinance message; backoff, connect timeout, error-without-close handling, silent-socket reconnect, per-symbol delay), `yahooBackfill` + `rollUp` (complete candles only), price-only path `ingestPrice` / `seedBars`, `ASTRA_FEEDS`, `GET /api/v1/market/feeds` and `/prices`, dashboard **Charts** page                                                                                                                                                                                                                                                                                                                                                                                                                                             | 27 + 4 API + 2 UI                           |
 | n8n                 | `@astra/n8n` (ADR-0021): 8 workflows generated from typed, tested code-node logic; drift and secret checks; `/api/v1/reports`; tested in n8n 2.40.7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | JSON validated                              |
 
-**Total: 626 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 659 automated tests passing.** Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -84,12 +90,22 @@ Completed:
   levels and ATR exist on open, and has an "Inject bad MNQ tick" button that shows the quality
   guard blocking MNQ trades for the cooldown.
 
+- **Free chart feed (ADR-0026, 2026-09-29):** Yahoo's public stream and 1-minute history for
+  EURUSD, GBPUSD, USDJPY, NQ and MNQ, turned on with `ASTRA_FEEDS=yahoo` (the Compose default).
+  - Prices only, through a separate path that builds bars but never a quote.
+  - Feed state and per-symbol delay: `GET /api/v1/market/feeds` and the dashboard **Charts**
+    page (candles M1…D1, source and delay badges).
+  - XAUUSD is not mapped: Yahoo has no spot-gold symbol, and GC=F is futures.
+  - Checked here against the real server with outbound access blocked: it reported
+    `HTTP 403` / `ERROR … reconnect attempt 6` honestly. This check found a Node WebSocket
+    behaviour (`error` without `close`) that is now handled.
+
 Remaining:
 
 - **Real provider adapter** for the owner's platform (LIVE quotes with provider timestamps and
   `providerSymbols`, reconnect/backoff, honest health) — needs the owner's platform choice.
-- Provider history backfill (seed complete bars from the provider) so D1/H4 levels and session
-  ranges are available right after a restart (today they return once a full period is observed).
+  Only such quotes can make MARKET_DATA ONLINE for trading.
+- Measure the free feed's real delay on a host with internet access (the Charts page shows it).
 
 ## News intelligence (done, ADR-0019)
 
@@ -220,7 +236,7 @@ Remaining:
 
 | Phase | Scope                                                                                                                                                     |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2     | First real market-data provider adapter (owner's platform); provider history backfill for bars                                                            |
+| 2     | First real market-data provider adapter (owner's platform) for tradable quotes. Free chart feed with history backfill: done (ADR-0026)                    |
 | 4     | Real economic-calendar and news provider adapters (owner's choice); news-driven strategies and §57 actions (reduce size / close / halt)                   |
 | 5     | Strategy engine with typed rule schemas on top of the structure engine; order blocks / displacement if the strategy needs them; signal generation         |
 | 6     | Done (ADR-0020). Owner: API key + budget; optional second provider adapter; AI news classification / sentiment if wanted                                  |
@@ -241,7 +257,11 @@ Remaining:
 4. **Your strategy rules** (entries, confirmation, stops, targets, management) — Phase 5.
    `docs/STRATEGY_PROMPT.md` is a prompt for drafting them with another model in ASTRA's format.
 5. **Your personal risk limits** — review `config/risk-policies/template-conservative.yaml`.
-6. **Data/AI providers and budget** — market data, economic calendar, news (Phase 2/4); for AI,
+6. **Data/AI providers and budget** — charts now have a free feed (ADR-0026). Tradable quotes
+   come from your platform (item 2). Still needed: economic calendar and news sources (Phase 4).
+   To test the free feed from this cloud environment, allow `query2.finance.yahoo.com` and
+   `streamer.finance.yahoo.com` in its network settings; on your own machine it needs nothing.
+   For AI,
    an Anthropic API key set as `ANTHROPIC_API_KEY` in the server environment, and your daily AI
    budget (`ai.budget` in `config/astra.yaml`, DEFAULTS $5 / 200 calls). Verify `ai.prices`.
 7. **Which of your strategies should require AI analysis** (`requiresAiAnalysis`) — AI can only
@@ -330,13 +350,24 @@ authorization. Details in `docs/adr/`.
     The Claude adapter is tested offline (injected fetch) — no real model call has been made from
     this environment. `ai_model_calls` has no retention policy yet.
 26. The AI brief uses the signal's timeframe, or M5 when the signal gives none.
+27. Free chart feed (ADR-0026):
+    - Yahoo's stream is unofficial: no service guarantee, Yahoo's terms apply, and FX prices are
+      indicative. Futures may be delayed by exchange rules; the delay is measured, not assumed.
+    - The real delay has not been measured yet: outbound access is blocked in the build
+      environment.
+    - After a restart, the H1/H4/D1 bar that is still forming appears only from the next period.
+      The history fills only whole periods, and the stream's first partial period is discarded.
+    - Rule-based strategies observe these bars. Each setup is evaluated and rejected by the gate
+      (no quote), which records it as a decision.
 
 ## Next implementation target
 
 **Owner decision (2026-09-29): Phase 5 strategy research is paused** until the owner supplies a
 strategy with a real edge. LSFVG stays paper-only, and the trend-breakout candidate was not
 started beyond the inventory. **Current focus: real market-data feeds (Phase 2 → shadow mode,
-Phase 9) and the owner's news websites (Phase 4, via the n8n RSS/Atom ingestion).**
+Phase 9) and the owner's news websites (Phase 4, via the n8n RSS/Atom ingestion).** The free
+chart feed is done (ADR-0026). Next: the owner's news RSS/Atom links in the n8n workflow, and
+the platform's quote feed once the platform is chosen.
 
 **No strategy is selected for trading.** LSFVG v1.0 showed no edge on 2010–2019
 (`docs/research/RESULTS-2026-09-29.md`). Before costs Model A makes +0.02 R per trade and after

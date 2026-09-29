@@ -235,6 +235,9 @@ export async function handleDemoRequest(
         ),
       };
     }
+    // The demo runs on the SIMULATED feed: no free chart feed is running in the browser.
+    if (path === '/api/v1/market/feeds') return { feeds: [] };
+    if (path === '/api/v1/market/prices') return { prices: rt.market.lastPrices() };
     if (path === '/api/v1/market/bars') {
       const symbol = q.get('symbol') ?? '';
       const timeframe = TimeframeSchema.safeParse(q.get('timeframe'));

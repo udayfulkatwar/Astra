@@ -9,3 +9,7 @@ export * from './health';
 export * from './adapter';
 export * from './simulation';
 export * from './service';
+export * from './rollup';
+export * from './feeds/yahoo-proto';
+export * from './feeds/yahoo-stream';
+export * from './feeds/yahoo-chart';

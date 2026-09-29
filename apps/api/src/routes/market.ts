@@ -1,5 +1,5 @@
 /**
- * Market scanner, OHLC bars (Phase 2) and market structure (Phase 5 groundwork). Read-only views over the market-data service; every
+ * Market scanner, OHLC bars (Phase 2), chart feeds and prices (ADR-0026) and market structure (Phase 5 groundwork). Read-only views over the market-data service; every
  * figure is derived from observed quotes and real bars — missing data is null, never estimated.
  */
 import { AstraError, SymbolSchema } from '@astra/core';
@@ -49,6 +49,14 @@ export function registerMarketRoutes(
       }),
     };
   });
+
+  // Free chart feeds (ADR-0026): connection, per-symbol delay and history load. Prices only.
+  app.get('/api/v1/market/feeds', read, () => ({
+    feeds: runtime.yahoo ? [runtime.yahoo.status()] : [],
+  }));
+
+  // Latest bid/ask-less price per instrument and source (charts; never a tradable quote).
+  app.get('/api/v1/market/prices', read, () => ({ prices: runtime.market.lastPrices() }));
 
   app.get('/api/v1/market/bars', read, (req) => {
     const q = BarsQuery.parse(req.query);

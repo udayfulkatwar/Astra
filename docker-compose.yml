@@ -40,6 +40,8 @@ services:
       ASTRA_CORS_ORIGINS: ${ASTRA_CORS_ORIGINS:-http://localhost:3000}
       ASTRA_LOG_LEVEL: ${ASTRA_LOG_LEVEL:-info}
       ASTRA_SIMULATION: ${ASTRA_SIMULATION:-false}
+      # Free chart feeds (ADR-0026), prices only. Default yahoo; set ASTRA_FEEDS= to disable.
+      ASTRA_FEEDS: ${ASTRA_FEEDS-yahoo}
       # AI analysis (optional): empty → strategies that require AI take no trades.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # One of six factors required for live execution (ADR-0008). Leave false.

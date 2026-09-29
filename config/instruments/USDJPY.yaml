@@ -38,6 +38,9 @@ maxEntryDeviationTicks: 20
 maxQuoteJumpTicks: 1000
 # Economic events of these currencies affect the pair.
 eventCurrencies: [USD, JPY]
+# Free chart data (ADR-0026): Yahoo's indicative FX rate, prices only (never a tradable quote).
+providerSymbols:
+  yahoo: USDJPY=X
 verification:
   status: UNVERIFIED
   note: Standard FX conventions assumed (100k lot, 0.001 tick, 7 USD/lot commission) — confirm with your broker.

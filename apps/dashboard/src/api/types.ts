@@ -37,7 +37,15 @@ import type {
 import type { DecisionInputs, DecisionPolicy, TradeDecision } from '@astra/decision';
 import type { ExecutionResult, OrderRecord } from '@astra/execution';
 import type { DecisionRecord, LsfvgCounters } from '@astra/strategy-lsfvg';
-import type { Bar, MarketSnapshot, Timeframe } from '@astra/market-data';
+import type {
+  AdapterHealth,
+  Bar,
+  LastPrice,
+  MarketSnapshot,
+  SymbolFeedStats,
+  Timeframe,
+  YahooStreamStats,
+} from '@astra/market-data';
 import type { MarketStructure } from '@astra/market-structure';
 import type { AccountState, AccountTracking, PropFirmRuleProfile } from '@astra/prop-firm';
 import type {
@@ -192,6 +200,32 @@ export type { ExecutionResult, Observed, Quote };
 
 /** Market scanner snapshot, bars, bar timeframes and market structure (GET /api/v1/market/…). */
 export type { Bar, MarketSnapshot, MarketStructure, Timeframe };
+
+/** Latest bid/ask-less price per instrument (GET /api/v1/market/prices): charts only. */
+export type { LastPrice };
+
+/** A free chart feed (GET /api/v1/market/feeds, ADR-0026): prices only, never a tradable quote. */
+export interface ChartFeedStatus {
+  id: string;
+  kind: DataSourceKind;
+  use: 'CHARTS_ONLY';
+  health: AdapterHealth;
+  stream: Omit<YahooStreamStats, 'symbols'> & {
+    symbols: (SymbolFeedStats & { instrument: string })[];
+  };
+  backfill: {
+    symbol: string;
+    providerSymbol: string;
+    status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'OFF';
+    at: string | null;
+    received: number;
+    kept: number;
+    dropped: number;
+    loaded: number;
+    stored: number;
+    error: string | null;
+  }[];
+}
 
 /** Event risk per instrument (GET /api/v1/calendar/risk). */
 export type { EventRiskView, InstrumentEventRisk };

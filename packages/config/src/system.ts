@@ -59,6 +59,34 @@ export const SystemConfigSchema = z.object({
       maxBarsPerSeries: z.number().int().min(15).max(10_000).optional(),
       /** A bar closes this long after its period ends when no newer quote arrives (default 2 s). */
       barCloseGraceMs: z.number().int().nonnegative().max(60_000).optional(),
+      /**
+       * Free chart feeds (ADR-0026): settings of each feed. A feed runs only when the deployment
+       * lists it in the ASTRA_FEEDS environment variable. Prices only — never tradable quotes.
+       */
+      feeds: z
+        .object({
+          yahoo: z
+            .object({
+              /** Stream URL (default: Yahoo's public streamer). */
+              url: z.string().url().optional(),
+              /** Re-send the subscription this often (default 15 s). */
+              heartbeatMs: z.number().int().min(1_000).max(60_000).optional(),
+              /** Connected but no price for this long → DEGRADED (default 60 s). */
+              staleAfterMs: z.number().int().positive().optional(),
+              /** Provider-to-ASTRA delay above this → DEGRADED, "delayed" (default 30 s). */
+              maxLagMs: z.number().int().positive().optional(),
+              /** No message at all for this long → reconnect (default 5 min). */
+              reconnectIfSilentMs: z.number().int().min(30_000).optional(),
+              /** Longest wait between reconnect attempts (default 60 s). */
+              reconnectMaxMs: z.number().int().min(1_000).optional(),
+              /** Recent 1-minute history loaded at start (1-minute data covers ~7 days). */
+              backfill: z.enum(['off', '1d', '5d', '7d']).default('5d'),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict()
+        .optional(),
     })
     .optional(),
   /**

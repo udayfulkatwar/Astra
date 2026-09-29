@@ -2,7 +2,9 @@
  * Deployment environment (secrets and host settings). Never logged; never sent to clients.
  * Trading rules are NOT configured here — see config/.
  */
+import { errorMessage } from '@astra/core';
 import { z } from 'zod';
+import { parseFeedList } from './runtime/feeds';
 
 const bool = z
   .enum(['true', 'false', '1', '0', ''])
@@ -32,6 +34,21 @@ export const EnvSchema = z.object({
   ASTRA_LIVE_TRADING_AUTHORIZED: bool.default(false),
   /** Enables SIMULATED market/calendar feeds for paper testing (never accepted in SHADOW/LIVE). */
   ASTRA_SIMULATION: bool.default(false),
+  /**
+   * Free chart feeds to run, comma-separated (ADR-0026): `yahoo`. Empty → none. Prices for
+   * charts only — never tradable quotes. Needs outbound internet access.
+   */
+  ASTRA_FEEDS: z
+    .string()
+    .default('')
+    .transform((v, ctx) => {
+      try {
+        return parseFeedList(v);
+      } catch (err) {
+        ctx.addIssue({ code: 'custom', message: errorMessage(err) });
+        return z.NEVER;
+      }
+    }),
 });
 export type Env = z.infer<typeof EnvSchema>;
 
@@ -50,5 +67,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   ].filter(Boolean);
   if (new Set(tokens).size !== tokens.length)
     throw new Error('invalid environment: role tokens must be distinct');
+  if (env.ASTRA_SIMULATION && env.ASTRA_FEEDS.length > 0) {
+    throw new Error(
+      'invalid environment: ASTRA_SIMULATION and ASTRA_FEEDS cannot be combined (simulated and real prices would mix) — set ASTRA_FEEDS= (empty) to simulate',
+    );
+  }
   return env;
 }

@@ -4,7 +4,7 @@
  *
  * Startup (ARCHITECTURE §18): config (already validated) → DB → migrations → config version →
  * trading mode → kill switches → heartbeats → paper state → reconciliation → market-data warm-up
- * (bars from the database) → market-data adapters → monitors.
+ * (bars from the database) → market-data adapters (and the chart feeds' history) → monitors.
  * Until that completes, the effective mode is HALTED and the kill-switch registry is unloaded,
  * so every decision is rejected. If the database is unavailable, initialization is retried.
  */
@@ -15,7 +15,13 @@ import {
   SimulatedCalendarAdapter,
   type CalendarChange,
 } from '@astra/calendar';
-import { effectiveImpact, errorMessage, type Clock } from '@astra/core';
+import {
+  AstraError,
+  effectiveImpact,
+  errorMessage,
+  type Clock,
+  type HealthStatus,
+} from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import {
   AccountRepository,
@@ -55,6 +61,7 @@ import { AiService } from './ai-service';
 import { BacktestService } from './backtest-service';
 import { DecisionService } from './decision-service';
 import { EventBus } from './event-bus';
+import { YahooFeed, type FeedId, type FeedTransport } from './feeds';
 import { marketValuation } from './valuation';
 import { StrategyRunner } from './strategy-runner';
 import { WorkingOrderService } from './working-orders';
@@ -79,6 +86,10 @@ export interface RuntimeOptions {
   readonly migrationsDir?: string | undefined;
   readonly liveTradingAuthorized: boolean;
   readonly simulation: boolean;
+  /** Free chart feeds to run (ADR-0026; prices only). Cannot be combined with `simulation`. */
+  readonly feeds?: readonly FeedId[];
+  /** Network seams of the feeds (tests). */
+  readonly feedTransport?: FeedTransport;
   /** Start the periodic safety loop (tests drive cycles manually). */
   readonly startLoops: boolean;
   readonly initRetryMs?: number;
@@ -141,7 +152,9 @@ export class AstraRuntime {
   readonly simulation: SimulationAdapter | null;
   /** Economic-calendar provider poller (null: windows arrive by push only). */
   readonly calendarPoller: CalendarPoller | null;
-  /** Quote sources started after initialization (simulation now; real providers later). */
+  /** Free Yahoo chart feed (ADR-0026): prices for charts only, never a tradable quote. */
+  readonly yahoo: YahooFeed | null;
+  /** Quote / price sources started after initialization (simulation or chart feeds; platforms later). */
   readonly marketAdapters: readonly MarketDataAdapter[];
 
   private initialized = false;
@@ -152,6 +165,7 @@ export class AstraRuntime {
   private calendarEvents: Promise<void> = Promise.resolve();
   private newsRecorded: Promise<void> = Promise.resolve();
   private stopped = false;
+  private feedHistory: Promise<void> = Promise.resolve();
 
   constructor(private readonly opts: RuntimeOptions) {
     const { config, sql, clock, log } = opts;
@@ -191,7 +205,7 @@ export class AstraRuntime {
       sql,
       heartbeats: this.repos.heartbeats,
       adapters: () => [...this.execution.adapters.values()],
-      marketData: () => this.market.feedHealth(this.tradedSymbols),
+      marketData: () => this.marketDataHealth(),
       calendar: () => this.calendar.health(),
       news: () => this.news.health(),
       ai: () => this.ai.health(),
@@ -407,8 +421,29 @@ export class AstraRuntime {
           },
         })
       : null;
+    const feeds = opts.feeds ?? [];
+    if (this.simulation && feeds.length > 0) {
+      throw new AstraError(
+        'CONFIG_INVALID',
+        'simulation and real chart feeds cannot run together (simulated and real prices would mix)',
+      );
+    }
+    this.yahoo = feeds.includes('yahoo')
+      ? new YahooFeed({
+          config,
+          clock,
+          log,
+          market: this.market,
+          store: this.repos.marketBars,
+          transport: opts.feedTransport,
+        })
+      : null;
     // Real provider adapters (owner's platform, Phase 2 remainder) are registered here.
-    this.marketAdapters = this.simulation ? [this.simulation] : [];
+    this.marketAdapters = this.simulation
+      ? [this.simulation]
+      : this.yahoo
+        ? [this.yahoo.adapter]
+        : [];
   }
 
   isInitialized(): boolean {
@@ -561,7 +596,7 @@ export class AstraRuntime {
   private async startMarketAdapters(): Promise<void> {
     for (const adapter of this.marketAdapters) {
       try {
-        await adapter.start(this.market.sink(adapter));
+        await adapter.start(this.market.sink(adapter), this.market.priceSink(adapter));
         this.log.info({ adapter: adapter.id, kind: adapter.kind }, 'market-data adapter started');
       } catch (err) {
         this.log.error(
@@ -570,6 +605,28 @@ export class AstraRuntime {
         );
       }
     }
+    // The chart feed's recent history loads in the background: the stream is already running
+    // and bars from both land in the same series (duplicates are not added twice).
+    if (this.yahoo) this.feedHistory = this.yahoo.backfill();
+  }
+
+  /** Resolves when the chart feeds' history load has finished (tests, diagnostics). */
+  feedHistoryLoaded(): Promise<void> {
+    return this.feedHistory;
+  }
+
+  /**
+   * MARKET_DATA: fresh tradable quotes decide the status (the gate's view). A chart feed is
+   * reported in the detail only — its prices never make market data ONLINE for trading.
+   */
+  private marketDataHealth(): { status: HealthStatus; detail: string } {
+    const quotes = this.market.feedHealth(this.tradedSymbols);
+    if (!this.yahoo) return quotes;
+    const feed = this.yahoo.adapter.health();
+    return {
+      status: quotes.status,
+      detail: `${quotes.detail}; chart feed ${this.yahoo.adapter.id} ${feed.status}: ${feed.detail} (prices only, never tradable quotes)`,
+    };
   }
 
   /** One pass of the in-core safety loop. Never overlaps with itself. */
@@ -607,6 +664,8 @@ export class AstraRuntime {
     clearInterval(this.loopTimer);
     this.calendarPoller?.stop();
     this.newsPoller?.stop();
+    this.yahoo?.cancel();
+    await this.feedHistory;
     for (const adapter of this.marketAdapters) {
       try {
         await adapter.stop();

@@ -6,6 +6,7 @@ import { createDb, type Sql } from '@astra/db';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { buildApp } from '../src/app';
+import type { FeedId, FeedTransport } from '../src/runtime/feeds';
 import { AstraRuntime } from '../src/runtime/runtime';
 import { createTestDb, type TestDb } from '../../../packages/db/test/helpers';
 
@@ -54,6 +55,8 @@ async function boot(
     runMigrations: true,
     liveTradingAuthorized: opts.liveTradingAuthorized ?? false,
     simulation: opts.simulation ?? false,
+    feeds: opts.feeds,
+    feedTransport: opts.feedTransport,
     startLoops: false,
     aiProviders: opts.aiProviders,
   });
@@ -73,6 +76,9 @@ export interface HarnessOptions {
   liveTradingAuthorized?: boolean;
   /** Start the SIMULATED market-data adapter (paper testing feed). */
   simulation?: boolean;
+  /** Free chart feeds with fake network seams (default: none). */
+  feeds?: FeedId[];
+  feedTransport?: FeedTransport;
   /** AI providers as the entry point would build them from environment keys (default: none). */
   aiProviders?: ReadonlyMap<string, AiProvider>;
 }

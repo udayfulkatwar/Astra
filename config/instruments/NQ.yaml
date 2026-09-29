@@ -27,6 +27,9 @@ tradingHours:
     - { open: { day: THU, time: '18:00' }, close: { day: FRI, time: '17:00' } }
 # Data-quality guard: a quote-to-quote move above this many ticks (50 points) is treated as abnormal.
 maxQuoteJumpTicks: 200
+# Free chart data (ADR-0026): Yahoo's continuous front-month future, prices only (never a quote).
+providerSymbols:
+  yahoo: NQ=F
 verification:
   status: UNVERIFIED
   note: Verify against CME specs and your broker's fee schedule.

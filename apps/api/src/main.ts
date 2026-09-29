@@ -62,6 +62,7 @@ async function main(): Promise<void> {
       configHash: config.hash,
       live: env.ASTRA_LIVE_TRADING_AUTHORIZED,
       simulation: env.ASTRA_SIMULATION,
+      feeds: env.ASTRA_FEEDS,
     },
     'configuration loaded',
   );
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
     migrationsDir: env.ASTRA_MIGRATIONS_DIR ? resolve(env.ASTRA_MIGRATIONS_DIR) : undefined,
     liveTradingAuthorized: env.ASTRA_LIVE_TRADING_AUTHORIZED,
     simulation: env.ASTRA_SIMULATION,
+    feeds: env.ASTRA_FEEDS,
     startLoops: true,
     aiProviders: aiProviders(config, log),
   });

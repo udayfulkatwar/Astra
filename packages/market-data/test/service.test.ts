@@ -289,3 +289,115 @@ describe('MarketDataService — bars', () => {
     expect(snaps[1]).toMatchObject({ mid: null, quality: { status: 'NO_DATA' } });
   });
 });
+
+describe('MarketDataService — bid/ask-less prices (public streams: charts only, never a quote)', () => {
+  const p = (clock: ManualClock, price: number, extra: Record<string, unknown> = {}) => ({
+    symbol: 'NQ=F',
+    price,
+    asOf: clock.now().toISOString(),
+    ...extra,
+  });
+  const yahoo = () => service({ specs: [instrument({ providerSymbols: { yahoo: 'NQ=F' } })] });
+
+  it('builds bars from prices, but the latest QUOTE stays UNAVAILABLE (the gate sees no trade)', () => {
+    const { svc, clock, bars } = yahoo();
+    for (const [dt, price] of [
+      [5_000, 20_000],
+      [20_000, 20_004],
+      [40_000, 19_998],
+      [65_000, 20_001],
+    ] as const) {
+      clock.set(new Date(Date.parse(T0) + dt));
+      expect(svc.ingestPrice(p(clock, price), 'yahoo', 'LIVE')).toMatchObject({
+        status: 'ACCEPTED',
+        symbol: 'NQ',
+      });
+    }
+    expect(bars).toEqual([
+      expect.objectContaining({
+        timeframe: 'M1',
+        openTime: T0,
+        open: 20_000,
+        high: 20_004,
+        low: 19_998,
+        close: 19_998,
+        tickCount: 3,
+        source: 'yahoo',
+        sourceKind: 'LIVE',
+      }),
+    ]);
+    expect(svc.bars('NQ', 'M1').map((b) => b.close)).toEqual([19_998, 20_001]);
+    expect(svc.latest('NQ')).toMatchObject({ status: 'UNAVAILABLE' });
+    expect(svc.fresh('NQ')).toMatchObject({ status: 'UNAVAILABLE' });
+    expect(svc.all()).toEqual([]);
+    expect(svc.feedHealth(['NQ']).status).not.toBe('ONLINE');
+    expect(svc.snapshot('NQ')).toMatchObject({ mid: null, quality: { status: 'NO_DATA' } });
+    expect(svc.lastPrices()).toEqual([
+      {
+        symbol: 'NQ',
+        price: 20_001,
+        asOf: new Date(Date.parse(T0) + 65_000).toISOString(),
+        source: 'yahoo',
+        sourceKind: 'LIVE',
+      },
+    ]);
+  });
+
+  it('same rules as quotes: symbol mapping, validation, source kind, ordering, clock skew', () => {
+    const { svc, clock } = yahoo();
+    expect(() => svc.ingestPrice(p(clock, 1, { symbol: 'ES=F' }), 'yahoo', 'LIVE')).toThrow(
+      /unknown instrument ES=F/,
+    );
+    expect(() => svc.ingestPrice(p(clock, 0), 'yahoo', 'LIVE')).toThrow(/invalid price/);
+    expect(() => svc.ingestPrice(p(clock, 1, { asOf: 'yesterday' }), 'yahoo', 'LIVE')).toThrow(
+      /invalid price/,
+    );
+    clock.advance(10_000);
+    svc.ingestPrice(p(clock, 20_000), 'yahoo', 'LIVE');
+    expect(() => svc.ingestPrice(p(clock, 20_000), 'yahoo', 'SIMULATED')).toThrow(
+      /delivers LIVE data/,
+    );
+    const earlier = new Date(clock.now().getTime() - 1_000).toISOString();
+    expect(svc.ingestPrice(p(clock, 1, { asOf: earlier }), 'yahoo', 'LIVE')).toMatchObject({
+      status: 'IGNORED',
+      reason: /older than the latest price/,
+    });
+    const future = new Date(clock.now().getTime() + 60_000).toISOString();
+    expect(svc.ingestPrice(p(clock, 1, { asOf: future }), 'yahoo', 'LIVE')).toMatchObject({
+      status: 'IGNORED',
+      reason: /in the future/,
+    });
+    expect(svc.stats()).toMatchObject({ rejected: 4, ignored: 2 });
+  });
+
+  it('priceSink never throws: rejections are reported', () => {
+    const onRejected = vi.fn();
+    const { svc, clock } = service({
+      onRejected,
+      specs: [instrument({ providerSymbols: { yahoo: 'NQ=F' } })],
+    });
+    const sink = svc.priceSink({ id: 'yahoo', kind: 'LIVE' });
+    expect(() => sink(p(clock, 1, { symbol: 'XX' }))).not.toThrow();
+    expect(onRejected).toHaveBeenCalledWith('yahoo', expect.stringMatching(/unknown instrument/));
+  });
+
+  it("a provider's own history (seedBars) is continued by its stream in one series", () => {
+    const { svc, clock } = yahoo();
+    const history = [0, 1, 2].map((i) =>
+      m1(new Date(Date.parse(T0) - (3 - i) * 60_000).toISOString(), 20_010 + i, 20_000 + i, {
+        source: 'yahoo',
+        sourceKind: 'LIVE',
+        tickCount: 0,
+      }),
+    );
+    const inProgress = { ...history[2]!, openTime: T0, complete: false };
+    expect(svc.seedBars([...history, inProgress])).toBe(3);
+    expect(svc.bars('NQ', 'M1').map((b) => b.openTime)).toEqual(history.map((b) => b.openTime));
+    clock.advance(5_000);
+    svc.ingestPrice(p(clock, 20_020), 'yahoo', 'LIVE');
+    expect(svc.bars('NQ', 'M1').map((b) => [b.openTime, b.complete])).toEqual([
+      ...history.map((b) => [b.openTime, true]),
+      [T0, false],
+    ]);
+  });
+});

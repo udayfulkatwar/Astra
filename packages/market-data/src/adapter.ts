@@ -3,9 +3,11 @@
  * source reports into a sink; the MarketDataService maps provider symbols, validates, checks
  * ordering and quality, and builds bars. Adapters never decide anything.
  *
- * Implemented today: SimulationAdapter (SIMULATED, paper testing only) and HTTP ingestion via
- * the API (MANUAL). The slot for real providers (LIVE kind) is this interface: the owner has not
- * yet chosen a platform (MT5, cTrader, DXtrade, Match-Trader, Tradovate, Rithmic/ProjectX, …).
+ * Implemented today: SimulationAdapter (SIMULATED, paper testing only), HTTP ingestion via the
+ * API (MANUAL) and YahooStreamAdapter (a free public price stream for charts — prices only,
+ * never quotes; ADR-0026). The slot for the trading platform's quotes (LIVE kind) is this
+ * interface: the owner has not yet chosen a platform (MT5, cTrader, DXtrade, Match-Trader,
+ * Tradovate, Rithmic/ProjectX, …).
  * A real adapter must:
  * - stamp each quote with the PROVIDER's timestamp (never the receive time),
  * - send the provider's own symbol; `instrument.providerSymbols[adapter.id]` maps it,
@@ -27,6 +29,21 @@ export interface RawQuote {
 /** Delivers one quote to the service. Never throws: rejections are counted and reported. */
 export type QuoteSink = (quote: RawQuote) => void;
 
+/**
+ * A traded / indicative price WITHOUT a bid and ask (e.g. a public price stream). It builds bars
+ * and charts; it is never a tradable quote, so nothing that needs a bid / ask (spread, entry,
+ * sizing, the gate) can use it — those stay UNAVAILABLE (no trade).
+ */
+export interface RawPrice {
+  readonly symbol: string;
+  readonly price: number;
+  /** Provider timestamp (ISO-8601 with offset). */
+  readonly asOf: string;
+}
+
+/** Delivers one price to the service. Never throws. */
+export type PriceSink = (price: RawPrice) => void;
+
 export interface AdapterHealth {
   readonly status: HealthStatus;
   readonly detail: string;
@@ -36,7 +53,8 @@ export interface MarketDataAdapter {
   /** Adapter id: the key in `instrument.providerSymbols` and the `source` of its observations. */
   readonly id: string;
   readonly kind: DataSourceKind;
-  start(sink: QuoteSink): void | Promise<void>;
+  /** `prices` receives bid/ask-less prices from sources that have them (optional). */
+  start(sink: QuoteSink, prices?: PriceSink): void | Promise<void>;
   stop(): void | Promise<void>;
   health(): AdapterHealth;
 }

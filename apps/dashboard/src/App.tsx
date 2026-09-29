@@ -10,6 +10,7 @@ import { AiMonitor } from './pages/AiMonitor';
 import { CalendarPage } from './pages/Intelligence';
 import { NewsPage } from './pages/News';
 import { MarketScanner } from './pages/MarketScanner';
+import { Charts } from './pages/Charts';
 import { Journal } from './pages/Journal';
 import { Learning } from './pages/Learning';
 import { Login } from './pages/Login';
@@ -46,6 +47,7 @@ const routes = [
       { path: 'calendar', element: <CalendarPage /> },
       { path: 'news', element: <NewsPage /> },
       { path: 'market', element: <MarketScanner /> },
+      { path: 'charts', element: <Charts /> },
       { path: 'strategies', element: <Strategies /> },
       { path: 'rules', element: <Rules /> },
       { path: 'paper', element: <Paper /> },

@@ -13,6 +13,7 @@ const NAV: { to: string; label: string; section?: string }[] = [
   { to: '/calendar', label: 'Economic Calendar', section: 'Intelligence' },
   { to: '/news', label: 'News Intelligence' },
   { to: '/market', label: 'Market Scanner' },
+  { to: '/charts', label: 'Charts' },
   { to: '/strategies', label: 'Strategy Manager', section: 'Trading' },
   { to: '/rules', label: 'Prop-Firm Rules' },
   { to: '/journal', label: 'Trade Journal' },

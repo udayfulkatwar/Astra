@@ -132,6 +132,18 @@ marketData:
   suspectCooldownMs: 60000
   maxBarsPerSeries: 1000
   barCloseGraceMs: 2000
+  # Free chart feeds (ADR-0026) — run only when listed in ASTRA_FEEDS (e.g. ASTRA_FEEDS=yahoo).
+  # Charts and analysis 24/7 without a broker account. PRICES ONLY: never a tradable quote, so
+  # the gate still rejects every trade until the execution platform's own quotes arrive.
+  # Instruments opt in with `providerSymbols: { yahoo: ... }` (config/instruments/).
+  feeds:
+    yahoo:
+      heartbeatMs: 15000
+      staleAfterMs: 60000
+      maxLagMs: 30000
+      reconnectIfSilentMs: 300000
+      reconnectMaxMs: 60000
+      backfill: 5d
 
 # Automatic protective closing (ADR-0014) — authorised by the owner on 2026-09-27. ASTRA closes
 # positions by itself (risk-reducing only; never while an EXECUTION kill switch is active, never
