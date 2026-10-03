@@ -106,9 +106,20 @@ export function Loading() {
   return <div className="empty">Loading…</div>;
 }
 
-export function ErrorBox({ error }: { error: unknown }) {
+/** `title` names what failed: a read by default; an action passes its own (never "load"). */
+export function ErrorBox({
+  error,
+  title = 'Could not load data',
+}: {
+  error: unknown;
+  title?: string;
+}) {
   const msg = error instanceof Error ? error.message : String(error);
-  return <div className="error-box">Could not load data: {msg}</div>;
+  return (
+    <div className="error-box">
+      {title}: {msg}
+    </div>
+  );
 }
 
 /** Honest placeholder for capabilities that are not built yet. No fake data. */

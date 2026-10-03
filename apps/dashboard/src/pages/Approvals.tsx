@@ -326,6 +326,7 @@ function ApprovalPanel({
           onConfirm={() => exec.mutate(decision.approval!.approvalId)}
         />
       </div>
+      {exec.isPending && <div className="muted">Sending to the execution gateway…</div>}
       {exec.data && (
         <div
           className={`result tone-border-${exec.data.outcome === 'CONFIRMED' || exec.data.outcome === 'SHADOW_RECORDED' ? 'ok' : 'bad'}`}
@@ -345,6 +346,7 @@ function ApprovalPanel({
       )}
       {exec.error && (
         <ErrorBox
+          title="Execution request failed"
           error={
             exec.error instanceof ApiError && exec.error.status === 403
               ? new Error('Only the operator role may execute approvals.')
