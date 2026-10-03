@@ -1,0 +1,60 @@
+name: Claude Direct Connection Test
+
+on:
+  push:
+    branches:
+      - claude-direct-connection-test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  connection-test:
+    name: Direct Claude CLI OAuth test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Claude Code CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Claude Code installation
+        run: claude --version
+
+      - name: Validate stored credential type without exposing it
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "Credential diagnosis: MISSING"
+            exit 2
+          fi
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) echo "Credential diagnosis: OAUTH_TOKEN_FORMAT" ;;
+            sk-ant-api*) echo "Credential diagnosis: API_KEY_STORED_IN_OAUTH_SECRET"; exit 3 ;;
+            *) echo "Credential diagnosis: UNKNOWN_TOKEN_FORMAT"; exit 4 ;;
+          esac
+
+      - name: Test Claude Pro OAuth connection directly
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          response="$(claude -p 'Reply with exactly CONNECTED and nothing else.' --max-turns 1 --output-format text 2>&1)"
+          status=$?
+          set -e
+          echo "Claude CLI exit code: $status"
+          echo "Claude response: $response"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          if [ "$response" != "CONNECTED" ]; then
+            echo "Expected CONNECTED but received a different response."
+            exit 1
+          fi
