@@ -12,7 +12,7 @@ interface Row {
   source: string;
   source_kind: string;
   as_of: Date;
-  window: unknown;
+  window_payload: unknown;
 }
 
 export class CalendarRepository {
@@ -20,7 +20,7 @@ export class CalendarRepository {
 
   async record(observation: ObservedOk<CalendarWindow>): Promise<void> {
     await this.sql`
-      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)
       values (${observation.source}, ${observation.sourceKind}, ${observation.asOf},
         ${observation.value.from}, ${observation.value.to}, ${jsonb(this.sql, observation.value)})`;
   }
@@ -36,13 +36,13 @@ export class CalendarRepository {
     onInvalid?: (reason: string) => void,
   ): Promise<ObservedOk<CalendarWindow> | null> {
     const rows = await this.sql<Row[]>`
-      select source, source_kind, as_of, window
+      select source, source_kind, as_of, window_payload
         from calendar_windows
        where to_at >= ${from} and from_at <= ${to}
        order by as_of desc, id desc
        limit 50`;
     for (const row of rows) {
-      const window = CalendarWindowSchema.safeParse(row.window);
+      const window = CalendarWindowSchema.safeParse(row.window_payload);
       const kind = DataSourceKindSchema.safeParse(row.source_kind);
       if (!window.success || !kind.success) {
         onInvalid?.(`stored calendar window from ${row.source} is malformed`);

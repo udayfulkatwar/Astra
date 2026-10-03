@@ -98,7 +98,7 @@ describe.skipIf(!available)('API — calendar persistence', () => {
   it('survives a malformed stored window: startup succeeds and the calendar stays UNAVAILABLE', async () => {
     h = await createHarness();
     await h.db.sql`
-      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)
       values ('ingest:n8n', 'MANUAL', '2026-09-28T14:00:00.000Z', '2026-09-28T00:00:00.000Z',
         '2026-10-05T00:00:00.000Z', ${jsonb(h.db.sql, { from: 'bad', events: [{ id: 1 }] })})`;
 

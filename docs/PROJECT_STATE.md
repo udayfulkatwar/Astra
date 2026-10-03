@@ -169,6 +169,7 @@ Remaining:
   Calendar page show CLEAR / BLACKOUT (until when, why) / UNKNOWN per instrument — the same
   `assessBlackout` the gate uses. With `ASTRA_SIMULATION=true` (and in the demo) a SIMULATED
   weekly schedule is polled; the demo can jump to 5 minutes before the next high-impact event.
+  Accepted windows are persisted and restored on startup with their original `asOf` (Task 002).
 
 ## Phase 8 — position monitor (done)
 
@@ -332,8 +333,12 @@ authorization. Details in `docs/adr/`.
 18. MARKET_DATA is DEGRADED — which blocks all trades while `allowDegradedComponents: false` — when
     any instrument traded by an ACTIVE account lacks a fresh quote, including instruments whose
     market is closed while another's is open.
-19. Calendar windows are not persisted: after a restart the calendar is UNAVAILABLE (no trades)
-    until the next poll or push. Decision records keep the calendar each decision saw.
+19. Calendar windows are persisted (Task 002, migration 0009, `calendar_windows`) and restored on
+    startup with their ORIGINAL observation time, so a restart never makes stale data fresh;
+    expired / out-of-horizon events are dropped, and malformed stored rows are skipped (calendar
+    stays UNAVAILABLE, no trades, `CALENDAR_RESTORE_FAILED` event). Open: no retention/pruning of
+    `calendar_windows`; store failures are logged/evented but not in health. Decision records keep
+    the calendar each decision saw.
 20. The event-risk view uses the global blackout rule; strategy and firm rules can only widen it
     at decision time (the gate applies the merged rule).
 21. When a calendar event's currency matches none of the configured instruments'

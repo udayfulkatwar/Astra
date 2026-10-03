@@ -82,7 +82,7 @@ describe.skipIf(!available)('calendar repository', () => {
     );
     await repo.record(good);
     await db.sql`
-      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)
       values ('ingest:bad', 'MANUAL', '2026-09-28T11:00:00.000Z', '2026-11-01T00:00:00.000Z',
         '2026-11-08T00:00:00.000Z', ${jsonb(db.sql, { from: 'nope', events: 'x' })})`;
     const invalid: string[] = [];
@@ -96,7 +96,7 @@ describe.skipIf(!available)('calendar repository', () => {
 
   it('returns null when every overlapping row is malformed', async () => {
     await db.sql`
-      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)
       values ('ingest:bad', 'MANUAL', '2026-09-28T11:00:00.000Z', '2027-01-01T00:00:00.000Z',
         '2027-01-08T00:00:00.000Z', ${jsonb(db.sql, { garbage: true })})`;
     expect(

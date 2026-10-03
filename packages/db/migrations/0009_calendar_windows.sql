@@ -7,7 +7,7 @@ CREATE TABLE calendar_windows (
   as_of       timestamptz NOT NULL,
   from_at     timestamptz NOT NULL,
   to_at       timestamptz NOT NULL,
-  window      jsonb       NOT NULL,
+  window_payload jsonb    NOT NULL,
   recorded_at timestamptz NOT NULL DEFAULT now(),
   CHECK (to_at > from_at)
 );
