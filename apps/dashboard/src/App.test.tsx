@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiError, mockApi, networkDown, type Route } from './test/api';
@@ -90,6 +90,52 @@ describe('Signed-in session', () => {
       await screen.findByRole('heading', { level: 1, name: 'Trade Approval Center' }),
     ).toBeTruthy();
     expect(menu).toBeTruthy();
+  });
+
+  it('holds a loading state with a usable shell until a route import resolves', async () => {
+    sessionStorage.setItem(TOKEN_KEY, OPERATOR_TOKEN);
+    mockApi(SHELL);
+    const { user } = await renderApp();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.doMock('./pages/RiskControls', async () => {
+      await held;
+      return await vi.importActual('./pages/RiskControls');
+    });
+    await screen.findByRole('heading', { level: 1, name: 'Command Center' });
+
+    await user.click(screen.getByRole('link', { name: 'Risk Controls' }));
+    expect(await screen.findByText('Loading page…')).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Risk Controls' })).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Trade Approval Center' })).toBeTruthy();
+
+    release();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Risk Controls' })).toBeTruthy();
+    expect(screen.queryByText('Loading page…')).toBeNull();
+    vi.doUnmock('./pages/RiskControls');
+  });
+
+  it('a page that fails to load shows an error with Reload, and the menu still works', async () => {
+    sessionStorage.setItem(TOKEN_KEY, OPERATOR_TOKEN);
+    mockApi(SHELL);
+    // React logs the caught chunk error; keep the test output clean.
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { user } = await renderApp();
+    vi.doMock('./pages/Charts', () => {
+      throw new Error('chunk load failed');
+    });
+    await screen.findByRole('heading', { level: 1, name: 'Command Center' });
+
+    await user.click(screen.getByRole('link', { name: 'Charts' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('This page could not be loaded');
+    expect(within(alert).getByRole('button', { name: 'Reload' })).toBeTruthy();
+
+    await user.click(screen.getByRole('link', { name: 'Risk Controls' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Risk Controls' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    vi.doUnmock('./pages/Charts');
   });
 
   it('an expired or revoked token (401 from the API) signs the operator out', async () => {

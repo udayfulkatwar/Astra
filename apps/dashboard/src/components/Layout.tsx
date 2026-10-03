@@ -1,5 +1,5 @@
-import { lazy, Suspense } from 'react';
-import { NavLink, Outlet } from 'react-router';
+import { Component, lazy, Suspense, type ReactNode } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router';
 import { DEMO, clearToken } from '../api/client';
 import { StatusBar } from './StatusBar';
 
@@ -30,7 +30,27 @@ const NAV: { to: string; label: string; section?: string }[] = [
 // Loaded only in demo builds.
 const DemoBanner = __ASTRA_DEMO__ ? lazy(() => import('../demo/DemoBanner')) : null;
 
+/** Catches a page chunk that failed to load (offline, or a stale tab after a deploy). */
+class PageLoadBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="empty" role="alert">
+        <p>This page could not be loaded. Check the connection and reload.</p>
+        <button className="btn" onClick={() => window.location.reload()}>
+          Reload
+        </button>
+      </div>
+    );
+  }
+}
+
 export function Layout() {
+  const { pathname } = useLocation();
   return (
     <div className="app">
       {DemoBanner && (
@@ -67,7 +87,18 @@ export function Layout() {
           )}
         </nav>
         <main className="main">
-          <Outlet />
+          {/* Keyed by route so a load error clears when the operator navigates elsewhere. */}
+          <PageLoadBoundary key={pathname}>
+            <Suspense
+              fallback={
+                <div className="empty" role="status">
+                  Loading page…
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </PageLoadBoundary>
         </main>
       </div>
     </div>
