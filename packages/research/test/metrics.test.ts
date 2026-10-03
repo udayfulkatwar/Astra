@@ -119,6 +119,15 @@ describe('§23 metrics', () => {
     expect(s.outOfSample.trades).toBe(2);
   });
 
+  it('split refuses an unreadable openedAt or one after the close', () => {
+    const cut = '2024-01-01T00:00:00Z';
+    const t = trade(1, '2024-02-01T00:00:00Z');
+    expect(() => split([{ ...t, openedAt: 'bad' }], cut)).toThrow(/openedAt/);
+    expect(() => split([{ ...t, openedAt: '2024-03-01T00:00:00Z' }], cut)).toThrow(
+      /after it closed/,
+    );
+  });
+
   it('Monte Carlo is reproducible for a seed and bounded by the trades', () => {
     const ts = Array.from({ length: 50 }, (_, i) =>
       trade(i % 3 === 0 ? 2 : -1, `2024-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`),

@@ -366,7 +366,7 @@ authorization. Details in `docs/adr/`.
 founder resumed research and delegated choosing, building and testing strategies. **No strategy is
 approved or selected**; LSFVG stays paper-only. R001 fixed validation defects (walk-forward
 boundaries, invalid-input handling, held-out labelling; `docs/research/R001-validation-audit.md`).
-Next blocker for US30: credible modern data and the owner's verified instrument terms. Route:
+Next target (the founder removed the US30-only constraint; no instrument is selected): compare the instruments the target prop firms support on verifiable data, trading costs and compatibility; none is a prerequisite, and examined datasets, including the FX losses, are never treated as untouched. Route:
 credible modern data → pre-registered candidate tests → unseen-period / cost / stress checks →
 prop-rule replay → paper / shadow verification → owner-authorized limited live. The product must
 support real execution, but nothing here enables it. Market-data feeds and the owner's news

@@ -31,6 +31,13 @@ function assertDated(trades: readonly ResearchTrade[]): void {
 export function split(trades: readonly ResearchTrade[], cut: string) {
   const c = instant('cut', cut);
   assertDated(trades);
+  // The straddling count is only meaningful when every entry time is readable and not later
+  // than its close.
+  for (const t of trades) {
+    const opened = instant(`openedAt of trade ${t.id}`, t.openedAt);
+    if (opened > Date.parse(t.closedAt))
+      throw new Error(`trade ${t.id} opened (${t.openedAt}) after it closed (${t.closedAt})`);
+  }
   const inSample = trades.filter((t) => Date.parse(t.closedAt) < c);
   const outOfSample = trades.filter((t) => Date.parse(t.closedAt) >= c);
   // Assignment is by close time (the frozen definition). Trades opened before the cut but
