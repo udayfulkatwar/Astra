@@ -83,12 +83,23 @@ describe.skipIf(!available)('API — calendar persistence', () => {
 
     h = await h.restart();
 
-    const risk = await get(h, '/api/v1/calendar/risk');
-    expect(risk.calendar).toMatchObject({
+    // The restored underlying observation keeps its original source and asOf (restart is not a
+    // refresh); this view is deliberately not freshness-checked.
+    expect(h.runtime.calendar.current()).toMatchObject({
+      status: 'OK',
+      source: 'ingest:n8n',
+      asOf: '2026-09-28T14:00:00.000Z',
+    });
+    // Freshness is evaluated against that original asOf, so it is already STALE (and keeps them).
+    expect(h.runtime.calendar.fresh()).toMatchObject({
       status: 'STALE',
       source: 'ingest:n8n',
       asOf: '2026-09-28T14:00:00.000Z',
     });
+    // The API risk view reports non-OK calendars by status + reason only (no source/asOf).
+    const risk = await get(h, '/api/v1/calendar/risk');
+    expect(risk.calendar.status).toBe('STALE');
+    expect(risk.instruments.every((i: Json) => i.state === 'UNKNOWN')).toBe(true);
     await h.runtime.cycle();
     const status = await get(h, '/api/v1/system/status');
     expect(status.calendar.status).toBe('DEGRADED');
