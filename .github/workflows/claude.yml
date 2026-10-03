@@ -6,8 +6,56 @@ on:
 
 jobs:
   fire:
-    if: contains(github.event.comment.body, '@claude')
+    if: github.actor == 'udayfulkatwar' && contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+
     steps:
-      - name: Bridge validation
-        run: echo "Claude routine bridge trigger received"
+      - name: Fire Claude Code cloud routine
+        id: fire
+        shell: bash
+        env:
+          ROUTINE_FIRE_URL: ${{ secrets.CLAUDE_ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_FIRE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          COMMENT=$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")
+          NUMBER=$(jq -r '.issue.number // ""' "$GITHUB_EVENT_PATH")
+          SOURCE_URL=$(jq -r '.comment.html_url // ""' "$GITHUB_EVENT_PATH")
+
+          TEXT=$(printf '%s\n\n%s\n%s\n%s\n\n%s' \
+            'ASTRA CEO task received through the GitHub control plane.' \
+            "Repository: $GITHUB_REPOSITORY" \
+            "Issue/PR: $NUMBER" \
+            "Source: $SOURCE_URL" \
+            "$COMMENT")
+
+          jq -n --arg text "$TEXT" '{text:$text}' > /tmp/payload.json
+
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/response.json \
+            --write-out '%{http_code}' \
+            --request POST "$ROUTINE_FIRE_URL" \
+            --header "Authorization: Bearer $ROUTINE_FIRE_TOKEN" \
+            --header 'anthropic-version: 2023-06-01' \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/payload.json)
+
+          if [ "$HTTP_CODE" != '200' ]; then
+            echo "::error::Claude routine fire failed with HTTP $HTTP_CODE"
+            jq -c '{type, error}' /tmp/response.json || true
+            exit 1
+          fi
+
+          SESSION_URL=$(jq -r '.claude_code_session_url // empty' /tmp/response.json)
+          SESSION_ID=$(jq -r '.claude_code_session_id // empty' /tmp/response.json)
+
+          test -n "$SESSION_URL"
+          test -n "$SESSION_ID"
+
+          echo "session_url=$SESSION_URL" >> "$GITHUB_OUTPUT"
+          echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+          echo "CLAUDE_SESSION_URL=$SESSION_URL"
+          echo "CLAUDE_SESSION_ID=$SESSION_ID"
+          printf '### Claude Code cloud session\n\n[%s](%s)\n' "$SESSION_ID" "$SESSION_URL" >> "$GITHUB_STEP_SUMMARY"
