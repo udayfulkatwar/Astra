@@ -1,4 +1,4 @@
-name: Claude Code
+name: Claude Code Routine Bridge
 
 on:
   issue_comment:
@@ -14,64 +14,162 @@ on:
     types: [submitted]
 
 jobs:
-  claude:
+  fire-claude-routine:
+    # This repository is public. Only the repository owner may fire the paid Claude routine.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.actor == github.repository_owner &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body || '', '@claude') || contains(github.event.issue.title || '', '@claude')))
+      )
 
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: astra
-          POSTGRES_PASSWORD: astra_ci_only
-          POSTGRES_DB: astra_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U astra -d astra_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
-    env:
-      TEST_DATABASE_URL: postgres://astra:astra_ci_only@localhost:5432/astra_test
+    timeout-minutes: 5
 
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       issues: write
-      id-token: write
-      actions: read
+      pull-requests: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
+      - name: Build CEO task context
+        shell: bash
+        run: |
+          python <<'PY'
+          import json
+          import os
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as f:
+              event = json.load(f)
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+          event_name = os.environ['GITHUB_EVENT_NAME']
+          repository = os.environ['GITHUB_REPOSITORY']
+          actor = os.environ['GITHUB_ACTOR']
+          instruction = ''
+          source_url = ''
+          number = None
+          source_kind = event_name
 
-      - name: Install project dependencies
-        run: pnpm install --frozen-lockfile
+          if event_name == 'issue_comment':
+              instruction = event.get('comment', {}).get('body', '')
+              source_url = event.get('comment', {}).get('html_url', '')
+              number = event.get('issue', {}).get('number')
+              source_kind = 'pull_request_comment' if event.get('issue', {}).get('pull_request') else 'issue_comment'
+          elif event_name == 'pull_request_review_comment':
+              instruction = event.get('comment', {}).get('body', '')
+              source_url = event.get('comment', {}).get('html_url', '')
+              number = event.get('pull_request', {}).get('number')
+              source_kind = 'pull_request_review_comment'
+          elif event_name == 'pull_request_review':
+              instruction = event.get('review', {}).get('body', '') or ''
+              source_url = event.get('review', {}).get('html_url', '')
+              number = event.get('pull_request', {}).get('number')
+              source_kind = 'pull_request_review'
+          elif event_name == 'issues':
+              issue = event.get('issue', {})
+              instruction = f"{issue.get('title', '')}\n\n{issue.get('body', '') or ''}"
+              source_url = issue.get('html_url', '')
+              number = issue.get('number')
+              source_kind = 'issue'
 
-      - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: |
-            --model sonnet
-            --max-turns 60
-            --allowedTools "Edit,Read,Write,Glob,Grep,LS,Bash(pnpm:*),Bash(corepack:*),Bash(pg_isready:*),Bash(psql:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rm:*),mcp__github_comment__update_claude_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log"
+          text = f'''ASTRA CEO task received through the GitHub control plane.
+
+Repository: {repository}
+Source: {source_kind}
+Number: {number if number is not None else 'n/a'}
+Requested by: {actor}
+Source URL: {source_url}
+
+CEO instruction:
+{instruction}
+
+Operating rules:
+- Work only on the ASTRA repository attached to this Claude Code routine.
+- Inspect the current repository/PR state before acting; do not assume earlier chat state is current.
+- Preserve ASTRA's fail-closed, risk-first architecture.
+- Never enable live trading, connect live accounts, expose credentials, or make irreversible production changes without explicit founder approval.
+- For implementation tasks, test the change and leave auditable evidence in GitHub (commit/PR/comment) as appropriate.
+- Do not merge unless the instruction explicitly authorizes it.
+'''
+
+          # Anthropic's routine fire API accepts at most 65,536 characters.
+          with open('/tmp/claude-routine-text.txt', 'w', encoding='utf-8') as f:
+              f.write(text[:65000])
+
+          with open('/tmp/github-target-number.txt', 'w', encoding='utf-8') as f:
+              f.write('' if number is None else str(number))
+          PY
+
+      - name: Fire visible Claude Code cloud session
+        id: fire
+        shell: bash
+        env:
+          ROUTINE_FIRE_URL: ${{ secrets.CLAUDE_ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_FIRE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ROUTINE_FIRE_URL:-}" ] || [ -z "${ROUTINE_FIRE_TOKEN:-}" ]; then
+            echo "::error::Claude routine secrets are missing."
+            exit 1
+          fi
+
+          jq -Rs '{text: .}' /tmp/claude-routine-text.txt > /tmp/claude-routine-payload.json
+
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/claude-routine-response.json \
+            --write-out '%{http_code}' \
+            --request POST "$ROUTINE_FIRE_URL" \
+            --header "Authorization: Bearer $ROUTINE_FIRE_TOKEN" \
+            --header 'anthropic-version: 2023-06-01' \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/claude-routine-payload.json)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Claude routine fire failed with HTTP $HTTP_CODE"
+            jq -c '{type, error}' /tmp/claude-routine-response.json || true
+            exit 1
+          fi
+
+          SESSION_URL=$(jq -r '.claude_code_session_url // empty' /tmp/claude-routine-response.json)
+          SESSION_ID=$(jq -r '.claude_code_session_id // empty' /tmp/claude-routine-response.json)
+
+          if [ -z "$SESSION_URL" ] || [ -z "$SESSION_ID" ]; then
+            echo "::error::Claude routine response did not contain a session URL/ID."
+            exit 1
+          fi
+
+          echo "session_url=$SESSION_URL" >> "$GITHUB_OUTPUT"
+          echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+          echo "Claude Code cloud session created: $SESSION_URL"
+          printf '### Claude Code session created\n\n[%s](%s)\n' "$SESSION_ID" "$SESSION_URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post Claude Code session link back to GitHub
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SESSION_URL: ${{ steps.fire.outputs.session_url }}
+          SESSION_ID: ${{ steps.fire.outputs.session_id }}
+        run: |
+          set -euo pipefail
+          NUMBER=$(cat /tmp/github-target-number.txt)
+
+          if [ -z "$NUMBER" ]; then
+            exit 0
+          fi
+
+          BODY=$(cat <<EOF
+          🤖 **Claude Code cloud session started**
+
+          Visible session: $SESSION_URL
+          Session ID: \`$SESSION_ID\`
+
+          This task is running in Claude Code on the web. Open the link to watch it or continue the session there.
+          EOF
+          )
+
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" \
+            -f body="$BODY" >/dev/null
