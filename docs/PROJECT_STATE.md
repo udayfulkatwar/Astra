@@ -337,10 +337,10 @@ authorization. Details in `docs/adr/`.
     startup with their ORIGINAL observation time, so a restart never makes stale data fresh;
     expired / out-of-horizon events are dropped. A stored row that is malformed OR semantically
     invalid (duplicate event ids, which `CalendarService` also rejects) is skipped with a logged
-    reason and the newest remaining valid overlapping window is restored; only when no valid
-    window can be restored — or restoration itself throws (e.g. the database is unavailable) — does
-    the calendar stay UNAVAILABLE (no trades, fail-closed) and emit a `CALENDAR_RESTORE_FAILED`
-    event. A restored STALE or UNAVAILABLE calendar, and a restored active blackout, are each
+    reason and the newest remaining valid overlapping window is restored. If no valid window
+    remains, the calendar stays UNAVAILABLE (no trades, fail-closed). If restoration throws (e.g.
+    the database is unavailable), it also emits a `CALENDAR_RESTORE_FAILED` event. A restored
+    STALE or UNAVAILABLE calendar, and a restored active blackout, are each
     rejected at the real decision gate (`apps/api/test/calendar-persistence.test.ts`). Open: no
     retention/pruning of `calendar_windows`; store failures are logged/evented but not in health.
     Decision records keep the calendar each decision saw.
