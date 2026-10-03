@@ -27,6 +27,20 @@ jobs:
       - name: Verify Claude Code installation
         run: claude --version
 
+      - name: Validate stored credential type without exposing it
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "Credential diagnosis: MISSING"
+            exit 2
+          fi
+          case "$CLAUDE_CODE_OAUTH_TOKEN" in
+            sk-ant-oat*) echo "Credential diagnosis: OAUTH_TOKEN_FORMAT" ;;
+            sk-ant-api*) echo "Credential diagnosis: API_KEY_STORED_IN_OAUTH_SECRET"; exit 3 ;;
+            *) echo "Credential diagnosis: UNKNOWN_TOKEN_FORMAT"; exit 4 ;;
+          esac
+
       - name: Test Claude Pro OAuth connection directly
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
