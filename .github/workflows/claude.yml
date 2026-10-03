@@ -22,6 +22,25 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
 
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: astra
+          POSTGRES_PASSWORD: astra_ci_only
+          POSTGRES_DB: astra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U astra -d astra_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      TEST_DATABASE_URL: postgres://astra:astra_ci_only@localhost:5432/astra_test
 
     permissions:
       contents: write
@@ -36,6 +55,18 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install project dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
@@ -43,4 +74,4 @@ jobs:
           claude_args: |
             --model sonnet
             --max-turns 60
-            --allowedTools "Edit,Read,Write,Glob,Grep,LS,Bash(pnpm:*),Bash(corepack:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rm:*),mcp__github_comment__update_claude_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log"
+            --allowedTools "Edit,Read,Write,Glob,Grep,LS,Bash(pnpm:*),Bash(corepack:*),Bash(pg_isready:*),Bash(psql:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git rm:*),mcp__github_comment__update_claude_comment,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log"
