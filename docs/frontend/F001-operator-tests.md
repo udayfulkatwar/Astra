@@ -4,7 +4,7 @@ _Frontend team · 2026-10-03 · branch `claude/frontend-f001-operator-tests`_
 
 The dashboard now has rendered UI tests for its highest-risk operator flows. The audit of
 2026-10-03 found 7 helper tests and no page tests; there are now 43 dashboard tests (36 new).
-The new tests found two real UI defects, now fixed (below).
+The new tests found three real UI defects, now fixed (below).
 
 ## How the tests work
 
