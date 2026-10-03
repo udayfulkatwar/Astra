@@ -4,27 +4,9 @@ on:
   issue_comment:
     types: [created]
 
-  pull_request_review_comment:
-    types: [created]
-
-  issues:
-    types: [opened, assigned]
-
-  pull_request_review:
-    types: [submitted]
-
 jobs:
   fire-claude-routine:
-    # This repository is public. Only the repository owner may fire the paid Claude routine.
-    if: |
-      github.actor == github.repository_owner &&
-      (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body || '', '@claude') || contains(github.event.issue.title || '', '@claude')))
-      )
-
+    if: github.actor == github.repository_owner && contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -34,7 +16,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Build CEO task context
+      - name: Build CEO task payload
         shell: bash
         run: |
           python <<'PY'
@@ -44,62 +26,35 @@ jobs:
           with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as f:
               event = json.load(f)
 
-          event_name = os.environ['GITHUB_EVENT_NAME']
-          repository = os.environ['GITHUB_REPOSITORY']
-          actor = os.environ['GITHUB_ACTOR']
-          instruction = ''
-          source_url = ''
-          number = None
-          source_kind = event_name
-
-          if event_name == 'issue_comment':
-              instruction = event.get('comment', {}).get('body', '')
-              source_url = event.get('comment', {}).get('html_url', '')
-              number = event.get('issue', {}).get('number')
-              source_kind = 'pull_request_comment' if event.get('issue', {}).get('pull_request') else 'issue_comment'
-          elif event_name == 'pull_request_review_comment':
-              instruction = event.get('comment', {}).get('body', '')
-              source_url = event.get('comment', {}).get('html_url', '')
-              number = event.get('pull_request', {}).get('number')
-              source_kind = 'pull_request_review_comment'
-          elif event_name == 'pull_request_review':
-              instruction = event.get('review', {}).get('body', '') or ''
-              source_url = event.get('review', {}).get('html_url', '')
-              number = event.get('pull_request', {}).get('number')
-              source_kind = 'pull_request_review'
-          elif event_name == 'issues':
-              issue = event.get('issue', {})
-              instruction = f"{issue.get('title', '')}\n\n{issue.get('body', '') or ''}"
-              source_url = issue.get('html_url', '')
-              number = issue.get('number')
-              source_kind = 'issue'
+          issue = event['issue']
+          comment = event['comment']
+          source_kind = 'pull_request_comment' if issue.get('pull_request') else 'issue_comment'
 
           text = f'''ASTRA CEO task received through the GitHub control plane.
 
-Repository: {repository}
+Repository: {os.environ['GITHUB_REPOSITORY']}
 Source: {source_kind}
-Number: {number if number is not None else 'n/a'}
-Requested by: {actor}
-Source URL: {source_url}
+Number: {issue['number']}
+Requested by: {os.environ['GITHUB_ACTOR']}
+Source URL: {comment.get('html_url', '')}
 
 CEO instruction:
-{instruction}
+{comment.get('body', '')}
 
 Operating rules:
 - Work only on the ASTRA repository attached to this Claude Code routine.
-- Inspect the current repository/PR state before acting; do not assume earlier chat state is current.
+- Inspect current repository and PR state before acting; do not assume earlier chat state is current.
 - Preserve ASTRA's fail-closed, risk-first architecture.
 - Never enable live trading, connect live accounts, expose credentials, or make irreversible production changes without explicit founder approval.
-- For implementation tasks, test the change and leave auditable evidence in GitHub (commit/PR/comment) as appropriate.
+- For implementation tasks, test changes and leave auditable evidence in GitHub.
 - Do not merge unless the instruction explicitly authorizes it.
 '''
 
-          # Anthropic's routine fire API accepts at most 65,536 characters.
-          with open('/tmp/claude-routine-text.txt', 'w', encoding='utf-8') as f:
-              f.write(text[:65000])
-
-          with open('/tmp/github-target-number.txt', 'w', encoding='utf-8') as f:
-              f.write('' if number is None else str(number))
+          payload = {'text': text[:65000]}
+          with open('/tmp/claude-routine-payload.json', 'w', encoding='utf-8') as f:
+              json.dump(payload, f)
+          with open('/tmp/target-number.txt', 'w', encoding='utf-8') as f:
+              f.write(str(issue['number']))
           PY
 
       - name: Fire visible Claude Code cloud session
@@ -115,8 +70,6 @@ Operating rules:
             echo "::error::Claude routine secrets are missing."
             exit 1
           fi
-
-          jq -Rs '{text: .}' /tmp/claude-routine-text.txt > /tmp/claude-routine-payload.json
 
           HTTP_CODE=$(curl --silent --show-error \
             --output /tmp/claude-routine-response.json \
@@ -146,7 +99,7 @@ Operating rules:
           echo "Claude Code cloud session created: $SESSION_URL"
           printf '### Claude Code session created\n\n[%s](%s)\n' "$SESSION_ID" "$SESSION_URL" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post Claude Code session link back to GitHub
+      - name: Post visible session link to the task thread
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -154,21 +107,8 @@ Operating rules:
           SESSION_ID: ${{ steps.fire.outputs.session_id }}
         run: |
           set -euo pipefail
-          NUMBER=$(cat /tmp/github-target-number.txt)
-
-          if [ -z "$NUMBER" ]; then
-            exit 0
-          fi
-
-          BODY=$(cat <<EOF
-          🤖 **Claude Code cloud session started**
-
-          Visible session: $SESSION_URL
-          Session ID: \`$SESSION_ID\`
-
-          This task is running in Claude Code on the web. Open the link to watch it or continue the session there.
-          EOF
-          )
+          NUMBER=$(cat /tmp/target-number.txt)
+          BODY="🤖 **Claude Code cloud session started**\n\nVisible session: $SESSION_URL\n\nSession ID: \`$SESSION_ID\`\n\nOpen the link to watch the task run in Claude Code on the web."
 
           gh api --method POST \
             "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" \
