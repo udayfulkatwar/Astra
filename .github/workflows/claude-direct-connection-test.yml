@@ -31,9 +31,15 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          set -euo pipefail
-          response="$(claude -p 'Reply with exactly CONNECTED and nothing else.' --max-turns 1 --output-format text)"
+          set +e
+          response="$(claude -p 'Reply with exactly CONNECTED and nothing else.' --max-turns 1 --output-format text 2>&1)"
+          status=$?
+          set -e
+          echo "Claude CLI exit code: $status"
           echo "Claude response: $response"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           if [ "$response" != "CONNECTED" ]; then
             echo "Expected CONNECTED but received a different response."
             exit 1
