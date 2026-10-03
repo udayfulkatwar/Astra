@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-09-29 · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-03 · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -169,6 +169,7 @@ Remaining:
   Calendar page show CLEAR / BLACKOUT (until when, why) / UNKNOWN per instrument — the same
   `assessBlackout` the gate uses. With `ASTRA_SIMULATION=true` (and in the demo) a SIMULATED
   weekly schedule is polled; the demo can jump to 5 minutes before the next high-impact event.
+  Accepted windows are persisted and restored on startup with their original `asOf` (Task 002).
 
 ## Phase 8 — position monitor (done)
 
@@ -332,8 +333,17 @@ authorization. Details in `docs/adr/`.
 18. MARKET_DATA is DEGRADED — which blocks all trades while `allowDegradedComponents: false` — when
     any instrument traded by an ACTIVE account lacks a fresh quote, including instruments whose
     market is closed while another's is open.
-19. Calendar windows are not persisted: after a restart the calendar is UNAVAILABLE (no trades)
-    until the next poll or push. Decision records keep the calendar each decision saw.
+19. Calendar windows are persisted (Task 002, migration 0009, `calendar_windows`) and restored on
+    startup with their ORIGINAL observation time, so a restart never makes stale data fresh;
+    expired / out-of-horizon events are dropped. A stored row that is malformed OR semantically
+    invalid (duplicate event ids, which `CalendarService` also rejects) is skipped with a logged
+    reason and the newest remaining valid overlapping window is restored. If no valid window
+    remains, the calendar stays UNAVAILABLE (no trades, fail-closed). If restoration throws (e.g.
+    the database is unavailable), it also emits a `CALENDAR_RESTORE_FAILED` event. A restored
+    STALE or UNAVAILABLE calendar, and a restored active blackout, are each
+    rejected at the real decision gate (`apps/api/test/calendar-persistence.test.ts`). Open: no
+    retention/pruning of `calendar_windows`; store failures are logged/evented but not in health.
+    Decision records keep the calendar each decision saw.
 20. The event-risk view uses the global blackout rule; strategy and firm rules can only widen it
     at decision time (the gate applies the merged rule).
 21. When a calendar event's currency matches none of the configured instruments'
