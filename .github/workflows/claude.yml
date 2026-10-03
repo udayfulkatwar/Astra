@@ -15,10 +15,19 @@ jobs:
         id: fire
         shell: bash
         env:
-          ROUTINE_FIRE_URL: ${{ secrets.CLAUDE_ROUTINE_FIRE_URL }}
-          ROUTINE_FIRE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_FIRE_TOKEN }}
+          ROUTINE_FIRE_URL: ${{ secrets.CLAUDE_ROUTINE_FIRE_URL || vars.CLAUDE_ROUTINE_FIRE_URL || secrets.ROUTINE_FIRE_URL || vars.ROUTINE_FIRE_URL }}
+          ROUTINE_FIRE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_FIRE_TOKEN || secrets.ROUTINE_FIRE_TOKEN }}
         run: |
           set -euo pipefail
+
+          if [ -z "${ROUTINE_FIRE_URL:-}" ]; then
+            echo "::error::Routine Fire URL is missing. Expected CLAUDE_ROUTINE_FIRE_URL (secret or Actions variable) or ROUTINE_FIRE_URL."
+            exit 1
+          fi
+          if [ -z "${ROUTINE_FIRE_TOKEN:-}" ]; then
+            echo "::error::Routine Fire token is missing. Expected CLAUDE_ROUTINE_FIRE_TOKEN or ROUTINE_FIRE_TOKEN secret."
+            exit 1
+          fi
 
           COMMENT=$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")
           NUMBER=$(jq -r '.issue.number // ""' "$GITHUB_EVENT_PATH")
