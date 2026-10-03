@@ -94,6 +94,43 @@ describe.skipIf(!available)('calendar repository', () => {
     expect(invalid).toHaveLength(1);
   });
 
+  it('skips a newer row with duplicate event ids and falls back to an older valid one', async () => {
+    const good = saved(
+      'ingest:valid',
+      '2027-03-01T10:00:00.000Z',
+      '2027-03-01T00:00:00.000Z',
+      '2027-03-08T00:00:00.000Z',
+      'march-cpi',
+    );
+    await repo.record(good);
+    // A newer observation that passes the shape schema but repeats an event id. The shape schema
+    // does not enforce id uniqueness, but CalendarService.restore rejects it — so if the repo
+    // returned it, restore would throw and no older valid window would be restored.
+    const dupEvent = {
+      id: 'dup',
+      title: 'event dup',
+      impact: 'HIGH',
+      scheduledAt: '2027-03-02T15:00:00.000Z',
+      affectedInstruments: ['NQ'],
+    };
+    await db.sql`
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)
+      values ('ingest:dup', 'MANUAL', '2027-03-01T11:00:00.000Z', '2027-03-01T00:00:00.000Z',
+        '2027-03-08T00:00:00.000Z', ${jsonb(db.sql, {
+          from: '2027-03-01T00:00:00.000Z',
+          to: '2027-03-08T00:00:00.000Z',
+          events: [dupEvent, dupEvent],
+        })})`;
+    const invalid: string[] = [];
+    expect(
+      await repo.latestOverlapping('2027-03-02T00:00:00.000Z', '2027-03-03T00:00:00.000Z', (r) =>
+        invalid.push(r),
+      ),
+    ).toEqual(good);
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]).toMatch(/repeats event id dup/);
+  });
+
   it('returns null when every overlapping row is malformed', async () => {
     await db.sql`
       insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window_payload)

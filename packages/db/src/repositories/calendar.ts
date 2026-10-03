@@ -2,6 +2,7 @@
 import {
   CalendarWindowSchema,
   DataSourceKindSchema,
+  firstDuplicateEventId,
   type CalendarWindow,
   type ObservedOk,
 } from '@astra/core';
@@ -28,7 +29,9 @@ export class CalendarRepository {
   /**
    * Latest valid accepted window whose asserted coverage overlaps [from, to]. The persisted
    * observation timestamp is returned unchanged; callers must apply normal freshness rules after
-   * restore. Malformed rows are skipped, never repaired; `onInvalid` is told about each one.
+   * restore. A row that is malformed OR semantically invalid (duplicate event ids, which
+   * `CalendarService` also rejects) is skipped so an older valid row is still restored rather than
+   * the newest one aborting the whole restore; `onInvalid` is told about each skipped row.
    */
   async latestOverlapping(
     from: string,
@@ -46,6 +49,11 @@ export class CalendarRepository {
       const kind = DataSourceKindSchema.safeParse(row.source_kind);
       if (!window.success || !kind.success) {
         onInvalid?.(`stored calendar window from ${row.source} is malformed`);
+        continue;
+      }
+      const duplicate = firstDuplicateEventId(window.data.events);
+      if (duplicate !== undefined) {
+        onInvalid?.(`stored calendar window from ${row.source} repeats event id ${duplicate}`);
         continue;
       }
       return {

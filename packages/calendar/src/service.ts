@@ -14,6 +14,7 @@
 import {
   AstraError,
   CalendarWindowSchema,
+  firstDuplicateEventId,
   applyFreshness,
   notObserved,
   observed,
@@ -143,15 +144,12 @@ export class CalendarService {
         `invalid calendar window from ${source}: ${z.prettifyError(parsed.error)}`,
       );
     }
-    const ids = new Set<string>();
-    for (const e of parsed.data.events) {
-      if (ids.has(e.id)) {
-        throw new AstraError(
-          'VALIDATION',
-          `calendar window from ${source} repeats event id ${e.id}`,
-        );
-      }
-      ids.add(e.id);
+    const duplicate = firstDuplicateEventId(parsed.data.events);
+    if (duplicate !== undefined) {
+      throw new AstraError(
+        'VALIDATION',
+        `calendar window from ${source} repeats event id ${duplicate}`,
+      );
     }
     return parsed.data;
   }
