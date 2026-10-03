@@ -51,6 +51,8 @@ export interface CalendarServiceOptions {
   readonly instruments: ReadonlyMap<string, Pick<InstrumentSpec, 'eventCurrencies'>>;
   /** Changes detected by an ingest (not called when there are none). */
   readonly onChanges?: ((changes: readonly CalendarChange[], source: string) => void) | undefined;
+  /** Every accepted live/manual/simulated ingest after mapping; restore never calls this. */
+  readonly onWindow?: ((window: ObservedOk<CalendarWindow>) => void) | undefined;
 }
 
 export class CalendarService {
@@ -61,48 +63,38 @@ export class CalendarService {
 
   /** Validates, maps and stores a window. Throws VALIDATION (the previous window is kept). */
   ingest(raw: unknown, source: string, sourceKind: DataSourceKind): CalendarIngestResult {
-    const parsed = CalendarWindowSchema.safeParse(raw);
-    if (!parsed.success) {
-      throw new AstraError(
-        'VALIDATION',
-        `invalid calendar window from ${source}: ${z.prettifyError(parsed.error)}`,
-      );
-    }
-    const ids = new Set<string>();
-    for (const e of parsed.data.events) {
-      if (ids.has(e.id)) {
-        throw new AstraError(
-          'VALIDATION',
-          `calendar window from ${source} repeats event id ${e.id}`,
-        );
-      }
-      ids.add(e.id);
-    }
-    const bound = this.sourceKinds.get(source);
-    if (bound !== undefined && bound !== sourceKind) {
-      throw new AstraError(
-        'VALIDATION',
-        `calendar source ${source} delivers ${bound} data; refusing ${sourceKind}`,
-      );
-    }
-    this.sourceKinds.set(source, sourceKind);
+    const parsed = this.validate(raw, source);
+    this.bindSource(source, sourceKind);
 
     const window: CalendarWindow = {
-      from: parsed.data.from,
-      to: parsed.data.to,
-      events: parsed.data.events
+      from: parsed.from,
+      to: parsed.to,
+      events: parsed.events
         .map((e) => this.mapInstruments(e))
         .sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt)),
     };
     const previous = this.window?.value ?? null;
-    this.window = observed(window, {
+    const accepted = observed(window, {
       source,
       sourceKind,
       asOf: this.opts.clock.now().toISOString(),
     });
+    this.window = accepted;
+    this.opts.onWindow?.(accepted);
     const changes = previous ? diffWindows(previous, window) : [];
     if (changes.length > 0) this.opts.onChanges?.(changes, source);
     return { events: window.events.length, changes };
+  }
+
+  /**
+   * Restores a previously accepted window exactly as observed. The original `asOf` is preserved,
+   * so restart cannot make stale data fresh. Restore is a baseline: it emits no change events and
+   * does not call `onWindow` (which would persist the same observation again).
+   */
+  restore(saved: ObservedOk<CalendarWindow>): void {
+    const parsed = this.validate(saved.value, saved.source);
+    this.bindSource(saved.source, saved.sourceKind);
+    this.window = { ...saved, value: parsed };
   }
 
   /** The stored window as observed (UNAVAILABLE before the first ingest); not freshness-checked. */
@@ -141,6 +133,38 @@ export class CalendarService {
       status: 'ONLINE',
       detail: `${w.value.events.length} events from ${w.source} (${w.sourceKind}), coverage ${w.value.from} → ${w.value.to}`,
     };
+  }
+
+  private validate(raw: unknown, source: string): CalendarWindow {
+    const parsed = CalendarWindowSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new AstraError(
+        'VALIDATION',
+        `invalid calendar window from ${source}: ${z.prettifyError(parsed.error)}`,
+      );
+    }
+    const ids = new Set<string>();
+    for (const e of parsed.data.events) {
+      if (ids.has(e.id)) {
+        throw new AstraError(
+          'VALIDATION',
+          `calendar window from ${source} repeats event id ${e.id}`,
+        );
+      }
+      ids.add(e.id);
+    }
+    return parsed.data;
+  }
+
+  private bindSource(source: string, sourceKind: DataSourceKind): void {
+    const bound = this.sourceKinds.get(source);
+    if (bound !== undefined && bound !== sourceKind) {
+      throw new AstraError(
+        'VALIDATION',
+        `calendar source ${source} delivers ${bound} data; refusing ${sourceKind}`,
+      );
+    }
+    this.sourceKinds.set(source, sourceKind);
   }
 
   private mapInstruments(e: EconomicEvent): EconomicEvent {
