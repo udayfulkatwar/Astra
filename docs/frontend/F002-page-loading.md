@@ -17,11 +17,11 @@ Status: done on `claude/frontend-f002-page-loading` (base: F001 head `83de612`).
 
 ## Bundle (production build, `pnpm --filter @astra/dashboard build`)
 
-| | Before | After |
-| --- | --- | --- |
-| Entry JS | 674.79 kB (205.14 kB gzip) | 327.92 kB (102.91 kB gzip) |
-| Largest lazy chunk | — | Charts 170.32 kB (55.57 kB gzip; holds lightweight-charts) |
-| Other lazy chunks | — | 21 page/shared chunks, 0.6–47.9 kB |
+|                    | Before                     | After                                                      |
+| ------------------ | -------------------------- | ---------------------------------------------------------- |
+| Entry JS           | 674.79 kB (205.14 kB gzip) | 327.92 kB (102.91 kB gzip)                                 |
+| Largest lazy chunk | —                          | Charts 170.32 kB (55.57 kB gzip; holds lightweight-charts) |
+| Other lazy chunks  | —                          | 21 page/shared chunks, 0.6–47.9 kB                         |
 
 `index.html` preloads only the entry, runtime and shared `ui` chunk. `lightweight-charts` appears
 only in the Charts chunk.
