@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { jsonb } from '@astra/db';
 import { H, createHarness, dbAvailable, type Harness } from './harness';
 
 const available = await dbAvailable();
@@ -92,6 +93,38 @@ describe.skipIf(!available)('API — calendar persistence', () => {
     const status = await get(h, '/api/v1/system/status');
     expect(status.calendar.status).toBe('DEGRADED');
     expect(status.trading.enabled).toBe(false);
+  });
+
+  it('survives a malformed stored window: startup succeeds and the calendar stays UNAVAILABLE', async () => {
+    h = await createHarness();
+    await h.db.sql`
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      values ('ingest:n8n', 'MANUAL', '2026-09-28T14:00:00.000Z', '2026-09-28T00:00:00.000Z',
+        '2026-10-05T00:00:00.000Z', ${jsonb(h.db.sql, { from: 'bad', events: [{ id: 1 }] })})`;
+
+    h = await h.restart();
+
+    const risk = await get(h, '/api/v1/calendar/risk');
+    expect(risk.calendar.status).toBe('UNAVAILABLE');
+    expect(risk.instruments.every((i: Json) => i.state === 'UNKNOWN')).toBe(true);
+    await h.runtime.cycle();
+    const status = await get(h, '/api/v1/system/status');
+    expect(status.trading.enabled).toBe(false);
+  });
+
+  it('does not restore events outside the horizon from an overlapping window', async () => {
+    h = await createHarness();
+    await pushWindow(
+      h,
+      '2026-09-01T00:00:00.000Z',
+      '2026-12-31T00:00:00.000Z',
+      '2026-12-30T12:00:00.000Z',
+    );
+
+    h = await h.restart();
+
+    const risk = await get(h, '/api/v1/calendar/risk');
+    expect(risk.instruments.every((i: Json) => !i.next)).toBe(true);
   });
 
   it('does not restore a stored window outside the configured lookback/lookahead horizon', async () => {

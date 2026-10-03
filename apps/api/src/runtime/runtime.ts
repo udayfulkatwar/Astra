@@ -495,7 +495,7 @@ export class AstraRuntime {
     await this.mode.load();
     await this.killSwitches.load();
     await this.ai.load();
-    await this.restoreCalendar();
+    await this.restoreCalendarSafely();
     await this.health.seedFromHeartbeats();
     await this.execution.restorePaperAccounts();
     await this.execution.reconcileAll();
@@ -548,6 +548,29 @@ export class AstraRuntime {
     return this.newsRecorded;
   }
 
+  /** Restore failures leave the calendar UNAVAILABLE (fail-closed); they never abort startup. */
+  private async restoreCalendarSafely(): Promise<void> {
+    try {
+      await this.restoreCalendar();
+    } catch (err) {
+      const message = errorMessage(err);
+      this.log.error({ err: message }, 'calendar restore failed; calendar stays unavailable');
+      try {
+        await this.events.emit({
+          level: 'ERROR',
+          component: 'calendar',
+          type: 'CALENDAR_RESTORE_FAILED',
+          message: `stored calendar state could not be restored: ${message}`,
+        });
+      } catch (eventErr) {
+        this.log.error(
+          { err: errorMessage(eventErr) },
+          'calendar restore failure could not be recorded as a system event',
+        );
+      }
+    }
+  }
+
   /** Restore only the configured calendar horizon, preserving the original observation time. */
   private async restoreCalendar(): Promise<void> {
     const cal = this.config.system.calendar;
@@ -557,6 +580,7 @@ export class AstraRuntime {
     const saved = await this.repos.calendar.latestOverlapping(
       new Date(desiredFromMs).toISOString(),
       new Date(desiredToMs).toISOString(),
+      (reason) => this.log.error({ reason }, 'skipping malformed stored calendar window'),
     );
     if (!saved) return;
 
@@ -593,7 +617,10 @@ export class AstraRuntime {
       await this.repos.calendar.record(window);
     } catch (err) {
       const message = errorMessage(err);
-      this.log.error({ err: message, source: window.source }, 'calendar window could not be stored');
+      this.log.error(
+        { err: message, source: window.source },
+        'calendar window could not be stored',
+      );
       try {
         await this.events.emit({
           level: 'ERROR',

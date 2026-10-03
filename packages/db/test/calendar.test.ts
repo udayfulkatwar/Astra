@@ -1,5 +1,6 @@
 import type { CalendarWindow, ObservedOk } from '@astra/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { jsonb } from '../src/client';
 import { CalendarRepository } from '../src/repositories/calendar';
 import { createTestDb, dbAvailable, type TestDb } from './helpers';
 
@@ -68,6 +69,38 @@ describe.skipIf(!available)('calendar repository', () => {
   it('ignores windows whose asserted coverage does not overlap the requested horizon', async () => {
     expect(
       await repo.latestOverlapping('2026-10-20T00:00:00.000Z', '2026-10-21T00:00:00.000Z'),
+    ).toBeNull();
+  });
+
+  it('skips malformed rows, falls back to the next valid one and reports them', async () => {
+    const good = saved(
+      'ingest:good',
+      '2026-09-28T10:00:00.000Z',
+      '2026-11-01T00:00:00.000Z',
+      '2026-11-08T00:00:00.000Z',
+      'good',
+    );
+    await repo.record(good);
+    await db.sql`
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      values ('ingest:bad', 'MANUAL', '2026-09-28T11:00:00.000Z', '2026-11-01T00:00:00.000Z',
+        '2026-11-08T00:00:00.000Z', ${jsonb(db.sql, { from: 'nope', events: 'x' })})`;
+    const invalid: string[] = [];
+    expect(
+      await repo.latestOverlapping('2026-11-02T00:00:00.000Z', '2026-11-03T00:00:00.000Z', (r) =>
+        invalid.push(r),
+      ),
+    ).toEqual(good);
+    expect(invalid).toHaveLength(1);
+  });
+
+  it('returns null when every overlapping row is malformed', async () => {
+    await db.sql`
+      insert into calendar_windows (source, source_kind, as_of, from_at, to_at, window)
+      values ('ingest:bad', 'MANUAL', '2026-09-28T11:00:00.000Z', '2027-01-01T00:00:00.000Z',
+        '2027-01-08T00:00:00.000Z', ${jsonb(db.sql, { garbage: true })})`;
+    expect(
+      await repo.latestOverlapping('2027-01-02T00:00:00.000Z', '2027-01-03T00:00:00.000Z'),
     ).toBeNull();
   });
 });
