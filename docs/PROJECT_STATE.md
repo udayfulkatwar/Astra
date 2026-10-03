@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-09-29 · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-03 · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -362,12 +362,15 @@ authorization. Details in `docs/adr/`.
 
 ## Next implementation target
 
-**Owner decision (2026-09-29): Phase 5 strategy research is paused** until the owner supplies a
-strategy with a real edge. LSFVG stays paper-only, and the trend-breakout candidate was not
-started beyond the inventory. **Current focus: real market-data feeds (Phase 2 → shadow mode,
-Phase 9) and the owner's news websites (Phase 4, via the n8n RSS/Atom ingestion).** The free
-chart feed is done (ADR-0026). Next: the owner's news RSS/Atom links in the n8n workflow, and
-the platform's quote feed once the platform is chosen.
+**R001 (2026-10-03): the owner's pause of strategy research (2026-09-29) is superseded.** The
+founder resumed research and delegated choosing, building and testing strategies. **No strategy is
+approved or selected**; LSFVG stays paper-only. R001 fixed validation defects (walk-forward
+boundaries, invalid-input handling, held-out labelling; `docs/research/R001-validation-audit.md`).
+Next blocker for US30: credible modern data and the owner's verified instrument terms. Route:
+credible modern data → pre-registered candidate tests → unseen-period / cost / stress checks →
+prop-rule replay → paper / shadow verification → owner-authorized limited live. The product must
+support real execution, but nothing here enables it. Market-data feeds and the owner's news
+websites remain in parallel (ADR-0026 chart feed done).
 
 **No strategy is selected for trading.** LSFVG v1.0 showed no edge on 2010–2019
 (`docs/research/RESULTS-2026-09-29.md`). Before costs Model A makes +0.02 R per trade and after

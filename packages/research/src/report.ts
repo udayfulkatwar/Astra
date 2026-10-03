@@ -160,11 +160,17 @@ export function renderStudy(s: Study): string {
     out.push(
       table([
         { key: `before ${m.split.cut.slice(0, 10)}`, metrics: m.split.inSample },
-        { key: `from ${m.split.cut.slice(0, 10)} (untouched)`, metrics: m.split.outOfSample },
+        {
+          key: `from ${m.split.cut.slice(0, 10)} (held out by date)`,
+          metrics: m.split.outOfSample,
+        },
       ]),
     );
     const oos = insufficient(m.split.outOfSample);
     if (oos) out.push(`\nOut-of-sample: ${oos}.`);
+    out.push(
+      `\nThe held-out part is a later slice of the same dataset, not a fresh one: it is independent evidence only if no rule or parameter was chosen after seeing it. ${m.split.straddling} out-of-sample trade(s) were opened before the cut and closed after it.`,
+    );
     out.push('');
     out.push('### Walk-forward (§22)');
     out.push('');
@@ -172,7 +178,10 @@ export function renderStudy(s: Study): string {
     const withTrades = m.walkForward.filter((w) => w.metrics.trades > 0);
     const positive = withTrades.filter((w) => (w.metrics.expectancyR ?? 0) > 0).length;
     out.push('');
-    out.push(`${positive} of ${withTrades.length} windows with trades had a positive expectancy.`);
+    const thin = withTrades.filter((w) => w.metrics.trades < MIN_TRADES_FOR_STATISTICS).length;
+    out.push(
+      `${positive} of ${withTrades.length} windows with trades had a positive expectancy (${m.walkForward.length - withTrades.length} of ${m.walkForward.length} windows had no trades; ${thin} of the windows with trades had fewer than ${MIN_TRADES_FOR_STATISTICS}, so each is INSUFFICIENT DATA on its own).`,
+    );
     out.push('');
     out.push('### Monte Carlo (§22)');
     out.push('');
@@ -180,7 +189,7 @@ export function renderStudy(s: Study): string {
     else {
       const mc = m.monteCarlo;
       out.push(
-        `${mc.runs} bootstrap resamples of the ${mc.tradesPerRun} trades' R (seed ${mc.seed}). Total R: 5th ${mc.totalR.p5}, median ${mc.totalR.p50}, 95th ${mc.totalR.p95}. Expectancy per trade: ${mc.expectancyR.p5} … ${mc.expectancyR.p95} R (5th–95th). Max drawdown: median ${mc.maxDrawdownR.p50} R, 95th ${mc.maxDrawdownR.p95} R, 99th ${mc.maxDrawdownR.p99} R.`,
+        `${mc.runs} bootstrap resamples of the ${mc.tradesPerRun} trades' R (seed ${mc.seed}; trades assumed independent — loss clustering and regime change are not modelled). Total R: 5th ${mc.totalR.p5}, median ${mc.totalR.p50}, 95th ${mc.totalR.p95}. Expectancy per trade: ${mc.expectancyR.p5} … ${mc.expectancyR.p95} R (5th–95th). Max drawdown: median ${mc.maxDrawdownR.p50} R, 95th ${mc.maxDrawdownR.p95} R, 99th ${mc.maxDrawdownR.p99} R.`,
       );
       out.push('');
       out.push(

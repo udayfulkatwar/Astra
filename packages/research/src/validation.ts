@@ -7,42 +7,88 @@
  * - Walk-forward: consecutive windows, each reported on its own; stability = share of windows
  *   with a positive expectancy.
  * - Monte Carlo: bootstrap resampling of the trades' R (seeded, reproducible): distributions of
- *   total R and max drawdown, and the chance the drawdown reaches a given depth.
+ *   total R and max drawdown, and the chance the drawdown reaches a given depth. It assumes the
+ *   trades are independent and identically distributed: it resamples the sample's own outcomes,
+ *   so it cannot show a regime change, loss clustering or an edge the sample did not contain.
+ *   Trades without an R (zero risk) are left out of the resampling.
  * - Robustness: how much the result depends on the best year, the best pair, the best session
  *   and the few largest winners.
  */
 import { breakdown, bySession, byPair, byYear, metrics, type Metrics } from './metrics';
 import type { ResearchTrade } from './simulate';
 
-export function split(trades: readonly ResearchTrade[], cut: string) {
-  const c = Date.parse(cut);
-  const inSample = trades.filter((t) => Date.parse(t.closedAt) < c);
-  const outOfSample = trades.filter((t) => Date.parse(t.closedAt) >= c);
-  return { cut, inSample: metrics(inSample), outOfSample: metrics(outOfSample) };
+function instant(label: string, iso: string): number {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) throw new Error(`${label} is not a valid date: ${JSON.stringify(iso)}`);
+  return t;
 }
 
+/** Trades with an unreadable close time cannot be ordered, split or windowed: refuse, never drop. */
+function assertDated(trades: readonly ResearchTrade[]): void {
+  for (const t of trades) instant(`closedAt of trade ${t.id}`, t.closedAt);
+}
+
+export function split(trades: readonly ResearchTrade[], cut: string) {
+  const c = instant('cut', cut);
+  assertDated(trades);
+  const inSample = trades.filter((t) => Date.parse(t.closedAt) < c);
+  const outOfSample = trades.filter((t) => Date.parse(t.closedAt) >= c);
+  // Assignment is by close time (the frozen definition). Trades opened before the cut but
+  // closed after it are counted out-of-sample although their entry was decided in-sample;
+  // the count stays visible so the held-out sample is not read as fully independent.
+  const straddling = outOfSample.filter((t) => Date.parse(t.openedAt) < c).length;
+  return { cut, inSample: metrics(inSample), outOfSample: metrics(outOfSample), straddling };
+}
+
+/** `months` after `from` in UTC, the day clamped to the month's length (31 Jan + 1 → 28/29 Feb). */
+function addMonths(from: Date, months: number): Date {
+  const y = from.getUTCFullYear();
+  const m = from.getUTCMonth() + months;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(
+    Date.UTC(
+      y,
+      m,
+      Math.min(from.getUTCDate(), last),
+      from.getUTCHours(),
+      from.getUTCMinutes(),
+      from.getUTCSeconds(),
+      from.getUTCMilliseconds(),
+    ),
+  );
+}
+
+/**
+ * Consecutive windows of `windowMonths` over [from, to). The last window is cut at `to`: no
+ * trade closed at or after `to` is counted. Each window is anchored to `from` (no day drift).
+ */
 export function walkForward(
   trades: readonly ResearchTrade[],
   from: string,
   to: string,
   windowMonths: number,
 ): { from: string; to: string; metrics: Metrics }[] {
+  const start0 = instant('from', from);
+  const end = instant('to', to);
+  if (!Number.isInteger(windowMonths) || windowMonths < 1)
+    throw new Error(`windowMonths must be a positive whole number, got ${windowMonths}`);
+  if (start0 >= end) throw new Error('walk-forward needs from < to');
+  assertDated(trades);
+  const origin = new Date(start0);
   const out: { from: string; to: string; metrics: Metrics }[] = [];
-  let start = new Date(from);
-  const end = Date.parse(to);
-  while (start.getTime() < end) {
-    const next = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + windowMonths, start.getUTCDate()),
-    );
-    const w = trades.filter(
-      (t) => Date.parse(t.closedAt) >= start.getTime() && Date.parse(t.closedAt) < next.getTime(),
-    );
+  for (let k = 0; ; k++) {
+    const lo = addMonths(origin, k * windowMonths).getTime();
+    if (lo >= end) break;
+    const hi = Math.min(addMonths(origin, (k + 1) * windowMonths).getTime(), end);
+    const w = trades.filter((t) => {
+      const c = Date.parse(t.closedAt);
+      return c >= lo && c < hi;
+    });
     out.push({
-      from: start.toISOString().slice(0, 10),
-      to: new Date(Math.min(next.getTime(), end)).toISOString().slice(0, 10),
+      from: new Date(lo).toISOString().slice(0, 10),
+      to: new Date(hi).toISOString().slice(0, 10),
       metrics: metrics(w),
     });
-    start = next;
   }
   return out;
 }
@@ -79,8 +125,10 @@ export function monteCarlo(
   opts: { runs?: number; seed?: number; depthsR?: readonly number[] } = {},
 ): MonteCarlo | null {
   const rs = trades.map((t) => t.r).filter((r): r is number => r !== null);
+  if (rs.some((r) => !Number.isFinite(r))) throw new Error('Monte Carlo needs finite R values');
   if (rs.length === 0) return null;
   const runs = opts.runs ?? 5_000;
+  if (!Number.isInteger(runs) || runs < 1) throw new Error(`runs must be a positive whole number`);
   const seed = opts.seed ?? 20_260_928;
   const depths = opts.depthsR ?? [4, 8, 12, 20];
   const next = rng(seed);
