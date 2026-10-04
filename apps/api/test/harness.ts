@@ -37,7 +37,11 @@ export interface Harness {
   runtime: AstraRuntime;
   clock: ManualClock;
   db: TestDb;
+  /** A second, competing runtime on the same database (own pool); close it when done. */
+  competitor(): Promise<{ runtime: AstraRuntime; close(): Promise<void> }>;
   restart(): Promise<Harness>;
+  /** A REAL crash seam: the owner's lock backend dies and runtime.stop() never runs (stays DIRTY). */
+  crash(): Promise<Harness>;
   close(): Promise<void>;
 }
 
@@ -45,7 +49,7 @@ async function boot(
   sql: Sql,
   clock: ManualClock,
   opts: HarnessOptions,
-): Promise<Omit<Harness, 'restart' | 'close' | 'db'>> {
+): Promise<Omit<Harness, 'restart' | 'crash' | 'close' | 'db' | 'competitor'>> {
   const log = pino({ level: 'silent' });
   const runtime = new AstraRuntime({
     config: CONFIG,
@@ -58,8 +62,10 @@ async function boot(
     feeds: opts.feeds,
     feedTransport: opts.feedTransport,
     startLoops: false,
+    ownerKeepaliveMs: 0,
     aiProviders: opts.aiProviders,
   });
+  opts.prepare?.(runtime); // fault-injection seam: before the startup sequence
   await runtime.start();
   const app = await buildApp({
     runtime,
@@ -79,6 +85,8 @@ export interface HarnessOptions {
   /** Free chart feeds with fake network seams (default: none). */
   feeds?: FeedId[];
   feedTransport?: FeedTransport;
+  /** Called with the runtime BEFORE start (fault injection). Applies to restarts as well. */
+  prepare?: (runtime: AstraRuntime) => void;
   /** AI providers as the entry point would build them from environment keys (default: none). */
   aiProviders?: ReadonlyMap<string, AiProvider>;
 }
@@ -94,6 +102,47 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
       async restart() {
         await h.app.close();
         await h.runtime.stop();
+        const sql2 = createDb({
+          url:
+            process.env.TEST_DATABASE_URL ??
+            'postgres://astra:astra_dev_only@localhost:5432/astra_test',
+          schema: db.schema,
+          maxConnections: 5,
+        });
+        return make(sql2);
+      },
+      async competitor() {
+        const sql2 = createDb({
+          url:
+            process.env.TEST_DATABASE_URL ??
+            'postgres://astra:astra_dev_only@localhost:5432/astra_test',
+          schema: db.schema,
+          maxConnections: 5,
+        });
+        const runtime = new AstraRuntime({
+          config: CONFIG,
+          sql: sql2,
+          clock,
+          log: pino({ level: 'silent' }),
+          runMigrations: false,
+          liveTradingAuthorized: false,
+          simulation: false,
+          startLoops: false,
+          ownerKeepaliveMs: 0,
+        });
+        await runtime.start();
+        return {
+          runtime,
+          async close() {
+            await runtime.stop().catch(() => undefined);
+            await sql2.end({ timeout: 5 });
+          },
+        };
+      },
+      async crash() {
+        const pid = h.runtime.execution.ownerBackendPid();
+        await h.app.close();
+        if (pid !== null) await db.sql`select pg_terminate_backend(${pid})`;
         const sql2 = createDb({
           url:
             process.env.TEST_DATABASE_URL ??

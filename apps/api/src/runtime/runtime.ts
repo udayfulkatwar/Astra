@@ -41,6 +41,7 @@ import {
   MarketBarRepository,
   NewsRepository,
   PaperBrokerStateRepository,
+  PaperOwnerRepository,
   ReportRepository,
   SystemStateRepository,
   migrate,
@@ -97,6 +98,8 @@ export interface RuntimeOptions {
   /** Start the periodic safety loop (tests drive cycles manually). */
   readonly startLoops: boolean;
   readonly initRetryMs?: number;
+  /** Paper ownership re-check interval in ms (0 = timer off; boundary checks always run). */
+  readonly ownerKeepaliveMs?: number;
   /** Real AI providers, built by the entry point from environment keys (none: AI unavailable). */
   readonly aiProviders?: ReadonlyMap<string, AiProvider>;
 }
@@ -118,6 +121,7 @@ export class AstraRuntime {
     execution: ExecutionRepository;
     accounts: AccountRepository;
     paperState: PaperBrokerStateRepository;
+    paperOwner: PaperOwnerRepository;
     marketBars: MarketBarRepository;
     journal: JournalRepository;
     backtests: BacktestRepository;
@@ -192,6 +196,7 @@ export class AstraRuntime {
       execution: new ExecutionRepository(sql),
       accounts: new AccountRepository(sql),
       paperState: new PaperBrokerStateRepository(sql),
+      paperOwner: new PaperOwnerRepository(sql),
       marketBars: new MarketBarRepository(sql),
       journal: new JournalRepository(sql),
       backtests: new BacktestRepository(sql),
@@ -277,6 +282,8 @@ export class AstraRuntime {
       config,
       store: this.repos.execution,
       paperState: this.repos.paperState,
+      paperOwner: this.repos.paperOwner,
+      ...(opts.ownerKeepaliveMs !== undefined ? { ownerKeepaliveMs: opts.ownerKeepaliveMs } : {}),
       mode: this.mode,
       killSwitches: this.killSwitches,
       health: this.health,
@@ -290,7 +297,7 @@ export class AstraRuntime {
           ? this.preSubmit.revalidate(req)
           : Promise.reject(new Error('pre-submit validator not bound')),
     });
-    this.market.onQuote((q) => this.execution.paper().onQuote(q));
+    this.market.onQuote((q) => this.execution.onQuote(q));
     this.journal = new JournalService({
       config,
       clock,
@@ -520,6 +527,8 @@ export class AstraRuntime {
     await this.ai.load();
     await this.restoreCalendarSafely();
     await this.health.seedFromHeartbeats();
+    // DIRTY ownership is ACKed before any paper state is restored, mutated or read.
+    await this.execution.acquireOwnership();
     await this.execution.restorePaperAccounts();
     await this.execution.reconcileAll();
     const warmed = await this.market.warmUp(this.repos.marketBars);
@@ -800,6 +809,6 @@ export class AstraRuntime {
     }
     await this.calendarStored;
     await this.barPersister.flush();
-    await this.execution.flush();
+    await this.execution.shutdown(); // rejects if the clean checkpoint could not be ACKed
   }
 }

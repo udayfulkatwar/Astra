@@ -682,6 +682,9 @@ export class ExecutionGateway {
       rejectReason: reason,
       updatedAt: clock.now().toISOString(),
     };
+    // Each durable step reports its REAL outcome: a failed write is never presented as recorded.
+    // (The DIRTY paper-session marker, written before any interaction, still covers a restart.)
+    const failed: string[] = [];
     try {
       await store.updateOrder(order.clientOrderId, unknownState);
       await store.appendOrderEvent({
@@ -690,15 +693,21 @@ export class ExecutionGateway {
         type: 'STATE_UNKNOWN',
         detail: { reason },
       });
-    } catch {
-      // Still UNKNOWN: the stored order stays PENDING_SUBMIT/dispatched, which restart treats as unresolved.
+    } catch (err) {
+      // The stored order stays PENDING_SUBMIT/dispatched, which restart treats as unresolved.
+      failed.push(`UNKNOWN state/evidence NOT recorded (${errorMessage(err)})`);
     }
     try {
       await this.deps.onExecutionUnknown(order.accountId, order.clientOrderId, reason);
-    } catch {
+    } catch (err) {
       // The reservation still blocks new entries; reconciliation resolves the order.
+      failed.push(`execution halt NOT persisted (${errorMessage(err)})`);
     }
-    return { outcome: 'UNKNOWN', reasons: [reason], order, brokerState: unknownState };
+    const detail =
+      failed.length > 0
+        ? `${reason}; persistence incomplete: ${failed.join('; ')}; the reservation is kept and the account needs recovery`
+        : reason;
+    return { outcome: 'UNKNOWN', reasons: [detail], order, brokerState: unknownState };
   }
 
   /**

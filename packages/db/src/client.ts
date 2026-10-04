@@ -12,7 +12,26 @@ export interface DbOptions {
   readonly applicationName?: string;
 }
 
+const origins = new WeakMap<object, DbOptions>();
+
+/**
+ * A separate single-connection client with the same target as `sql`. Session-level state that
+ * must live and die with ONE connection (the paper-owner advisory lock) uses this instead of a
+ * reserved pool connection, so killing that backend never disturbs the shared pool.
+ */
+export function dedicatedClient(sql: Sql, applicationName = 'astra-dedicated'): Sql {
+  const o = origins.get(sql);
+  if (!o) throw new Error('dedicatedClient requires a client created by createDb');
+  return createDb({ ...o, maxConnections: 1, applicationName });
+}
+
 export function createDb(opts: DbOptions): Sql {
+  const sql = createPool(opts);
+  origins.set(sql, opts);
+  return sql;
+}
+
+function createPool(opts: DbOptions): Sql {
   return postgres(opts.url, {
     max: opts.maxConnections ?? 10,
     idle_timeout: 30,

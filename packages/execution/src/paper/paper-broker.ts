@@ -95,6 +95,12 @@ export interface PaperBrokerOptions {
   readonly fillSlippageTicks?: number;
   /** Called after any change to an account's state (so the caller can persist it). */
   readonly onChange?: (accountRef: string) => void;
+  /**
+   * Returns a reason while this process must not mutate or read paper state (ownership not yet
+   * ACKed as DIRTY, ownership lost, persistence failed, shutting down). Quotes are then ignored and
+   * every interaction rejects. Wired in production; absent only in unit fixtures.
+   */
+  readonly blocked?: () => string | null;
 }
 
 /** Serializable paper account state (persisted so paper trading survives restarts). */
@@ -178,6 +184,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
   /** Feeds a quote: fills or expires resting LIMIT entries, then triggers stops/targets. */
   onQuote(quote: Quote): void {
+    if (this.opts.blocked?.()) return; // not the DIRTY owner: no mutation, no cache
     this.quotes.set(quote.symbol, quote);
     for (const [ref, acct] of this.accounts) {
       // Entries first: a position just filled is exposed to this same quote (pessimistic).
@@ -216,7 +223,15 @@ export class PaperBrokerAdapter implements BrokerAdapter {
     }
   }
 
+  /** Rejects (as a failed broker call) while the owner guard blocks paper interaction. */
+  private blockedCall(): Promise<never> | null {
+    const why = this.opts.blocked?.();
+    return why ? Promise.reject(new Error(`paper broker unavailable: ${why}`)) : null;
+  }
+
   submitOrder(req: OrderRequest): Promise<BrokerOrderState> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     const acct = this.account(req.accountRef);
     const existing = acct.orders.get(req.clientOrderId);
     if (existing) return Promise.resolve(existing); // idempotent
@@ -273,6 +288,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   getOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState | null> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     this.expireDue(accountRef);
     return Promise.resolve(this.account(accountRef).orders.get(clientOrderId) ?? null);
   }
@@ -297,6 +314,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   cancelOrder(accountRef: string, clientOrderId: string): Promise<BrokerOrderState> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     const acct = this.account(accountRef);
     const o = acct.orders.get(clientOrderId);
     if (!o) return Promise.reject(new AstraError('NOT_FOUND', `order ${clientOrderId} not found`));
@@ -317,6 +336,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   listOpenOrders(accountRef: string): Promise<BrokerOrderState[]> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     this.expireDue(accountRef);
     return Promise.resolve(
       [...this.account(accountRef).orders.values()].filter((o) =>
@@ -326,6 +347,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   getAccountSnapshot(accountRef: string, accountId: string): Promise<AccountSnapshot> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     this.expireDue(accountRef);
     const acct = this.account(accountRef);
     let floating = ZERO;
@@ -370,6 +393,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
   }
 
   closePosition(req: ClosePositionRequest): Promise<ClosePositionResult> {
+    const blocked = this.blockedCall();
+    if (blocked) return blocked;
     const acct = this.account(req.accountRef);
     const previous = acct.closes.get(req.clientCloseId);
     if (previous) return Promise.resolve(previous); // idempotent
@@ -416,6 +441,8 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
   /** Test/operator helper: close a position at the current market. */
   closeAtMarket(accountRef: string, positionId: string): void {
+    const why = this.opts.blocked?.();
+    if (why) throw new Error(`paper broker unavailable: ${why}`);
     const pos = this.account(accountRef).positions.get(positionId);
     if (!pos) throw new AstraError('NOT_FOUND', `position ${positionId} not found`);
     const q = this.quotes.get(pos.symbol);
