@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { initAccountTracking, mergeAccountTracking, updateAccountTracking } from '../src/tracking';
+import {
+  initAccountTracking,
+  mergeAccountTracking,
+  unresolvedDayConflicts,
+  updateAccountTracking,
+} from '../src/tracking';
 import { makeSnapshot, makeTracking } from './fixtures';
 
 const reset = { timeZone: 'America/New_York', time: '17:00' };
@@ -42,7 +47,9 @@ describe('account tracking', () => {
       opts,
     );
     expect(t.tradingDayKey).toBe('2026-09-29');
-    expect(t.completedDays).toEqual([{ day: '2026-09-28', pnl: 400 }]);
+    expect(t.completedDays).toEqual([
+      { day: '2026-09-28', pnl: 400, basisAt: '2026-09-28T20:59:00.000Z' },
+    ]);
     expect(t.endOfDayBalancePeak).toBe(50_400);
     expect(t.dayStartBalance).toBe(50_400);
     expect(t.dayStartEquity).toBe(50_350);
@@ -182,7 +189,10 @@ describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
     });
   });
 
-  it('a measured day-start beats a late guess, in either order', () => {
+  // S001-R3 (finding 3): this test used to let a more trusted source LOWER the same-day reference
+  // (51 000 → 50 000). Without separately evidenced, audited correction the reference never
+  // decreases within a day; the label then names the (weaker) source that supplied the kept values.
+  it('same day: a more trusted source cannot lower the reference, in either order', () => {
     const measured = sameDay({
       dayStartBalance: 50_000,
       dayStartEquity: 50_000,
@@ -200,9 +210,9 @@ describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
       mergeAccountTracking(guess, { ...measured, updatedAt: '2026-09-28T22:10:00.000Z' }),
     ]) {
       expect(m).toMatchObject({
-        dayStartBalance: 50_000,
-        dayStartEquity: 50_000,
-        dayStartSource: 'OBSERVED_AT_RESET',
+        dayStartBalance: 51_000,
+        dayStartEquity: 51_000,
+        dayStartSource: 'OBSERVED_LATE',
       });
     }
   });
@@ -273,5 +283,124 @@ describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
     expect(() => mergeAccountTracking(base, { ...base, accountId: 'other' })).toThrow(
       /different accounts/,
     );
+  });
+});
+
+describe('S001-R3: same-day references and completed-day evidence', () => {
+  const D = '2026-09-28';
+  const t = (o: Partial<Parameters<typeof makeTracking>[0]> = {}) =>
+    makeTracking({ tradingDayKey: D, ...o });
+
+  it('same day: a higher-ranked source never lowers either reference; mixed suppliers take the weaker label', () => {
+    const late = t({
+      dayStartBalance: 50_500,
+      dayStartEquity: 50_400,
+      dayStartSource: 'OBSERVED_LATE',
+      updatedAt: '2026-09-28T15:00:00.000Z',
+    });
+    const reported = t({
+      dayStartBalance: 50_000,
+      dayStartEquity: 50_450,
+      dayStartSource: 'REPORTED',
+      updatedAt: '2026-09-28T15:01:00.000Z',
+    });
+    for (const m of [mergeAccountTracking(late, reported), mergeAccountTracking(reported, late)])
+      expect(m).toMatchObject({
+        dayStartBalance: 50_500,
+        dayStartEquity: 50_450,
+        dayStartSource: 'OBSERVED_LATE', // values from both: claim no more trust than the weaker
+      });
+    // Equal values from both: the more trusted label may stand (it measured exactly that value).
+    expect(
+      mergeAccountTracking(late, { ...reported, dayStartBalance: 50_500, dayStartEquity: 50_400 }),
+    ).toMatchObject({ dayStartBalance: 50_500, dayStartSource: 'REPORTED' });
+  });
+
+  it("genuine day reset: the new day's (lower, REPORTED) references apply; a same-day REPORTED value would not", () => {
+    const yesterday = t({
+      dayStartBalance: 50_800,
+      dayStartEquity: 50_800,
+      dayStartSource: 'OBSERVED_LATE',
+      lastBalance: 50_700,
+      updatedAt: '2026-09-28T20:50:00.000Z',
+    });
+    const today = updateAccountTracking(
+      yesterday,
+      makeSnapshot({
+        asOf: '2026-09-29T02:00:00.000Z',
+        balance: 50_700,
+        equity: 50_700,
+        reported: { dayStartBalance: 50_650, dayStartEquity: 50_650 },
+      }),
+      opts,
+    );
+    const m = mergeAccountTracking(yesterday, today);
+    expect(m).toMatchObject({
+      tradingDayKey: '2026-09-29',
+      dayStartBalance: 50_650,
+      dayStartSource: 'REPORTED',
+    });
+    expect(m.completedDays).toEqual([{ day: D, pnl: -100, basisAt: yesterday.updatedAt }]);
+    expect(m.completedDayConflicts).toBeUndefined();
+  });
+
+  it("conflicting day P&L is resolved only by a strictly later observation of THAT day, never by the writer's current timestamp; the loser is kept", () => {
+    const correct = { day: '2026-09-25', pnl: 1_000, basisAt: '2026-09-25T20:55:00.000Z' };
+    const staleEntry = { day: '2026-09-25', pnl: 100, basisAt: '2026-09-25T19:00:00.000Z' };
+    const stored = t({ completedDays: [correct], updatedAt: '2026-09-28T15:00:00.000Z' });
+    const staleWriter = t({ completedDays: [staleEntry], updatedAt: '2026-09-28T15:30:00.000Z' });
+    for (const m of [
+      mergeAccountTracking(stored, staleWriter),
+      mergeAccountTracking(staleWriter, { ...stored, updatedAt: '2026-09-28T16:00:00.000Z' }),
+    ]) {
+      expect(m.completedDays).toEqual([correct]);
+      expect(m.completedDayConflicts).toEqual([
+        { day: '2026-09-25', kept: correct, other: staleEntry, resolution: 'LATER_BASIS' },
+      ]);
+      expect(unresolvedDayConflicts(m)).toEqual([]);
+    }
+  });
+
+  it('unorderable contradictory history (no basis, or equal basis) is UNRESOLVED: kept, sticky, fails closed', () => {
+    const a = t({ completedDays: [{ day: '2026-09-25', pnl: 300 }] });
+    const b = t({
+      completedDays: [{ day: '2026-09-25', pnl: 900 }],
+      updatedAt: '2026-09-28T14:00:00.000Z',
+    });
+    const m = mergeAccountTracking(a, b);
+    expect(m.completedDays).toEqual([{ day: '2026-09-25', pnl: 900 }]); // stricter consistency input
+    expect(unresolvedDayConflicts(m)).toHaveLength(1);
+    // A writer that never saw the conflict cannot drop it; idempotent on repeat.
+    const again = mergeAccountTracking(m, t({ updatedAt: '2026-09-28T14:30:00.000Z' }));
+    expect(mergeAccountTracking(again, m).completedDayConflicts).toHaveLength(1);
+    const sameBasis = '2026-09-25T20:00:00.000Z';
+    const eq = mergeAccountTracking(
+      t({ completedDays: [{ day: '2026-09-25', pnl: 1, basisAt: sameBasis }] }),
+      t({ completedDays: [{ day: '2026-09-25', pnl: 2, basisAt: sameBasis }] }),
+    );
+    expect(unresolvedDayConflicts(eq)).toHaveLength(1);
+  });
+
+  it("a writer still on a day the other already closed contributes that day's later closing observation (and its end-of-day balance)", () => {
+    // Stored: still on D at 20:55 with the latest pre-reset balance 51 000.
+    const stored = t({
+      dayStartBalance: 50_000,
+      lastBalance: 51_000,
+      balancePeak: 51_000,
+      equityPeak: 51_000,
+      updatedAt: '2026-09-28T20:55:00.000Z',
+    });
+    // Incoming: rolled into D+1 from an older read (19:00, balance 50 100) → D P&L 100.
+    const older = t({ lastBalance: 50_100, updatedAt: '2026-09-28T19:00:00.000Z' });
+    const incoming = updateAccountTracking(
+      older,
+      makeSnapshot({ asOf: '2026-09-28T21:00:20.000Z', balance: 51_000, equity: 51_000 }),
+      opts,
+    );
+    const m = mergeAccountTracking(stored, incoming);
+    expect(m.tradingDayKey).toBe('2026-09-29');
+    expect(m.completedDays).toEqual([{ day: D, pnl: 1_000, basisAt: stored.updatedAt }]);
+    expect(m.endOfDayBalancePeak).toBe(51_000);
+    expect(unresolvedDayConflicts(m)).toEqual([]);
   });
 });

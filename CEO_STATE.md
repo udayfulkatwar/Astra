@@ -2,18 +2,22 @@
 
 Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL.
 
-| Item              | Value                                                                                        |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| Current candidate | `claude/s001-execution-safety` (from I001 `f0d79a71981036b6c06d51fdbd2768124a3d07e6`)        |
-| Stage             | S001 P0 execution safety: IN_PROGRESS (implementation done; CI + independent review pending) |
-| Current task      | S001 — fresh pre-submit validation and durable account-wide reservations (ADR-0027)          |
-| Not started       | Any next major task (none until independent review of S001)                                  |
+| Item              | Value                                                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted                                                                                           |
+| Current candidate | `claude/s001-r3-risk-repair` (from reviewed `claude/s001-execution-safety` `ba8c487`; head and tested SHA in `RELEASE_EVIDENCE.md`)              |
+| Active task       | S001-R3 — bounded critical account-risk repair (third review escalation): implementation done, independent CEO review pending                    |
+| Prior reviews     | S001 candidate `c765554`/`6caeb71`: FAIL. S001 round 2 `ce12040`/`ba8c487`: FAIL (released-row bypass, migration 0011 gaps, tracking weakenings) |
+| Not started       | Any next task (none until the independent review of S001-R3)                                                                                     |
+
+Technical decisions (architecture, safety design, tests, migrations) are made by engineering and
+recorded in ADRs; they are not owner-managed.
 
 ## Blockers
 
-- BLOCKED for LIVE: real-broker adapter must supply position ↔ order linkage / closed trades keyed by `clientOrderId` (ADR-0027). Paper only today.
+- BLOCKED for LIVE: real-broker adapter must supply position ↔ order linkage / closed trades keyed by `clientOrderId` (ADR-0027). Paper only today. Live trading is DISABLED.
 - BLOCKED: no strategy has a verified edge (see `RESEARCH_REGISTRY.md`); nothing is approved for trading.
-- Independent acceptance and CI of S001: NOT_STARTED (owner's reviewer).
+- An account quarantine (ADR-0027 §8) or an unresolved completed-day history conflict has NO clearing path yet: it blocks the account until an audited reconciliation is built.
 
 ## Accepted safety rules
 
@@ -21,15 +25,25 @@ Default NO TRADE; any non-OK input rejects; no fabricated data/rules; AI context
 approve); risk, sizing, rules, kill switches and execution permission are deterministic code;
 secrets only via env; live trading never enabled without ADR-0008's six factors; a missing
 revalidation/reservation input blocks transmission; reservations release only on authoritative
-evidence; conservative refusal over invented headroom.
+evidence; evidence contradicting a released reservation quarantines the account durably (never a
+silent re-open or a time-based expiry); conservative refusal over invented headroom.
 
-## Next 3 priorities
+## Next priorities (in order)
 
-1. Independent review/CI of S001 (owner).
-2. Real-broker adapter position↔order linkage + audited operator release of orphaned reservations (needs owner's platform).
-3. Research on verifiable modern data (R001 route); no strategy promoted meanwhile.
+1. Finish the independent risk review of S001-R3 (CEO).
+2. Separate bounded task: queued cancel / protective-close permission re-checks (deliberately not changed in R3 beyond contradiction propagation).
+3. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
+4. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
 
 ## Founder-only decisions
 
-Platform/broker and credentials; firm and account rules verification; strategy selection and
-rules; the six live-trading factors (ADR-0008); any live authorization; budgets/paid services.
+Money (budgets, paid services), legal matters, credentials, and financial authorization —
+including the six live-trading factors (ADR-0008), platform/broker accounts and verification of
+the firm's rules.
+
+## Process lesson (S001-R3)
+
+A previous text replacement silently missed `freshTracking` after formatting changed the code it
+was meant to match. Every scripted edit must assert its expected match count, the diff must be
+read, and the regression must exercise the exact production path (here `AccountService.tracking()`
+and `freshTracking()` are both tested through the composed runtime).

@@ -185,15 +185,34 @@ export interface ExposureReservation {
   readonly reservedAt: string;
 }
 
+/**
+ * A durable, account-wide block on NEW entries (ADR-0027 §8): broker evidence contradicted an order
+ * whose reservation had already been released (e.g. REJECTED with nothing filled, then FILLED), or
+ * a migration found legacy exposure it could not represent safely. Every gateway and process sees
+ * it through the shared ledger; `reserveAndConsume` refuses while one is active. It never expires
+ * and nothing in ASTRA clears it automatically (no audited clearing rule exists yet).
+ */
+export interface AccountQuarantine {
+  readonly quarantineId: string;
+  readonly accountId: string;
+  /** The order whose evidence caused it (null for an account-level legacy finding). */
+  readonly clientOrderId: string | null;
+  readonly reason: string;
+  readonly createdAt: string;
+}
+
 /** The active reservations of one account with the ledger version they were read at. */
 export interface AccountExposure {
   readonly accountId: string;
   /** Bumped by every change to the account's reservations (optimistic concurrency token). */
   readonly version: number;
   readonly reservations: readonly ExposureReservation[];
+  /** Active quarantines: while any exists, no new entry may be reserved or transmitted. */
+  readonly quarantines: readonly AccountQuarantine[];
 }
 
 export type ReserveFailure =
+  | 'ACCOUNT_QUARANTINED'
   | 'LEDGER_CHANGED'
   | 'APPROVAL_NOT_PENDING'
   | 'APPROVAL_EXPIRED'
@@ -224,6 +243,10 @@ export interface ExecutionStore {
    * Applies broker evidence. Fills only ever grow and the lifecycle only moves forward: evidence
    * that contradicts what is known is NOT applied as stated — the order becomes UNKNOWN, its
    * reservation is kept, and `contradiction` says why (callers must halt/poll, never assume).
+   * An order with NO active reservation (released, or never reserved) is judged against its
+   * recorded end state (the tombstone, never modified): anything but a consistent repeat — a late
+   * fill, a different ending, a working state, UNKNOWN — durably quarantines the account in the
+   * same transaction (ledger version bumped) and is reported as a contradiction.
    */
   updateOrder(clientOrderId: string, state: BrokerOrderState): Promise<OrderUpdateResult>;
   appendOrderEvent(event: OrderEvent): Promise<void>;
@@ -232,7 +255,8 @@ export interface ExecutionStore {
   /** Active reservations of the account (all symbols) and the ledger version they were read at. */
   accountExposure(accountId: string): Promise<AccountExposure>;
   /**
-   * ONE atomic step under the account's shared lock: the ledger version must still equal
+   * ONE atomic step under the account's shared lock: the account must not be quarantined, the
+   * ledger version must still equal
    * `expectedVersion`, the approval must still be PENDING and unexpired at `at`, and the account
    * must hold no active reservation for the symbol; then the approval is consumed and the order,
    * its reservation and the SUBMIT_REQUESTED intent are written together — or nothing is.
@@ -243,7 +267,10 @@ export interface ExecutionStore {
     at: string;
     intent: Record<string, unknown>;
   }): Promise<ReserveResult>;
-  /** Durably records that the submit call is about to start. Must throw if it cannot. */
+  /**
+   * Durably records that the submit call is about to start. Must throw if it cannot, or if the
+   * account is quarantined.
+   */
   markDispatching(clientOrderId: string, at: string): Promise<void>;
   /**
    * Marks an order the broker was never contacted for as REJECTED and releases its reservation.

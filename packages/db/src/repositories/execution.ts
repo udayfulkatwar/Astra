@@ -1,9 +1,15 @@
 /** ExecutionStore backed by PostgreSQL. Uniqueness is enforced by the schema, not by hope. */
-import { AstraError, type Direction, type EntryType, type TradingMode } from '@astra/core';
+import { AstraError, newId, type Direction, type EntryType, type TradingMode } from '@astra/core';
 import type { ApprovedOrderPlan } from '@astra/decision';
-import { applyOrderState, confirmedClosures } from '@astra/execution';
+import {
+  applyOrderState,
+  confirmedClosures,
+  contradictedFill,
+  evidenceAfterRelease,
+} from '@astra/execution';
 import type {
   AccountExposure,
+  AccountQuarantine,
   ApprovalRecord,
   ApprovalState,
   BrokerOrderState,
@@ -93,6 +99,32 @@ interface ReservationRow {
   order_status: OrderStatus;
   dispatched_at: Date | null;
   reserved_at: Date;
+  released_at: Date | null;
+  release_reason: string | null;
+}
+
+interface QuarantineRow {
+  id: string;
+  account_id: string;
+  client_order_id: string | null;
+  reason: string;
+  created_at: Date;
+}
+
+const mapQuarantine = (q: QuarantineRow): AccountQuarantine => ({
+  quarantineId: q.id,
+  accountId: q.account_id,
+  clientOrderId: q.client_order_id,
+  reason: q.reason,
+  createdAt: iso(q.created_at)!,
+});
+
+/** Active quarantines of an account (call with the ledger locked for a consistent answer). */
+async function activeQuarantines(tx: Queryable, accountId: string): Promise<AccountQuarantine[]> {
+  const rows = await tx<QuarantineRow[]>`
+    select id, account_id, client_order_id, reason, created_at from exposure_quarantines
+     where account_id = ${accountId} and cleared_at is null order by created_at, id`;
+  return rows.map(mapQuarantine);
 }
 
 function mapReservation(r: ReservationRow): ExposureReservation {
@@ -250,21 +282,21 @@ export class ExecutionRepository implements ExecutionStore {
     return this.sql.begin(async (tx) => {
       const accountId = await accountOf(tx, clientOrderId);
       await lockLedger(tx, accountId, s.updatedAt);
+      // client_order_id is unique: this is the order's reservation, active or released.
       const rows = await tx<ReservationRow[]>`
-        select * from exposure_reservations where client_order_id = ${clientOrderId} and released_at is null for update`;
-      const u = rows[0] ? applyOrderState(mapReservation(rows[0]), s) : null;
-      const status = u ? u.orderStatus : s.status;
-      const filled = u ? u.filledQuantity : s.filledQuantity;
-      const avg = u ? u.averageFillPrice : s.averageFillPrice;
-      const reason = u?.contradiction
+        select * from exposure_reservations where client_order_id = ${clientOrderId} for update`;
+      const row = rows[0];
+      if (!row || row.released_at !== null)
+        return this.afterRelease(tx, accountId, clientOrderId, row ?? null, s);
+      const u = applyOrderState(mapReservation(row), s);
+      const reason = u.contradiction
         ? `contradictory broker evidence: ${u.contradiction}`
         : s.rejectReason;
       await tx`
-        update orders set status = ${status}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
-               filled_quantity = ${filled}, average_fill_price = ${avg},
+        update orders set status = ${u.orderStatus}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
+               filled_quantity = ${u.filledQuantity}, average_fill_price = ${u.averageFillPrice},
                reject_reason = ${reason}, updated_at = ${s.updatedAt}
          where client_order_id = ${clientOrderId}`;
-      if (!u) return { contradiction: null };
       await tx`
         update exposure_reservations
            set reserved_quantity = ${u.reservedQuantity}, filled_quantity = ${u.filledQuantity},
@@ -279,6 +311,80 @@ export class ExecutionRepository implements ExecutionStore {
       await bumpLedger(tx, accountId, s.updatedAt);
       return { contradiction: u.contradiction };
     });
+  }
+
+  /**
+   * Evidence for an order with no ACTIVE reservation, judged against its tombstone (the released
+   * row, never modified here, or the order record if it was never reserved). A consistent repeat
+   * changes nothing. A contradiction marks the order UNKNOWN, appends the evidence and — once per
+   * order — durably quarantines the ACCOUNT and bumps the ledger, all in the caller's transaction
+   * under the ledger lock. It never re-activates the released row, so it can neither collide with
+   * nor erase a newer reservation on the same symbol.
+   */
+  private async afterRelease(
+    tx: Queryable,
+    accountId: string,
+    clientOrderId: string,
+    released: ReservationRow | null,
+    s: BrokerOrderState,
+  ): Promise<OrderUpdateResult> {
+    const orders = await tx<OrderRow[]>`
+      select * from orders where client_order_id = ${clientOrderId} for update`;
+    const o = mapOrder(orders[0]!);
+    const contradiction = evidenceAfterRelease(
+      released
+        ? { ...mapReservation(released), releaseReason: released.release_reason }
+        : { ...o, orderStatus: o.status, releaseReason: null },
+      s,
+    );
+    if (!contradiction) {
+      await tx`
+        update orders set broker_order_id = coalesce(broker_order_id, ${s.brokerOrderId})
+         where client_order_id = ${clientOrderId}`;
+      return { contradiction: null };
+    }
+    await tx`
+      update orders set status = 'UNKNOWN', broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
+             filled_quantity = ${contradictedFill(o.filledQuantity, s)},
+             average_fill_price = ${s.averageFillPrice ?? o.averageFillPrice},
+             reject_reason = ${`contradictory broker evidence: ${contradiction}`}, updated_at = ${s.updatedAt}
+       where client_order_id = ${clientOrderId}`;
+    await tx`
+      insert into order_events (client_order_id, at, type, detail)
+      values (${clientOrderId}, ${s.updatedAt}, 'STATE_CONTRADICTORY',
+              ${jsonb(tx, { reason: contradiction, incoming: { ...s }, afterRelease: true })})`;
+    const created = await tx<{ id: string }[]>`
+      insert into exposure_quarantines (id, account_id, client_order_id, reason, evidence, created_at)
+      values (${newId('quarantine')}, ${accountId}, ${clientOrderId},
+              ${contradiction},
+              ${jsonb(tx, {
+                incoming: { ...s },
+                tombstone: released
+                  ? {
+                      orderStatus: released.order_status,
+                      filledQuantity: Number(released.filled_quantity),
+                      reservedQuantity: Number(released.reserved_quantity),
+                      releasedAt: iso(released.released_at),
+                      releaseReason: released.release_reason,
+                    }
+                  : { orderStatus: o.status, filledQuantity: o.filledQuantity, reserved: false },
+              })},
+              ${s.updatedAt})
+      on conflict do nothing
+      returning id`;
+    if (created[0]) {
+      await appendAuditInTx(tx, {
+        actor: { type: 'SYSTEM', id: 'execution-gateway' },
+        category: 'EXECUTION',
+        action: 'ACCOUNT_QUARANTINED',
+        entityType: 'order',
+        entityId: clientOrderId,
+        payload: { accountId, reason: contradiction },
+        at: s.updatedAt,
+      });
+      await bumpLedger(tx, accountId, s.updatedAt);
+    }
+    return { contradiction };
   }
 
   async appendOrderEvent(e: OrderEvent): Promise<void> {
@@ -305,6 +411,7 @@ export class ExecutionRepository implements ExecutionStore {
         accountId,
         version: ledger[0] ? Number(ledger[0].version) : 0,
         reservations: rows.map(mapReservation),
+        quarantines: await activeQuarantines(tx, accountId),
       };
     });
   }
@@ -321,6 +428,9 @@ export class ExecutionRepository implements ExecutionStore {
     try {
       return await this.sql.begin(async (tx): Promise<ReserveResult> => {
         const version = await lockLedger(tx, o.accountId, at);
+        const quarantine = (await activeQuarantines(tx, o.accountId))[0];
+        if (quarantine)
+          return refuse('ACCOUNT_QUARANTINED', `account quarantined: ${quarantine.reason}`);
         if (version !== req.expectedVersion)
           return refuse(
             'LEDGER_CHANGED',
@@ -384,6 +494,12 @@ export class ExecutionRepository implements ExecutionStore {
     await this.sql.begin(async (tx) => {
       const accountId = await accountOf(tx, clientOrderId);
       await lockLedger(tx, accountId, at);
+      const quarantine = (await activeQuarantines(tx, accountId))[0];
+      if (quarantine)
+        throw new AstraError(
+          'CONFLICT',
+          `account quarantined: ${quarantine.reason}; not dispatching`,
+        );
       const rows = await tx`
         update exposure_reservations set dispatched_at = ${at}
          where client_order_id = ${clientOrderId} and released_at is null returning id`;
@@ -410,7 +526,8 @@ export class ExecutionRepository implements ExecutionStore {
       await lockLedger(tx, accountId, at);
       const only = opts.onlyIfUndispatched === true;
       const rows = await tx`
-        update exposure_reservations set released_at = ${at}, release_reason = ${`not transmitted: ${reason}`}
+        update exposure_reservations set released_at = ${at}, release_reason = ${`not transmitted: ${reason}`},
+               order_status = 'REJECTED'
          where client_order_id = ${clientOrderId} and released_at is null
            and (${only} = false or dispatched_at is null)
         returning id`;

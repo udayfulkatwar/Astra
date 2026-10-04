@@ -176,6 +176,21 @@ export class ExecutionService {
     }
     // Exposure of ended orders is released only on closure linked to the same order.
     await this.deps.store.reconcileReservations(account.id, at());
+    // A durable quarantine (contradictory evidence after a release, unrepresentable legacy
+    // exposure) is never resolved by a restart: the account stays unreconciled and halted. The
+    // gate and the reservation step refuse on it in every process regardless.
+    const { quarantines } = await this.deps.store.accountExposure(account.id);
+    if (quarantines.length > 0) {
+      // Never overwrite an active switch (e.g. an operator's reason); the account stays halted.
+      if (this.deps.killSwitches.registry.get('EXECUTION', account.id)?.active) return;
+      await this.deps.killSwitches.activate({
+        scope: 'EXECUTION',
+        target: account.id,
+        reason: `account quarantined: ${quarantines.map((q) => q.reason).join('; ')}`,
+        actor: { type: 'SYSTEM', id: 'reconciliation' },
+      });
+      return;
+    }
     this.reconciled.add(account.id);
   }
 

@@ -708,12 +708,14 @@ describe.skipIf(!available)('migration 0011 backfill of unclosed ended orders', 
       // Fully linked closure and a rejection with nothing filled: nothing to hold.
       expect(by.has(ids.fullyClosed!)).toBe(false);
       expect(by.has(ids.rejectedNothing!)).toBe(false);
-      // Unknown legacy fill: the full approved quantity is held.
+      // Unknown legacy fill: the full approved quantity is held. (0011 labelled it FILLED, i.e.
+      // known exposure; the corrective 0012 makes it UNKNOWN and quarantines the account — S001-R3.)
       expect(by.get(ids.unknownFill!)).toMatchObject({
         reservedQuantity: 2,
         filledQuantity: 0,
-        orderStatus: 'FILLED',
+        orderStatus: 'UNKNOWN',
       });
+      expect(e.quarantines.map((q) => q.clientOrderId)).toEqual([ids.unknownFill]);
       expect(e.reservations).toHaveLength(4);
       expect(e.version).toBeGreaterThanOrEqual(1);
       // The partially closed one is released only when cumulative closures cover the fill.

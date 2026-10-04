@@ -39,3 +39,8 @@ Re-check the control plane after every await and right before submit; revalidate
 candidate with the existing engines on fresh data; reserve account-wide exposure in the same DB
 transaction that consumes the approval (ledger version = optimistic token, row lock = shared
 serialisation); release only on authoritative evidence; never net positions without order linkage.
+S001-R3: evidence about an order whose reservation was released is judged against the unchanged
+tombstone; anything but a consistent repeat durably quarantines the account (shared, enforced by
+the gate and the reservation step, no clearing path yet). Corrective migration `0012`. Tracking:
+same-day references never decrease; completed-day conflicts resolve only on per-day evidence,
+otherwise tracking fails closed.

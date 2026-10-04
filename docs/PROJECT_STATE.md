@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-10-04 (I001 integration) · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-04 (S001-R3 risk repair) · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -264,6 +264,12 @@ approval consumption, order, intent and an account-wide exposure reservation in 
 transaction guarded by a per-account ledger version. Release needs authoritative evidence.
 Evidence: `RELEASE_EVIDENCE.md`. Gaps: real-broker position↔order linkage (blocks LIVE),
 per-process paper broker, operator release of orphaned reservations (not built).
+
+**S001-R3 (review round 3, candidate `claude/s001-r3-risk-repair`, review pending):** evidence
+after a released reservation durably quarantines the account (ADR-0027 §8); corrective migration
+`0012` repairs prematurely released, uncovered rows and makes legacy unknown fills UNKNOWN +
+quarantined; tracking never lowers a same-day reference and fails closed on unresolvable
+completed-day conflicts. No clearing path for a quarantine exists yet. Stage 1 is NOT accepted.
 
 ## Remaining (by phase)
 

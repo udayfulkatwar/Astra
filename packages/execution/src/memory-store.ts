@@ -5,10 +5,16 @@
  * (no await between its check and its write), which is what makes it atomic here.
  */
 import { AstraError, newId } from '@astra/core';
-import { applyOrderState, confirmedClosures } from './reservations';
+import {
+  applyOrderState,
+  confirmedClosures,
+  contradictedFill,
+  evidenceAfterRelease,
+} from './reservations';
 import {
   isTerminal,
   type AccountExposure,
+  type AccountQuarantine,
   type ApprovalRecord,
   type ApprovalState,
   type BrokerOrderState,
@@ -23,6 +29,9 @@ import {
 interface Ledger {
   version: number;
   readonly active: Map<string, ExposureReservation>; // by clientOrderId
+  /** Released reservations, unchanged since release (evidence), by clientOrderId. */
+  readonly tombstones: Map<string, { reservation: ExposureReservation; reason: string }>;
+  readonly quarantines: AccountQuarantine[];
 }
 
 export class InMemoryExecutionStore implements ExecutionStore {
@@ -56,7 +65,7 @@ export class InMemoryExecutionStore implements ExecutionStore {
   private ledger(accountId: string): Ledger {
     let l = this.ledgers.get(accountId);
     if (!l) {
-      l = { version: 0, active: new Map() };
+      l = { version: 0, active: new Map(), tombstones: new Map(), quarantines: [] };
       this.ledgers.set(accountId, l);
     }
     return l;
@@ -90,41 +99,90 @@ export class InMemoryExecutionStore implements ExecutionStore {
     if (!o) return Promise.reject(new AstraError('NOT_FOUND', `order ${clientOrderId} not found`));
     const ledger = this.ledger(o.accountId);
     const r = ledger.active.get(clientOrderId);
-    const u = r ? applyOrderState(r, s) : null;
+    if (!r) return Promise.resolve(this.afterRelease(ledger, o, s));
+    const u = applyOrderState(r, s);
     this.orders.set(clientOrderId, {
       ...o,
-      status: u ? u.orderStatus : s.status,
+      status: u.orderStatus,
       brokerOrderId: s.brokerOrderId ?? o.brokerOrderId,
-      filledQuantity: u ? u.filledQuantity : s.filledQuantity,
-      averageFillPrice: u ? u.averageFillPrice : s.averageFillPrice,
-      rejectReason: u?.contradiction
+      filledQuantity: u.filledQuantity,
+      averageFillPrice: u.averageFillPrice,
+      rejectReason: u.contradiction
         ? `contradictory broker evidence: ${u.contradiction}`
         : s.rejectReason,
       updatedAt: s.updatedAt,
     });
-    if (r && u) {
-      if (u.release) {
-        this.release(ledger, r, u.release, s.updatedAt);
-      } else {
-        const { contradiction: _c, release: _r, ...fields } = u;
-        void _c;
-        void _r;
-        ledger.active.set(clientOrderId, { ...r, ...fields });
-        ledger.version++;
-      }
-      if (u.contradiction)
-        this.events.push({
-          clientOrderId,
-          at: s.updatedAt,
-          type: 'STATE_CONTRADICTORY',
-          detail: { reason: u.contradiction, incoming: { ...s } },
-        });
+    const { contradiction: _c, release: _r, ...fields } = u;
+    void _c;
+    void _r;
+    if (u.release) {
+      // The tombstone is the end state that justified the release.
+      this.release(ledger, { ...r, ...fields }, u.release, s.updatedAt);
+    } else {
+      ledger.active.set(clientOrderId, { ...r, ...fields });
+      ledger.version++;
     }
-    return Promise.resolve({ contradiction: u?.contradiction ?? null });
+    if (u.contradiction)
+      this.events.push({
+        clientOrderId,
+        at: s.updatedAt,
+        type: 'STATE_CONTRADICTORY',
+        detail: { reason: u.contradiction, incoming: { ...s } },
+      });
+    return Promise.resolve({ contradiction: u.contradiction });
+  }
+
+  /**
+   * Evidence for an order without an active reservation, judged against its unchanged tombstone.
+   * A contradiction quarantines the account (once per order; repeats change nothing durable but
+   * the evidence log) and never restores, erases or collides with any other reservation.
+   */
+  private afterRelease(ledger: Ledger, o: OrderRecord, s: BrokerOrderState): OrderUpdateResult {
+    const t = ledger.tombstones.get(o.clientOrderId);
+    const contradiction = evidenceAfterRelease(
+      t
+        ? { ...t.reservation, releaseReason: t.reason }
+        : { ...o, orderStatus: o.status, releaseReason: null },
+      s,
+    );
+    if (!contradiction) {
+      this.orders.set(o.clientOrderId, {
+        ...o,
+        brokerOrderId: o.brokerOrderId ?? s.brokerOrderId,
+      });
+      return { contradiction: null };
+    }
+    this.orders.set(o.clientOrderId, {
+      ...o,
+      status: 'UNKNOWN',
+      brokerOrderId: s.brokerOrderId ?? o.brokerOrderId,
+      filledQuantity: contradictedFill(o.filledQuantity, s),
+      averageFillPrice: s.averageFillPrice ?? o.averageFillPrice,
+      rejectReason: `contradictory broker evidence: ${contradiction}`,
+      updatedAt: s.updatedAt,
+    });
+    this.events.push({
+      clientOrderId: o.clientOrderId,
+      at: s.updatedAt,
+      type: 'STATE_CONTRADICTORY',
+      detail: { reason: contradiction, incoming: { ...s }, afterRelease: true },
+    });
+    if (!ledger.quarantines.some((q) => q.clientOrderId === o.clientOrderId)) {
+      ledger.quarantines.push({
+        quarantineId: newId('quarantine'),
+        accountId: o.accountId,
+        clientOrderId: o.clientOrderId,
+        reason: contradiction,
+        createdAt: s.updatedAt,
+      });
+      ledger.version++;
+    }
+    return { contradiction };
   }
 
   private release(ledger: Ledger, r: ExposureReservation, reason: string, at: string): void {
     ledger.active.delete(r.clientOrderId);
+    ledger.tombstones.set(r.clientOrderId, { reservation: r, reason });
     ledger.version++;
     this.released.push({ clientOrderId: r.clientOrderId, reason, at });
   }
@@ -144,7 +202,12 @@ export class InMemoryExecutionStore implements ExecutionStore {
 
   accountExposure(accountId: string): Promise<AccountExposure> {
     const l = this.ledger(accountId);
-    return Promise.resolve({ accountId, version: l.version, reservations: [...l.active.values()] });
+    return Promise.resolve({
+      accountId,
+      version: l.version,
+      reservations: [...l.active.values()],
+      quarantines: [...l.quarantines],
+    });
   }
 
   reserveAndConsume(req: {
@@ -157,6 +220,8 @@ export class InMemoryExecutionStore implements ExecutionStore {
     const ledger = this.ledger(order.accountId);
     const fail = (code: Exclude<ReserveResult, { ok: true }>['code'], reason: string) =>
       Promise.resolve<ReserveResult>({ ok: false, code, reason });
+    const q = ledger.quarantines[0];
+    if (q) return fail('ACCOUNT_QUARANTINED', `account quarantined: ${q.reason}`);
     if (ledger.version !== req.expectedVersion)
       return fail('LEDGER_CHANGED', 'account exposure changed while the order was being validated');
     const a = this.approvals.get(order.approvalId);
@@ -214,6 +279,11 @@ export class InMemoryExecutionStore implements ExecutionStore {
       return Promise.reject(
         new AstraError('NOT_FOUND', `no active reservation for ${clientOrderId}`),
       );
+    const q = ledger.quarantines[0];
+    if (q)
+      return Promise.reject(
+        new AstraError('CONFLICT', `account quarantined: ${q.reason}; not dispatching`),
+      );
     ledger.active.set(clientOrderId, { ...r, dispatched: true });
     ledger.version++;
     this.events.push({ clientOrderId, at, type: 'SUBMIT_DISPATCHING', detail: {} });
@@ -237,7 +307,8 @@ export class InMemoryExecutionStore implements ExecutionStore {
       rejectReason: reason,
       updatedAt: at,
     });
-    this.release(ledger, r, `not transmitted: ${reason}`, at);
+    // The tombstone records the provable end state: rejected before the broker was contacted.
+    this.release(ledger, { ...r, orderStatus: 'REJECTED' }, `not transmitted: ${reason}`, at);
     this.events.push({ clientOrderId, at, type: 'NOT_TRANSMITTED', detail: { reason } });
     return Promise.resolve(true);
   }

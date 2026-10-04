@@ -359,12 +359,16 @@ export class ExecutionGateway {
     recheck: () => Promise<string[] | null>,
   ): Promise<
     | { ok: true; exposure: AccountExposure; verdict: Extract<EntryRevalidation, { ok: true }> }
-    | { ok: false; reasons: string[] }
+    | { ok: false; reasons: string[]; ledgerMoved?: boolean }
   > {
     const { store, clock } = this.deps;
     const { account } = ctx;
     const plan = approval.orderPlan;
     const no = (...reasons: string[]) => ({ ok: false as const, reasons });
+    const quarantined = (e: AccountExposure) =>
+      e.quarantines[0]
+        ? `account ${approval.accountId} is quarantined (${e.quarantines[0].reason}); new entries are blocked until it is reconciled`
+        : null;
     try {
       const working = (await store.workingOrders(approval.accountId, plan.symbol)).filter(
         (o) => o.clientOrderId !== exclude,
@@ -386,6 +390,8 @@ export class ExecutionGateway {
       }
       await store.reconcileReservations(approval.accountId, clock.now().toISOString());
       const full = await store.accountExposure(approval.accountId);
+      const blocked = quarantined(full);
+      if (blocked) return no(blocked);
       const exposure: AccountExposure = {
         ...full,
         reservations: full.reservations.filter((r) => r.clientOrderId !== exclude),
@@ -418,6 +424,25 @@ export class ExecutionGateway {
           `permitted size ${verdict.permittedQuantity} is below the approved ${plan.quantity}`,
         );
       }
+      // Evidence may have arrived WHILE the revalidation waited (e.g. a late fill on a released
+      // order quarantining the account). Re-read the shared ledger, bounded like the revalidation,
+      // before the synchronous control-plane check. Before the reservation, `reserveAndConsume`
+      // re-checks the version and the quarantine under the ledger lock; after it (final gate),
+      // a changed ledger means the verdict was reached on stale exposure: the gate is re-run.
+      const latest = await withTimeout(
+        store.accountExposure(approval.accountId),
+        this.deps.revalidationTimeoutMs,
+      );
+      const blockedNow = quarantined(latest);
+      if (blockedNow) return no(blockedNow);
+      if (exclude !== null && latest.version !== full.version)
+        return {
+          ok: false,
+          ledgerMoved: true,
+          reasons: [
+            'account exposure changed while the order was being validated; refusing to guess',
+          ],
+        };
       const after = await recheck();
       if (after) return no(...after);
       return { ok: true, exposure: full, verdict };
@@ -467,11 +492,16 @@ export class ExecutionGateway {
       return notSent(`submit intent could not be persisted: ${errorMessage(err)}`);
     }
     // Everything below the last durable wait: the same fresh-data gate again (our own reservation
-    // excluded), then the control plane with no await before the adapter call.
-    const finalGate = await this.gate(approval, ctx, adapter, order.clientOrderId, () =>
-      Promise.resolve(((c) => (c.ok ? null : c.reasons))(this.control(approval))),
-    );
-    if (!finalGate.ok) return notSent(...finalGate.reasons);
+    // excluded), then the control plane with no await before the adapter call. A ledger that moved
+    // during the validation re-runs the gate (bounded); a quarantine refuses outright.
+    for (let attempt = 1; ; attempt++) {
+      const finalGate = await this.gate(approval, ctx, adapter, order.clientOrderId, () =>
+        Promise.resolve(((c) => (c.ok ? null : c.reasons))(this.control(approval))),
+      );
+      if (finalGate.ok) break;
+      if (finalGate.ledgerMoved && attempt < MAX_LEDGER_ATTEMPTS) continue;
+      return notSent(...finalGate.reasons);
+    }
     const last = this.control(approval);
     if (!last.ok) return notSent(...last.reasons);
     let submitted: BrokerOrderState | null = null;

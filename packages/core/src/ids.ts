@@ -29,6 +29,7 @@ export const ID_PREFIXES = {
   aiReview: 'air',
   aiCall: 'aic',
   reservation: 'rsv',
+  quarantine: 'qtn',
 } as const;
 export type IdKind = keyof typeof ID_PREFIXES;
 

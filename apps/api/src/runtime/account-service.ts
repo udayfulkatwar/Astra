@@ -22,6 +22,7 @@ import { PaperBrokerAdapter, type BrokerAdapter } from '@astra/execution';
 import {
   computeAccountState,
   initAccountTracking,
+  unresolvedDayConflicts,
   updateAccountTracking,
   type AccountState,
   type AccountTracking,
@@ -33,6 +34,18 @@ import type { EventBus } from './event-bus';
 import type { Valuation } from './valuation';
 import type { HealthService } from './health-service';
 import type { KillSwitchService } from './kill-switch-service';
+
+/**
+ * Contradictory completed-day P&L the evidence could not order: the consistency inputs are not
+ * known, so tracking is not usable for new entries (fail closed; the evidence stays persisted).
+ */
+function historyConflict(t: AccountTracking): string | null {
+  const open = unresolvedDayConflicts(t);
+  if (open.length === 0) return null;
+  return `unresolved completed-day history conflict (${open
+    .map((c) => `${c.day}: ${c.kept.pnl} vs ${c.other.pnl}`)
+    .join('; ')}); new entries are blocked until it is reconciled`;
+}
 
 export interface AccountView {
   readonly account: AccountDefinition;
@@ -106,6 +119,8 @@ export class AccountService {
     if (!e?.tracking || e.snapshot.status !== 'OK') {
       return notObserved('UNAVAILABLE', 'account tracking not available', 'account-monitor');
     }
+    const conflict = historyConflict(e.tracking);
+    if (conflict) return notObserved('ERROR', conflict, 'account-tracking');
     return observed(e.tracking, {
       source: 'astra-account-tracking',
       sourceKind: e.snapshot.sourceKind,
@@ -158,6 +173,8 @@ export class AccountService {
       });
       const stored = await repo.saveTracking(tracking); // monotonic merge: peaks never decrease
       entry.tracking = stored;
+      const conflict = historyConflict(stored);
+      if (conflict) return notObserved('ERROR', conflict, 'account-tracking');
       return observed(stored, {
         source: 'astra-account-tracking',
         sourceKind,

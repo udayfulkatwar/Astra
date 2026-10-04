@@ -142,6 +142,47 @@ export function applyOrderState(
 }
 
 /**
+ * The recorded end state of an order whose exposure is no longer reserved: its released
+ * reservation row (kept unchanged as evidence), or — for an order that was never reserved — the
+ * order record itself.
+ */
+export interface Tombstone {
+  readonly quantity: number;
+  readonly filledQuantity: number;
+  readonly orderStatus: OrderStatus;
+  readonly releaseReason: string | null;
+}
+
+/**
+ * Broker evidence about an order whose exposure was already released (ADR-0027 §8). The release
+ * was justified only by the recorded end state, so the only acceptable evidence is a consistent
+ * repeat of it. A tombstone that never ended (released as never transmitted, SHADOW) stands for
+ * "REJECTED, nothing filled": the broker was never contacted. Anything else — a late fill, a
+ * different ending, a working state, or UNKNOWN — means the released exposure may be real.
+ * Returns the contradiction, or null for a consistent repeat.
+ */
+export function evidenceAfterRelease(t: Tombstone, s: BrokerOrderState): string | null {
+  const ended = orderHasEnded(t.orderStatus);
+  const why = (what: string) =>
+    `${what} after its exposure was released${t.releaseReason ? ` (${t.releaseReason})` : ''}`;
+  if (s.status === 'UNKNOWN') return why('order state became UNKNOWN');
+  const u = applyOrderState(
+    {
+      quantity: t.quantity,
+      filledQuantity: ended ? t.filledQuantity : 0,
+      averageFillPrice: null,
+      orderStatus: ended ? t.orderStatus : 'REJECTED',
+    },
+    s,
+  );
+  return u.contradiction ? why(u.contradiction) : null;
+}
+
+/** The fill to record on the order when released evidence is contradictory: never lowered. */
+export const contradictedFill = (known: number, s: BrokerOrderState): number =>
+  Math.max(known, Number.isFinite(s.filledQuantity) ? Math.max(s.filledQuantity, 0) : 0);
+
+/**
  * Ended reservations whose exposure is authoritatively gone: the CUMULATIVE quantity of closures
  * recorded against THIS order's clientOrderId covers everything the order actually filled
  * (`reservedQuantity` of an ended order = its cumulative fill). A partial closure (fill 1 → close 1,
