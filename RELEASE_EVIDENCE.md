@@ -95,3 +95,38 @@ Remaining gaps: R004 durable failure/restart ownership; S002 queued cancel / pro
 permissions; no quarantine clearing path; ledger evidence committed inside the last round trip is
 applied after submit; stored AI analysis has no provider to re-read (age only); activity/tracking
 age reuses the account-snapshot limit; real-broker linkage absent.
+
+## R004 single-owner PAPER crash/restart safety
+
+| Field      | Value                                                                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/r004-paper-recovery` from accepted F003 docs head `aa75c01e421007ba1e2a1291a4c73bb2b3cf67c6` (code `2e75b104`); F003/M001/default untouched     |
+| Tested SHA | code `842ed66686ac9da26225cd2bcc63f2a4d239993a` (clean committed tree); later commits on the branch are documentation only                              |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0 (also run before the first publish), tests 0, build 0 |
+| Tests      | 95 files, 874 passed, 0 failed, 0 skipped (F003 baseline 92 files / 857)                                                                                |
+| CI         | Triggered by the branch push; result not claimed here                                                                                                   |
+| Migrations | 0015 added (`paper_owner`, `paper_broker_state.revision/session_id`); 0010–0014 unchanged byte-for-byte (empty diff)                                    |
+| Software   | IN_PROGRESS — local PASS only, pending independent CEO review. Stage 1 NOT accepted; live DISABLED; no readiness, edge or real-broker claim             |
+
+Old-base repro (isolated temporary git worktree at `aa75c01e`, no change to the implementation
+tree): `apps/api/test/paper-recovery-seam.test.ts`, written only against pre-R004 APIs, fails 2/2
+there — `flush()` resolves although the snapshot save failed (absorbed), and a restarted runtime
+after a crash reports the account reconciled with no quarantine — and passes 2/2 on the candidate.
+
+Candidate coverage (real PostgreSQL, composed runtime, deterministic fault injection; the crash seam
+terminates the owner's lock backend and never calls `stop()`): DIRTY write failure and lost DIRTY
+ACK before any interaction; owner A vs competitor B; ownership loss halting admission/paper actions,
+and during the final ledger wait; terminal-ended dirty restart with no kill switch blocking the
+gateway AND direct DB `reserveAndConsume`/`markDispatching`; quote-driven fill before a failed
+snapshot save then crash; all evidence/UNKNOWN/kill-switch writes failing then crash (older
+reservation preserved, no resend); ended order unknown to the restored broker recorded as lost
+evidence; failed flush propagating and never CLEAN; lost-ACK CLEAN commit verified at the next
+start; idempotent replay of committed evidence; positive clean stop → ACKed checkpoint → restart
+admits. Plus a gateway test that `unknown()` reports the real persistence outcome.
+
+Remaining risks: any unclean paper session blocks its accounts until an audited clearing path exists
+(none built); recovery does not re-apply lost mutations; PAPER only (no real broker, no distributed
+takeover); ownership is verified by the caller just before — not inside — the DB reserve/dispatch
+SQL; the keepalive interval bounds detection of a silent lock loss between boundary checks;
+legacy sessions from before 0015 cannot be proven clean; S002 queued cancel / protective-close
+permissions unchanged.
