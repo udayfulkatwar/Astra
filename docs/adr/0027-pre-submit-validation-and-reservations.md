@@ -61,12 +61,15 @@ twice, and an in-process mutex cannot prevent that across processes.
    (`tradingDayWindow(now, profile.tradingDayReset)`) is no longer the captured tracking's day
    (reassemble, never reuse yesterday's reference); (d) re-ages the captured tracking, activity
    and duplicate observations with the account-snapshot limit (existing policy, no new knob) and
-   every FX quote with the quote limit, each at its own timestamp; (e) requires the CURRENT
-   provider state (`CurrentEvidencePorts`: quote, FX pairs, calendar, news) to still be OK, so a
-   provider ERROR/revocation voids captured evidence even with a fresh timestamp; (f) re-runs the
-   real `DecisionEngine` on the captured inputs with the CURRENT clock, mode, kill switches,
-   component health, execution readiness and live authorization; (g) repeats the original
-   plan/quantity matching. Captured data is only re-judged, never re-stamped as newly observed.
+   every FX quote with the quote limit, each at its own timestamp; (e) reads the CURRENT
+   provider state (`CurrentEvidencePorts`: quote, FX pairs, calendar, news): a provider that is no
+   longer OK voids the captured evidence even with a fresh timestamp, and a current OK quote,
+   calendar window or news risk REPLACES the captured one (keeping its own `asOf`/source), so a
+   calendar revision, a news-risk change or a moved/widened quote is judged by the engine; an FX
+   rate whose current value differs from the one the valuation used refuses; (f) re-runs the real
+   `DecisionEngine` with the CURRENT clock, mode, kill switches, component health, execution
+   readiness, live authorization and those current observations; (g) repeats the original
+   plan/quantity matching. Evidence is never re-stamped as newly observed.
    A missing, throwing, asynchronous (thenable) or malformed guard refuses before transmission and
    the reservation is released, or kept for reconciliation if the release itself fails. The
    assembler takes ONE decision time after its last awaited fetch, so a slow later FX fetch cannot

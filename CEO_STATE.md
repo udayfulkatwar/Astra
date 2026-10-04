@@ -17,6 +17,20 @@ Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL.
 Technical decisions (architecture, safety design, tests, migrations) are made by engineering and
 recorded in ADRs; they are not owner-managed.
 
+## Session / task index
+
+One active writer; this chat is reused for corrections and, after acceptance, the next mission. Old
+chats are historical.
+
+| Task | Status                                                                                                                                                    |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I001 | PASS (integration, software-only)                                                                                                                         |
+| R3   | candidate FAIL                                                                                                                                            |
+| M001 | PASS `3cd84145`, 820 tests                                                                                                                                |
+| F003 | IN_PROGRESS: https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ · `claude/f003-final-freshness` · baseSHA `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28` |
+| F003 | `f0b2c283` rejected: CI typecheck failure + current-OK-context issue (calendar/news/quote revisions ignored); corrected, re-review pending                |
+| R004 | next (NOT_STARTED), then S002 (NOT_STARTED)                                                                                                               |
+
 ## Blockers
 
 - BLOCKED for LIVE: real-broker adapter must supply position ↔ order linkage / closed trades keyed by `clientOrderId` (ADR-0027). Paper only today. Live trading is DISABLED.

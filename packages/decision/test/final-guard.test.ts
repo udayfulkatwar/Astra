@@ -29,6 +29,9 @@ import {
 } from './fixtures';
 
 const base = makeInputs();
+const fxQuote = (symbol: string, asOf: string, bid = 150, ask = 150): Observed<Quote> =>
+  observed({ symbol, bid, ask, asOf }, { source: 'fx', sourceKind: 'SIMULATED', asOf });
+const iso = (ms: number) => new Date(ms).toISOString();
 const T0 = Date.parse(NOW);
 const plan = (() => {
   const d = new DecisionEngine().evaluate(base);
@@ -57,6 +60,10 @@ interface Rig {
   health: { down: boolean };
   revoked: { quote: boolean; calendar: boolean; news: boolean; fx: boolean };
   ports: Partial<DecisionDataPorts>;
+  /** What the providers serve NOW (mutable): data ports and current ports both read these. */
+  quotes: Record<string, Observed<Quote>>;
+  calendarObs: typeof base.calendar;
+  newsObs: typeof base.newsRisk;
   withFx: boolean;
   policy: typeof policy;
   profile: typeof profile;
@@ -70,6 +77,9 @@ function rig(over: Partial<Rig> = {}): Rig {
     health: { down: false },
     revoked: { quote: false, calendar: false, news: false, fx: false },
     ports: {},
+    quotes: { NQ: base.quote },
+    calendarObs: base.calendar,
+    newsObs: notObserved('UNAVAILABLE', 'none', 'news'),
     withFx: false,
     policy,
     profile,
@@ -88,12 +98,12 @@ function options(r: Rig): {
   const instruments = r.withFx ? ['NQ', 'USDJPY', 'DAX'] : ['NQ'];
   const specs = { NQ, USDJPY, DAX } as Record<string, typeof NQ>;
   const data: DecisionDataPorts = {
-    quote: () => Promise.resolve(base.quote),
+    quote: (symbol) => Promise.resolve(r.quotes[symbol] ?? base.quote),
     accountSnapshot: () => Promise.resolve(base.accountSnapshot),
     tracking: () => Promise.resolve(base.tracking),
     activity: () => Promise.resolve(base.activity),
-    calendar: () => Promise.resolve(base.calendar),
-    newsRisk: () => Promise.resolve(notObserved('UNAVAILABLE', 'none', 'news')),
+    calendar: () => Promise.resolve(r.calendarObs),
+    newsRisk: () => Promise.resolve(r.newsObs),
     aiAnalysis: () => Promise.resolve(notObserved('UNAVAILABLE', 'none', 'ai')),
     duplicates: () => Promise.resolve(base.duplicates),
     ...r.ports,
@@ -102,10 +112,10 @@ function options(r: Rig): {
     quote: (symbol) =>
       r.revoked.quote || (r.revoked.fx && symbol !== 'NQ')
         ? notObserved('ERROR', `${symbol} provider down`, 'q')
-        : base.quote,
+        : (r.quotes[symbol] ?? base.quote),
     calendar: () =>
-      r.revoked.calendar ? notObserved('ERROR', 'calendar down', 'cal') : base.calendar,
-    newsRisk: () => (r.revoked.news ? notObserved('ERROR', 'news down', 'news') : base.newsRisk),
+      r.revoked.calendar ? notObserved('ERROR', 'calendar down', 'cal') : r.calendarObs,
+    newsRisk: () => (r.revoked.news ? notObserved('ERROR', 'news down', 'news') : r.newsObs),
   };
   return {
     engine: new DecisionEngine(),
@@ -131,9 +141,7 @@ function options(r: Rig): {
         killSwitches: (ctx) => r.killSwitches.evaluate(ctx),
         componentHealth: () =>
           healthyComponents().map((c) =>
-            r.health.down && c.component === 'MARKET_DATA'
-              ? { ...c, status: 'OFFLINE' as const }
-              : c,
+            r.health.down && c.component === 'MARKET_DATA' ? { ...c, status: 'ERROR' as const } : c,
           ),
         execution: () => base.execution,
         liveTradingEnvironmentAuthorized: () => false,
@@ -197,7 +205,7 @@ describe('final guard — carries the revalidation and judges captured evidence 
       },
       { source: 'test', sourceKind: 'SIMULATED', asOf: '2026-09-28T13:59:59.000Z' },
     );
-    const r = rig({ policy: longPolicy, ports: { calendar: () => Promise.resolve(calendar) } });
+    const r = rig({ policy: longPolicy, calendarObs: calendar });
     const v = await approved(r);
     r.clock.advance(70_000); // 14:01:10; signal TTL (120s) still valid; inside the blackout
     expect(reasonsOf(v.finalGuard())).toMatch(/CPI/);
@@ -268,6 +276,66 @@ describe('final guard — carries the revalidation and judges captured evidence 
     expect(reasonsOf(v.finalGuard())).toMatch(/configuration changed/);
   });
 
+  const cpi = (at: string) => ({
+    id: 'cpi',
+    title: 'Revised CPI',
+    impact: 'HIGH' as const,
+    scheduledAt: at,
+    affectedInstruments: [],
+  });
+  const window = (events: ReturnType<typeof cpi>[], asOf = '2026-09-28T14:00:00.000Z') =>
+    observed(
+      {
+        from: '2026-09-28T13:00:00.000Z',
+        to: '2026-09-28T16:00:00.000Z',
+        events,
+      },
+      { source: 'test', sourceKind: 'SIMULATED', asOf },
+    );
+
+  it('a calendar REVISED after the revalidation (still OK and fresh) is evaluated: new/rescheduled HIGH event inside the blackout refuses', async () => {
+    const r = rig({ policy: longPolicy });
+    const v = await approved(r);
+    r.calendarObs = window([cpi('2026-09-28T14:05:00.000Z')]); // added, in the blackout
+    expect(reasonsOf(v.finalGuard())).toMatch(/Revised CPI/);
+
+    const r2 = rig({ policy: longPolicy, calendarObs: window([cpi('2026-09-28T17:00:00.000Z')]) });
+    const v2 = await approved(r2);
+    expect(v2.finalGuard().ok).toBe(true);
+    r2.calendarObs = window([cpi('2026-09-28T14:03:00.000Z')]); // rescheduled into the blackout
+    expect(reasonsOf(v2.finalGuard())).toMatch(/Revised CPI/);
+  });
+
+  it('news risk that turns HIGH after the revalidation (status still OK) refuses', async () => {
+    const news = (level: 'NORMAL' | 'HIGH') =>
+      observed(
+        { symbol: 'NQ', level, assessedAt: NOW, reasons: [] },
+        { source: 'news', sourceKind: 'SIMULATED', asOf: '2026-09-28T13:59:59.000Z' },
+      );
+    const newsPolicy: typeof policy = {
+      ...policy,
+      news: { required: true, blockLevels: ['HIGH'] },
+    };
+    const r = rig({ policy: newsPolicy, newsObs: news('NORMAL') });
+    const v = await approved(r);
+    expect(v.finalGuard().ok).toBe(true);
+    r.newsObs = news('HIGH');
+    expect(reasonsOf(v.finalGuard())).toMatch(/news risk HIGH/);
+  });
+
+  it('a current quote that moved or widened is evaluated, not ignored', async () => {
+    const q = (bid: number, ask: number) =>
+      observed(
+        { symbol: 'NQ', bid, ask, asOf: '2026-09-28T13:59:59.500Z' },
+        { source: 'test', sourceKind: 'SIMULATED', asOf: '2026-09-28T13:59:59.500Z' },
+      );
+    const r = rig({ quotes: { NQ: q(19_999.75, 20_000) } });
+    const v = await approved(r);
+    expect(v.finalGuard().ok).toBe(true);
+    r.quotes.NQ = q(19_900, 20_100); // spread blown out, same fresh timestamp class
+    expect(v.finalGuard().ok).toBe(false);
+  });
+
   it('profile trading-day reset crossed during the wait: refuse, never use yesterday’s reference', async () => {
     // Reset 14:01 UTC: at 14:00:00 the day key is 2026-09-28 (the captured tracking's); at 14:01:30
     // it is 2026-09-29. Every other input stays valid (long limits; signal TTL 120s not reached).
@@ -281,22 +349,13 @@ describe('final guard — carries the revalidation and judges captured evidence 
 });
 
 describe('FX provenance (assembler) and its final validation', () => {
-  const fxQuote = (symbol: string, asOf: string, bid = 150, ask = 150): Observed<Quote> =>
-    observed({ symbol, bid, ask, asOf }, { source: 'fx', sourceKind: 'SIMULATED', asOf });
-  const iso = (ms: number) => new Date(ms).toISOString();
-
   it('keeps every consulted FX quote with its own source and timestamp', async () => {
     const r = rig({
       withFx: true,
-      ports: {
-        quote: (s) =>
-          Promise.resolve(
-            s === 'USDJPY'
-              ? fxQuote(s, iso(T0 - 1_000))
-              : s === 'EURUSD'
-                ? fxQuote(s, iso(T0 - 2_000), 1.1, 1.1)
-                : base.quote,
-          ),
+      quotes: {
+        NQ: base.quote,
+        USDJPY: fxQuote('USDJPY', iso(T0 - 1_000)),
+        EURUSD: fxQuote('EURUSD', iso(T0 - 2_000), 1.1, 1.1),
       },
     });
     const { inputs, provenance } = await assembleWithProvenance({
@@ -334,19 +393,28 @@ describe('FX provenance (assembler) and its final validation', () => {
     expect(inputs.now).toBe(iso(T0 + 6_000));
   });
 
+  it('an FX rate that changed value (still OK and fresh) refuses: the valuation used the old one', async () => {
+    const r = rig({
+      withFx: true,
+      quotes: {
+        NQ: base.quote,
+        USDJPY: fxQuote('USDJPY', iso(T0 - 500)),
+        EURUSD: fxQuote('EURUSD', iso(T0 - 500), 1.1, 1.1),
+      },
+    });
+    const v = await approved(r);
+    r.quotes.USDJPY = fxQuote('USDJPY', iso(T0 - 100), 151, 151);
+    expect(reasonsOf(v.finalGuard())).toMatch(/FX quote USDJPY changed/);
+  });
+
   it('final guard: an FX rate that ages (own timestamp) or whose provider fails is refused', async () => {
     const mk = () =>
       rig({
         withFx: true,
-        ports: {
-          quote: (s) =>
-            Promise.resolve(
-              s === 'USDJPY'
-                ? fxQuote(s, iso(T0 - 4_000)) // fresh at assembly (limit 5s), older than the others
-                : s === 'EURUSD'
-                  ? fxQuote(s, iso(T0 - 500), 1.1, 1.1)
-                  : base.quote,
-            ),
+        quotes: {
+          NQ: base.quote,
+          USDJPY: fxQuote('USDJPY', iso(T0 - 4_000)), // fresh at assembly (limit 5s), oldest
+          EURUSD: fxQuote('EURUSD', iso(T0 - 500), 1.1, 1.1),
         },
       });
     const r = mk();

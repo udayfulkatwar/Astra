@@ -174,6 +174,8 @@ function createFinalGuard(o: {
       }
 
       // FX: every consulted rate, with its OWN timestamp, at the final clock and provider state.
+      // The money math used the captured rate, so a current rate that differs is a known
+      // contradiction (the spec values would have to be re-derived): refuse, never ignore it.
       const quoteAge = { maxAgeMs: fresh.quoteMaxAgeMs, maxFutureSkewMs: fresh.maxFutureSkewMs };
       for (const dep of provenance.fx) {
         if (dep.observed.status !== 'OK') continue; // already a conversion error in the inputs
@@ -183,25 +185,33 @@ function createFinalGuard(o: {
         const cur = o.current.quote(dep.pair);
         if (cur.status !== 'OK')
           return refuse(`FX provider for ${dep.pair} is now ${cur.status}: ${cur.reason}`);
+        if (cur.value.bid !== dep.observed.value.bid || cur.value.ask !== dep.observed.value.ask)
+          return refuse(`FX quote ${dep.pair} changed since the valuation; re-evaluate`);
       }
 
-      // Provider revocation: captured evidence is void once its provider is no longer OK.
+      // Known CURRENT facts replace the captured ones, each keeping its own provenance (asOf and
+      // source are never re-stamped): a revised calendar, a changed news risk or a moved quote
+      // is evaluated by the real engine, so a contradicting veto is seen. A provider that is no
+      // longer OK voids the captured evidence even while its timestamp is fresh.
       const symbol = candidate.signal.symbol;
-      const providers: [string, Observed<unknown>, () => Observed<unknown>][] = [
-        ['quote', inputs.quote, () => o.current.quote(symbol)],
-        ['calendar', inputs.calendar, () => o.current.calendar()],
-        ['news', inputs.newsRisk, () => o.current.newsRisk(symbol)],
+      const replaced: Partial<Pick<DecisionInputs, 'quote' | 'calendar' | 'newsRisk'>> = {};
+      const providers: [string, Observed<unknown>, () => Observed<unknown>, string][] = [
+        ['quote', inputs.quote, () => o.current.quote(symbol), 'quote'],
+        ['calendar', inputs.calendar, () => o.current.calendar(), 'calendar'],
+        ['news', inputs.newsRisk, () => o.current.newsRisk(symbol), 'newsRisk'],
       ];
-      for (const [label, captured, read] of providers) {
-        if (captured.status !== 'OK') continue; // the engine rejects a non-OK input itself
+      for (const [label, captured, read, key] of providers) {
+        if (captured.status !== 'OK') continue; // not requested / non-OK: the engine decides
         const cur = read();
         if (cur.status !== 'OK')
           return refuse(`${label} provider is now ${cur.status}: ${cur.reason}`);
+        (replaced as Record<string, unknown>)[key] = cur;
       }
 
-      // The real Decision Engine, current clock and current synchronous state, captured evidence.
+      // The real Decision Engine, current clock and current synchronous state and evidence.
       const d = o.engine.evaluate({
         ...inputs,
+        ...replaced,
         decisionId: 'final-guard',
         now: now.toISOString(),
         mode: state.mode(),

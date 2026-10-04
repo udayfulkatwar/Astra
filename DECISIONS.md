@@ -33,6 +33,13 @@ Index only; architecture lives in `docs/ARCHITECTURE.md` and the ADRs in `docs/a
 | 0026 | Free chart feed                                      | Accepted |
 | 0027 | Pre-submit validation + durable exposure reservation | Accepted |
 
+## Session and mission rule
+
+"Continue" never creates a new chat by itself. One active coding mission and one writer at a time.
+Reuse the current session unless a concrete context, access or model reason warrants a new one. A
+handoff always pins the accepted baseSHA and the reviewed evidence. Old chats are historical, not
+simultaneous workers.
+
 ## F003 design (summary; detail in ADR-0027 §4a)
 
 Every successful revalidation carries a REQUIRED synchronous final guard that keeps the assembled
@@ -42,7 +49,10 @@ runs the guard: invalid or backward clock, trading-day rollover, aged account/FX
 news evidence, provider revocation, and a re-run of the real engine on the captured inputs at the
 current clock and state. Missing, throwing or asynchronous guards refuse. Rejected assumption (M001
 lesson): a TTL check, a mocked boolean callback or the engine alone on captured inputs does not
-prove freshness; the guard must be exercised through the real assembler/engine/API.
+prove freshness; the guard must be exercised through the real assembler/engine/API. Rejected at
+`f0b2c283`: the guard read current quote/calendar/news only for status and reused the captured
+values, so a revised calendar or changed news risk (still OK, fresh) went unseen; current OK
+observations now replace the captured ones. Its CI also failed typecheck (invalid test status).
 
 ## S001 design (summary; detail in ADR-0027)
 

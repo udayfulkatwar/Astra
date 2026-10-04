@@ -186,13 +186,12 @@ describe('a wait on the FINAL ledger read cannot carry aged or revoked evidence 
   it('no store, broker or other call sits between the guard and submitOrder', async () => {
     const s = setup();
     s.add({ approvalId: 'a1', signalId: 's1' });
-    for (const name of Object.getOwnPropertyNames(
-      Object.getPrototypeOf(s.store),
-    ) as (keyof typeof s.store)[]) {
-      const f = s.store[name] as unknown;
+    const store = s.store as unknown as Record<string, unknown>;
+    for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(s.store))) {
+      const f = store[name];
       if (name === 'constructor' || typeof f !== 'function') continue;
-      (s.store as unknown as Record<string, unknown>)[name as string] = (...a: unknown[]) => {
-        s.events.push(`store.${String(name)}`);
+      store[name] = (...a: unknown[]) => {
+        s.events.push(`store.${name}`);
         return (f as (...x: unknown[]) => unknown).apply(s.store, a);
       };
     }
