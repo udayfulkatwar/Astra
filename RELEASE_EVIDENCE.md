@@ -1,3 +1,7 @@
+# Latest independent CEO evidence — 4 October 2026
+
+Candidate a85323928d74ee18417cc50d181bb46e774c7e56: software checks PASS (run 37189561759, job 111398729769; 88 files, 813 tests, zero skips; PostgreSQL 16.15). Safety acceptance FAIL. See docs/ledger/S001_R3_CEO_REVIEW.md. This documentation checkpoint changes no application code; it is not a new accepted/tested operating release. Prior candidate evidence follows.
+
 # RELEASE_EVIDENCE
 
 Three separate questions, never conflated: **software** (does the code do what it claims — tests/CI),

@@ -1,3 +1,7 @@
+# Latest CEO acceptance — 4 October 2026
+
+Stage 1 IN_PROGRESS. S001-R3 acceptance FAIL despite independent 813-test CI PASS. Cloud Claude handoff BLOCKED: environment offline. See docs/ledger/S001_R3_CEO_REVIEW.md for exact findings, evidence and prepared bounded task. No accepted operating release; live DISABLED. Next priorities: conservative tombstone upgrade repair; final synchronous freshness check; durable failure/restart ownership, then S002 queued risk-reduction permissions. Prior content below is historical candidate state.
+
 # CEO_STATE
 
 Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL.
