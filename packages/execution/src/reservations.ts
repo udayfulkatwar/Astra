@@ -24,52 +24,146 @@ export interface ReservationUpdate {
   readonly orderStatus: OrderStatus;
   /** Release reason when this broker state is authoritative proof the exposure is gone. */
   readonly release: string | null;
+  /**
+   * Set when the evidence contradicts what is already known (decreasing or malformed fills,
+   * status moving backwards, an ended order changing its ending). The reservation is then kept at
+   * full size and the order becomes UNKNOWN (unresolved) — contradictory evidence never frees risk.
+   */
+  readonly contradiction: string | null;
 }
 
+const EPS = 1e-9;
+
+/** Forward-only lifecycle rank (clock independent). UNKNOWN is neutral; ended states share the top. */
+const STATUS_RANK: Record<OrderStatus, number> = {
+  PENDING_SUBMIT: 0,
+  SUBMITTED: 1,
+  ACCEPTED: 2,
+  PARTIALLY_FILLED: 3,
+  FILLED: 4,
+  REJECTED: 4,
+  CANCELLED: 4,
+  EXPIRED: 4,
+  SHADOW: 4,
+  UNKNOWN: -1,
+};
+
 /**
- * What a broker order state does to its reservation. An ended order keeps only its filled
- * quantity (that exposure now lives in a position and stays reserved until the position is
- * confirmed or closed); an order that ended with nothing filled releases outright.
+ * What a broker order state does to its reservation, given what is already known.
+ *
+ * - Fills are CUMULATIVE and monotonic: the known fill never decreases, whatever a later state says.
+ * - A state is accepted only if it is well-formed (finite, 0 ≤ fill ≤ quantity), does not lower the
+ *   fill, does not move the lifecycle backwards, a FILLED order is fully filled, and an ended order
+ *   does not change how it ended or gain fills afterwards. Anything else is contradictory/stale:
+ *   the reservation is retained at full size, the known fill is preserved (or raised), and the
+ *   order becomes UNKNOWN until a consistent authoritative state resolves it.
+ * - An ended order then keeps only its cumulative fill (that exposure lives in a position until
+ *   closures cover it); an order that ended with nothing ever filled releases outright.
  */
 export function applyOrderState(
-  r: Pick<ExposureReservation, 'quantity' | 'filledQuantity' | 'averageFillPrice'>,
+  r: Pick<ExposureReservation, 'quantity' | 'filledQuantity' | 'averageFillPrice' | 'orderStatus'>,
   s: BrokerOrderState,
 ): ReservationUpdate {
-  const filled = Math.max(s.filledQuantity, 0);
+  const known = r.filledQuantity;
+  const wellFormed = Number.isFinite(s.filledQuantity) && s.filledQuantity >= 0;
+  // Highest fill ever evidenced (a malformed value never lowers it, a finite overfill raises it).
+  const cumulative = Math.max(
+    known,
+    Number.isFinite(s.filledQuantity) ? Math.max(s.filledQuantity, 0) : 0,
+  );
+  const avg = s.averageFillPrice ?? r.averageFillPrice;
+
+  const contradict = (why: string): ReservationUpdate => ({
+    reservedQuantity: Math.max(r.quantity, cumulative),
+    filledQuantity: cumulative,
+    averageFillPrice: avg,
+    orderStatus: 'UNKNOWN',
+    release: null,
+    contradiction: why,
+  });
+
+  if (s.status === 'UNKNOWN') {
+    // Not evidence: keep everything reserved, never lower a known fill.
+    return {
+      reservedQuantity: Math.max(r.quantity, cumulative),
+      filledQuantity: cumulative,
+      averageFillPrice: avg,
+      orderStatus: 'UNKNOWN',
+      release: null,
+      contradiction: null,
+    };
+  }
+  if (!wellFormed) return contradict(`malformed fill quantity ${String(s.filledQuantity)}`);
+  if (s.filledQuantity > r.quantity + EPS)
+    return contradict(`fill ${s.filledQuantity} exceeds the order quantity ${r.quantity}`);
+  if (s.filledQuantity < known - EPS)
+    return contradict(`fill decreased from ${known} to ${s.filledQuantity}`);
+  if (s.status === 'FILLED') {
+    // The broker may report a reduced quantity (remainder cancelled); never one above what was ordered.
+    if (!Number.isFinite(s.quantity) || s.quantity <= 0 || s.quantity > r.quantity + EPS)
+      return contradict(
+        `FILLED with reported quantity ${String(s.quantity)} (ordered ${r.quantity})`,
+      );
+    if (s.filledQuantity <= EPS || s.filledQuantity < s.quantity - EPS)
+      return contradict(
+        `FILLED with fill ${s.filledQuantity} below the reported quantity ${s.quantity}`,
+      );
+  }
+  if (r.orderStatus !== 'UNKNOWN') {
+    if (STATUS_RANK[s.status] < STATUS_RANK[r.orderStatus])
+      return contradict(`status moved backwards from ${r.orderStatus} to ${s.status}`);
+    if (orderHasEnded(r.orderStatus)) {
+      if (s.status !== r.orderStatus)
+        return contradict(`order ended as ${r.orderStatus} but is now reported ${s.status}`);
+      if (s.filledQuantity > known + EPS)
+        return contradict(`fill grew from ${known} to ${s.filledQuantity} after the order ended`);
+    }
+  }
+
+  const filled = s.filledQuantity;
   if (orderHasEnded(s.status)) {
     return {
       reservedQuantity: filled,
       filledQuantity: filled,
-      averageFillPrice: s.averageFillPrice ?? r.averageFillPrice,
+      averageFillPrice: avg,
       orderStatus: s.status,
       release: filled === 0 ? `broker ${s.status} with nothing filled` : null,
+      contradiction: null,
     };
   }
   return {
     reservedQuantity: r.quantity,
     filledQuantity: filled,
-    averageFillPrice: s.averageFillPrice ?? r.averageFillPrice,
+    averageFillPrice: avg,
     orderStatus: s.status,
     release: null,
+    contradiction: null,
   };
 }
 
 /**
- * Ended reservations whose exposure is authoritatively gone: the resulting position's closure is
- * recorded against THIS order's clientOrderId. A broker position carries no originating order id,
- * so a position that is visible — or absent from one (possibly transient) snapshot — is never
- * evidence: the reservation is retained, conservatively, until closure is linked.
+ * Ended reservations whose exposure is authoritatively gone: the CUMULATIVE quantity of closures
+ * recorded against THIS order's clientOrderId covers everything the order actually filled
+ * (`reservedQuantity` of an ended order = its cumulative fill). A partial closure (fill 1 → close 1,
+ * then the remaining 2 fill) keeps the whole reservation: exposure is never freed by a closure
+ * that does not account for every filled unit. A broker position carries no originating order id,
+ * so a visible — or momentarily absent — position is never evidence either.
  */
 export function confirmedClosures(
   reservations: readonly ExposureReservation[],
-  closedOrderIds: ReadonlySet<string>,
+  closedQuantityByOrderId: ReadonlyMap<string, number>,
 ): { reservation: ExposureReservation; reason: string }[] {
-  return reservations
-    .filter((r) => orderHasEnded(r.orderStatus) && closedOrderIds.has(r.clientOrderId))
-    .map((reservation) => ({
-      reservation,
-      reason: 'closure of the resulting position is recorded for this order',
-    }));
+  const out: { reservation: ExposureReservation; reason: string }[] = [];
+  for (const reservation of reservations) {
+    if (!orderHasEnded(reservation.orderStatus)) continue;
+    const closed = closedQuantityByOrderId.get(reservation.clientOrderId) ?? 0;
+    if (reservation.reservedQuantity > 0 && closed >= reservation.reservedQuantity - EPS)
+      out.push({
+        reservation,
+        reason: `closures recorded for this order cover its cumulative fill (${closed} of ${reservation.reservedQuantity})`,
+      });
+  }
+  return out;
 }
 
 /**

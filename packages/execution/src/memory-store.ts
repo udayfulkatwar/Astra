@@ -16,6 +16,7 @@ import {
   type ExposureReservation,
   type OrderEvent,
   type OrderRecord,
+  type OrderUpdateResult,
   type ReserveResult,
 } from './types';
 
@@ -36,8 +37,16 @@ export class InMemoryExecutionStore implements ExecutionStore {
   }[] = [];
   /** Released reservations with their evidence (audit). */
   readonly released: { clientOrderId: string; reason: string; at: string }[] = [];
-  /** Orders whose resulting position has a recorded closure (the journal's evidence). */
-  readonly closedOrderIds = new Set<string>();
+  /** Cumulative closed quantity per order (the journal's closure evidence). */
+  readonly closedQuantity = new Map<string, number>();
+
+  /** Records a (partial) closure of an order's position. */
+  recordClosure(clientOrderId: string, quantity: number): void {
+    this.closedQuantity.set(
+      clientOrderId,
+      (this.closedQuantity.get(clientOrderId) ?? 0) + quantity,
+    );
+  }
   private readonly ledgers = new Map<string, Ledger>();
 
   addApproval(a: ApprovalRecord): void {
@@ -76,30 +85,42 @@ export class InMemoryExecutionStore implements ExecutionStore {
     return Promise.resolve();
   }
 
-  updateOrder(clientOrderId: string, s: BrokerOrderState): Promise<void> {
+  updateOrder(clientOrderId: string, s: BrokerOrderState): Promise<OrderUpdateResult> {
     const o = this.orders.get(clientOrderId);
     if (!o) return Promise.reject(new AstraError('NOT_FOUND', `order ${clientOrderId} not found`));
-    this.orders.set(clientOrderId, {
-      ...o,
-      status: s.status,
-      brokerOrderId: s.brokerOrderId ?? o.brokerOrderId,
-      filledQuantity: s.filledQuantity,
-      averageFillPrice: s.averageFillPrice,
-      rejectReason: s.rejectReason,
-      updatedAt: s.updatedAt,
-    });
     const ledger = this.ledger(o.accountId);
     const r = ledger.active.get(clientOrderId);
-    if (r) {
-      const u = applyOrderState(r, s);
+    const u = r ? applyOrderState(r, s) : null;
+    this.orders.set(clientOrderId, {
+      ...o,
+      status: u ? u.orderStatus : s.status,
+      brokerOrderId: s.brokerOrderId ?? o.brokerOrderId,
+      filledQuantity: u ? u.filledQuantity : s.filledQuantity,
+      averageFillPrice: u ? u.averageFillPrice : s.averageFillPrice,
+      rejectReason: u?.contradiction
+        ? `contradictory broker evidence: ${u.contradiction}`
+        : s.rejectReason,
+      updatedAt: s.updatedAt,
+    });
+    if (r && u) {
       if (u.release) {
         this.release(ledger, r, u.release, s.updatedAt);
       } else {
-        ledger.active.set(clientOrderId, { ...r, ...u });
+        const { contradiction: _c, release: _r, ...fields } = u;
+        void _c;
+        void _r;
+        ledger.active.set(clientOrderId, { ...r, ...fields });
         ledger.version++;
       }
+      if (u.contradiction)
+        this.events.push({
+          clientOrderId,
+          at: s.updatedAt,
+          type: 'STATE_CONTRADICTORY',
+          detail: { reason: u.contradiction, incoming: { ...s } },
+        });
     }
-    return Promise.resolve();
+    return Promise.resolve({ contradiction: u?.contradiction ?? null });
   }
 
   private release(ledger: Ledger, r: ExposureReservation, reason: string, at: string): void {
@@ -223,7 +244,7 @@ export class InMemoryExecutionStore implements ExecutionStore {
 
   reconcileReservations(accountId: string, at: string): Promise<number> {
     const ledger = this.ledger(accountId);
-    const done = confirmedClosures([...ledger.active.values()], this.closedOrderIds);
+    const done = confirmedClosures([...ledger.active.values()], this.closedQuantity);
     for (const t of done) this.release(ledger, t.reservation, t.reason, at);
     return Promise.resolve(done.length);
   }

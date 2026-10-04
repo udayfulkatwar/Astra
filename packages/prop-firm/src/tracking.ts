@@ -168,12 +168,28 @@ export function updateAccountTracking(
   return next;
 }
 
+/** Trust in a day-start reference: a measured/reported value beats a late-observation guess. */
+const DAY_START_RANK: Record<DayStartSource, number> = {
+  REPORTED: 3,
+  OBSERVED_AT_RESET: 2,
+  INITIAL: 1,
+  OBSERVED_LATE: 0,
+};
+
 /**
  * Merges two tracking states of the SAME account (the persisted one and a newly computed one,
- * possibly produced by another process from older data). The later observation provides the
- * state; every peak/counter that can only grow is the larger of both, so a stale writer can never
- * lower a peak or the drawdown/daily-loss references derived from it. On an equal timestamp the
- * incoming (newer write) state wins; peaks are the max regardless.
+ * possibly produced by another process from older data or a stale cache).
+ *
+ * - Peaks and counters that can only grow are the larger of both.
+ * - Different trading days: the LATER day owns every day field (day start, counted flag), so
+ *   yesterday's day-start floor never leaks into a genuine day reset.
+ * - SAME trading day: the references never loosen. A more trusted source (REPORTED, measured at
+ *   reset) wins over a late guess; between equally trusted sources the higher reference wins (a
+ *   higher day-start is a higher daily-loss floor); `currentDayCounted` is sticky.
+ * - Completed-day history is the union by day (on a conflict the later observation's entry), so
+ *   evidence is never dropped by a writer that had not seen it.
+ * - Balance and `updatedAt` come from the later observation; an equal timestamp lets the incoming
+ *   state win.
  */
 export function mergeAccountTracking(
   stored: AccountTracking,
@@ -185,9 +201,57 @@ export function mergeAccountTracking(
       incoming: incoming.accountId,
     });
   }
-  const base = Date.parse(incoming.updatedAt) >= Date.parse(stored.updatedAt) ? incoming : stored;
+  const incomingIsLater = Date.parse(incoming.updatedAt) >= Date.parse(stored.updatedAt);
+  const later = incomingIsLater ? incoming : stored;
+  const earlier = incomingIsLater ? stored : incoming;
+  const sameDay = stored.tradingDayKey === incoming.tradingDayKey;
+  // Trading-day keys are ISO dates: lexicographic order is chronological.
+  const dayOwner = sameDay
+    ? later
+    : incoming.tradingDayKey > stored.tradingDayKey
+      ? incoming
+      : stored;
+
+  let day: Pick<
+    AccountTracking,
+    'tradingDayKey' | 'dayStartBalance' | 'dayStartEquity' | 'dayStartSource' | 'currentDayCounted'
+  >;
+  if (!sameDay) {
+    day = {
+      tradingDayKey: dayOwner.tradingDayKey,
+      dayStartBalance: dayOwner.dayStartBalance,
+      dayStartEquity: dayOwner.dayStartEquity,
+      dayStartSource: dayOwner.dayStartSource,
+      currentDayCounted: dayOwner.currentDayCounted,
+    };
+  } else {
+    const rank = (t: AccountTracking) => DAY_START_RANK[t.dayStartSource];
+    let ref = later;
+    if (rank(earlier) > rank(later)) ref = earlier;
+    const trustedBoth = rank(stored) === rank(incoming);
+    day = {
+      tradingDayKey: later.tradingDayKey,
+      dayStartBalance: trustedBoth
+        ? Math.max(stored.dayStartBalance, incoming.dayStartBalance)
+        : ref.dayStartBalance,
+      dayStartEquity: trustedBoth
+        ? Math.max(stored.dayStartEquity, incoming.dayStartEquity)
+        : ref.dayStartEquity,
+      dayStartSource: ref.dayStartSource,
+      currentDayCounted: stored.currentDayCounted || incoming.currentDayCounted,
+    };
+  }
+
+  const days = new Map<string, { day: string; pnl: number }>();
+  for (const d of [...earlier.completedDays, ...later.completedDays]) days.set(d.day, d);
+  const completedDays = [...days.values()].sort((x, y) =>
+    x.day < y.day ? -1 : x.day > y.day ? 1 : 0,
+  );
+
   return AccountTrackingSchema.parse({
-    ...base,
+    ...later,
+    ...day,
+    completedDays: completedDays.slice(-400),
     equityPeak: Math.max(stored.equityPeak, incoming.equityPeak),
     balancePeak: Math.max(stored.balancePeak, incoming.balancePeak),
     endOfDayBalancePeak: Math.max(stored.endOfDayBalancePeak, incoming.endOfDayBalancePeak),

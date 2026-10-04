@@ -145,7 +145,9 @@ export class AccountService {
     if (!account || !profile || !entry)
       return notObserved('UNAVAILABLE', `unknown account ${accountId}`, 'account-tracking');
     try {
-      const prev = entry.tracking ?? (await repo.getTracking(accountId));
+      // The persisted state is authoritative (another process may have advanced it); the cache is
+      // only a fallback when nothing is stored yet.
+      const prev = (await repo.getTracking(accountId)) ?? entry.tracking;
       if (!prev)
         return notObserved('UNAVAILABLE', 'no stored account tracking', 'account-tracking');
       const activity = await this.activity(accountId);

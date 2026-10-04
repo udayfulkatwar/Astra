@@ -137,6 +137,139 @@ describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
       updatedAt: newer.updatedAt,
     });
   });
+  const D1 = '2026-09-28';
+  const sameDay = (o: Record<string, unknown>) =>
+    ({ ...base, tradingDayKey: D1, ...o }) as typeof base;
+
+  it('same day: a stale writer with a NEWER timestamp and a lower reference cannot loosen the day-start', () => {
+    const stored = sameDay({
+      dayStartBalance: 50_200,
+      dayStartEquity: 50_300,
+      updatedAt: '2026-09-28T14:00:05.000Z',
+    });
+    const stale = sameDay({
+      dayStartBalance: 49_900,
+      dayStartEquity: 49_900,
+      lastBalance: 49_500,
+      updatedAt: '2026-09-28T14:00:20.000Z',
+    });
+    const m = mergeAccountTracking(stored, stale);
+    expect(m).toMatchObject({
+      dayStartBalance: 50_200,
+      dayStartEquity: 50_300,
+      lastBalance: 49_500,
+      updatedAt: stale.updatedAt,
+    });
+  });
+
+  it('same day, equal timestamps: references take the max; the incoming state supplies the rest', () => {
+    const at = '2026-09-28T14:00:05.000Z';
+    const stored = sameDay({
+      dayStartBalance: 50_000,
+      dayStartEquity: 50_100,
+      lastBalance: 50_000,
+      updatedAt: at,
+    });
+    const incoming = sameDay({
+      dayStartBalance: 50_050,
+      dayStartEquity: 50_000,
+      lastBalance: 49_000,
+      updatedAt: at,
+    });
+    expect(mergeAccountTracking(stored, incoming)).toMatchObject({
+      dayStartBalance: 50_050,
+      dayStartEquity: 50_100,
+      lastBalance: 49_000,
+    });
+  });
+
+  it('a measured day-start beats a late guess, in either order', () => {
+    const measured = sameDay({
+      dayStartBalance: 50_000,
+      dayStartEquity: 50_000,
+      dayStartSource: 'OBSERVED_AT_RESET',
+      updatedAt: '2026-09-28T22:00:00.000Z',
+    });
+    const guess = sameDay({
+      dayStartBalance: 51_000,
+      dayStartEquity: 51_000,
+      dayStartSource: 'OBSERVED_LATE',
+      updatedAt: '2026-09-28T22:05:00.000Z',
+    });
+    for (const m of [
+      mergeAccountTracking(measured, guess),
+      mergeAccountTracking(guess, { ...measured, updatedAt: '2026-09-28T22:10:00.000Z' }),
+    ]) {
+      expect(m).toMatchObject({
+        dayStartBalance: 50_000,
+        dayStartEquity: 50_000,
+        dayStartSource: 'OBSERVED_AT_RESET',
+      });
+    }
+  });
+
+  it("a genuine day reset takes the new day's references and never carries yesterday's higher floor", () => {
+    const yesterday = sameDay({
+      dayStartBalance: 50_800,
+      dayStartEquity: 50_900,
+      currentDayCounted: true,
+      tradingDaysCount: 4,
+      updatedAt: '2026-09-28T20:00:00.000Z',
+    });
+    const today = {
+      ...base,
+      tradingDayKey: '2026-09-29',
+      dayStartBalance: 49_900,
+      dayStartEquity: 49_950,
+      dayStartSource: 'OBSERVED_AT_RESET' as const,
+      currentDayCounted: false,
+      tradingDaysCount: 4,
+      completedDays: [{ day: D1, pnl: -100 }],
+      updatedAt: '2026-09-29T21:05:00.000Z',
+    };
+    const m = mergeAccountTracking(yesterday, today);
+    expect(m).toMatchObject({
+      tradingDayKey: '2026-09-29',
+      dayStartBalance: 49_900,
+      dayStartEquity: 49_950,
+      currentDayCounted: false,
+    });
+    expect(m.completedDays).toEqual([{ day: D1, pnl: -100 }]);
+    // A stale writer still on yesterday cannot drag the state back, even arriving afterwards.
+    expect(mergeAccountTracking(m, yesterday)).toMatchObject({
+      tradingDayKey: '2026-09-29',
+      dayStartBalance: 49_900,
+    });
+  });
+
+  it('completed-day history is the union (evidence is never dropped) and the counted flag is sticky', () => {
+    const stored = sameDay({
+      completedDays: [
+        { day: '2026-09-24', pnl: 100 },
+        { day: '2026-09-25', pnl: -50 },
+      ],
+      currentDayCounted: true,
+      updatedAt: '2026-09-28T14:00:05.000Z',
+    });
+    const stale = sameDay({
+      completedDays: [{ day: '2026-09-24', pnl: 100 }],
+      currentDayCounted: false,
+      updatedAt: '2026-09-28T14:00:30.000Z',
+    });
+    const m = mergeAccountTracking(stored, stale);
+    expect(m.completedDays.map((d) => d.day)).toEqual(['2026-09-24', '2026-09-25']);
+    expect(m.currentDayCounted).toBe(true);
+    const extra = sameDay({
+      completedDays: [{ day: '2026-09-26', pnl: 10 }],
+      updatedAt: '2026-09-28T14:00:40.000Z',
+    });
+    expect(mergeAccountTracking(m, extra).completedDays.map((d) => d.day)).toEqual([
+      '2026-09-24',
+      '2026-09-25',
+      '2026-09-26',
+    ]);
+  });
+
   it('refuses to merge different accounts', () => {
     expect(() => mergeAccountTracking(base, { ...base, accountId: 'other' })).toThrow(
       /different accounts/,

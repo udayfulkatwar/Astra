@@ -5,7 +5,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BrokerAdapter } from '../src/types';
 import { InMemoryExecutionStore } from '../src/memory-store';
-import { snapshotWithReservations } from '../src/reservations';
+import { PaperBrokerAdapter } from '../src/paper/paper-broker';
+import { confirmedClosures, snapshotWithReservations } from '../src/reservations';
+import { runEvidenceScenarios } from './evidence-scenarios';
 import {
   ES,
   decide,
@@ -521,10 +523,10 @@ describe('reservation lifecycle', () => {
     // The gate-time reconcile (flat or not) finds no closure linked to this order: nothing released.
     expect(await s.store.reconcileReservations('acct-a', NOWISO)).toBe(0);
     // A closure for ANOTHER order is no evidence.
-    s.store.closedOrderIds.add('astra-someone-else');
+    s.store.recordClosure('astra-someone-else', 1);
     expect(await s.store.reconcileReservations('acct-a', NOWISO)).toBe(0);
     // Closure recorded for this very order: released exactly once.
-    s.store.closedOrderIds.add(clientOrderId);
+    s.store.recordClosure(clientOrderId, 1);
     expect(await s.store.reconcileReservations('acct-a', NOWISO)).toBe(1);
     expect(await s.store.reconcileReservations('acct-a', NOWISO)).toBe(0);
     expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(0);
@@ -607,6 +609,186 @@ describe('reservation lifecycle', () => {
     const r = await s.gateway.execute('a1');
     expect(r.outcome).toBe('REJECTED');
     expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(0);
+  });
+});
+
+describe('closure must cover the cumulative fill (partial closure retains exposure)', () => {
+  const at = '2026-09-28T14:00:05.000Z';
+  it('qty 3: fill 1, close that 1, then the remaining 2 fill → the reservation stays until all 3 are closed', async () => {
+    const s = setup();
+    const d = s.add({ approvalId: 'a1', signalId: 's1' });
+    const order = {
+      orderId: 'o1',
+      clientOrderId: 'astra-a1',
+      approvalId: 'a1',
+      decisionId: d.approval.decisionId,
+      accountId: 'acct-a',
+      strategyId: 's',
+      signalId: 's1',
+      adapterId: 'paper',
+      mode: 'PAPER' as const,
+      symbol: 'NQ',
+      direction: 'LONG' as const,
+      quantity: 3,
+      entryType: 'MARKET' as const,
+      plannedEntry: 20_000,
+      stopLoss: 19_990,
+      takeProfit: 20_030,
+      status: 'PENDING_SUBMIT' as const,
+      brokerOrderId: null,
+      filledQuantity: 0,
+      averageFillPrice: null,
+      rejectReason: null,
+      expiresAt: null,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const v = (await s.store.accountExposure('acct-a')).version;
+    expect(await s.store.reserveAndConsume({ order, expectedVersion: v, at, intent: {} })).toEqual({
+      ok: true,
+    });
+    const state = (status: 'PARTIALLY_FILLED' | 'FILLED', filled: number) => ({
+      clientOrderId: 'astra-a1',
+      brokerOrderId: 'b',
+      status,
+      quantity: 3,
+      filledQuantity: filled,
+      averageFillPrice: 20_000,
+      rejectReason: null,
+      updatedAt: at,
+    });
+    await s.store.updateOrder('astra-a1', state('PARTIALLY_FILLED', 1));
+    s.store.recordClosure('astra-a1', 1); // the first unit was closed
+    await s.store.updateOrder('astra-a1', state('FILLED', 3)); // then the remaining 2 filled
+    expect(await s.store.reconcileReservations('acct-a', at)).toBe(0);
+    expect((await s.store.accountExposure('acct-a')).reservations[0]).toMatchObject({
+      reservedQuantity: 3,
+      filledQuantity: 3,
+    });
+    s.store.recordClosure('astra-a1', 1); // 2 of 3 closed: still open exposure
+    expect(await s.store.reconcileReservations('acct-a', at)).toBe(0);
+    s.store.recordClosure('astra-a1', 1); // all 3 closed
+    expect(await s.store.reconcileReservations('acct-a', at)).toBe(1);
+  });
+
+  it('confirmedClosures is cumulative-quantity based and never releases on a non-ended order', () => {
+    const r = (status: 'ACCEPTED' | 'FILLED' | 'CANCELLED', reserved: number) =>
+      ({ clientOrderId: 'x', orderStatus: status, reservedQuantity: reserved }) as never;
+    expect(confirmedClosures([r('FILLED', 3)], new Map([['x', 2.999]]))).toHaveLength(0);
+    expect(confirmedClosures([r('FILLED', 3)], new Map([['x', 3]]))).toHaveLength(1);
+    expect(confirmedClosures([r('CANCELLED', 1)], new Map([['x', 1]]))).toHaveLength(1);
+    expect(confirmedClosures([r('ACCEPTED', 1)], new Map([['x', 5]]))).toHaveLength(0);
+    expect(confirmedClosures([r('FILLED', 3)], new Map())).toHaveLength(0);
+  });
+});
+
+describe('contradictory broker evidence never frees risk (in-memory parity)', () => {
+  it('zero/decreasing/malformed fills and out-of-order states retain the reservation', async () => {
+    const store = new InMemoryExecutionStore();
+    let n = 0;
+    const at = '2026-09-28T14:00:00.000Z';
+    await runEvidenceScenarios({
+      a: store,
+      b: store,
+      async newOrder(symbol, quantity) {
+        const id = ++n;
+        store.addApproval({
+          approvalId: `apr_e${id}`,
+          decisionId: `dec_e${id}`,
+          accountId: 'acct-a',
+          strategyId: 's',
+          signalId: `sg${id}`,
+          mode: 'PAPER',
+          expiresAt: '2026-09-28T14:10:00.000Z',
+          state: 'PENDING',
+          orderPlan: {
+            symbol,
+            direction: 'LONG',
+            entryType: 'MARKET',
+            entry: 20_000,
+            stop: 19_990,
+            target: 20_030,
+            quantity,
+          },
+        });
+        const order = {
+          orderId: `o_e${id}`,
+          clientOrderId: `astra-apr_e${id}`,
+          approvalId: `apr_e${id}`,
+          decisionId: `dec_e${id}`,
+          accountId: 'acct-a',
+          strategyId: 's',
+          signalId: `sg${id}`,
+          adapterId: 'paper',
+          mode: 'PAPER' as const,
+          symbol,
+          direction: 'LONG' as const,
+          quantity,
+          entryType: 'MARKET' as const,
+          plannedEntry: 20_000,
+          stopLoss: 19_990,
+          takeProfit: 20_030,
+          status: 'PENDING_SUBMIT' as const,
+          brokerOrderId: null,
+          filledQuantity: 0,
+          averageFillPrice: null,
+          rejectReason: null,
+          expiresAt: null,
+          createdAt: at,
+          updatedAt: at,
+        };
+        const v = (await store.accountExposure('acct-a')).version;
+        expect(
+          await store.reserveAndConsume({ order, expectedVersion: v, at, intent: {} }),
+        ).toEqual({ ok: true });
+        await store.markDispatching(order.clientOrderId, at);
+        return order.clientOrderId;
+      },
+      recordClosure: (id, q) => Promise.resolve(store.recordClosure(id, q)),
+      order: (id) => Promise.resolve(store.orders.get(id) ?? null),
+      events: (id) =>
+        Promise.resolve(store.events.filter((e) => e.clientOrderId === id).map((e) => e.type)),
+    });
+  });
+});
+
+describe('a synchronous submit failure is handled as uncertainty, not as "nothing transmitted"', () => {
+  it('adapter records the order, then throws synchronously: polled and confirmed, never resent', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    // The class method, not the spy that setup() installed on the instance.
+    const real = PaperBrokerAdapter.prototype.submitOrder.bind(s.paper);
+    s.submit.mockImplementation((req) => {
+      void real(req); // the broker received and recorded it ...
+      throw new Error('socket reset after write'); // ... but the call threw synchronously
+    });
+    const r = await s.gateway.execute('a1');
+    expect(r.outcome).toBe('CONFIRMED');
+    expect(reasons(r)).not.toMatch(/nothing was transmitted/);
+    expect(r.brokerState).toMatchObject({ status: 'FILLED' });
+    expect(s.submit).toHaveBeenCalledTimes(1);
+    expect(s.store.events.map((e) => e.type)).toContain('SUBMIT_ERROR');
+    expect(s.store.orders.get('astra-a1')!.status).toBe('FILLED');
+  });
+
+  it('adapter throws synchronously with no trace at the broker: UNKNOWN, execution halted, reservation kept, never resent', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    s.submit.mockImplementation(() => {
+      throw new Error('ECONNRESET');
+    });
+    vi.spyOn(s.paper, 'getOrder').mockResolvedValue(null);
+    const unknown = vi.fn(() => Promise.resolve());
+    const gw = makeGateway(s.w, s.store, s.broker, { onExecutionUnknown: unknown });
+    const r = await gw.execute('a1');
+    expect(r.outcome).toBe('UNKNOWN');
+    expect(reasons(r)).toMatch(/submission error \(ECONNRESET\)/);
+    expect(reasons(r)).not.toMatch(/nothing was transmitted/);
+    expect(unknown).toHaveBeenCalledTimes(1);
+    expect(s.store.orders.get('astra-a1')!.status).toBe('UNKNOWN');
+    expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(1);
+    expect((await gw.execute('a1')).outcome).toBe('REJECTED'); // duplicate execution
+    expect(s.submit).toHaveBeenCalledTimes(1);
   });
 });
 

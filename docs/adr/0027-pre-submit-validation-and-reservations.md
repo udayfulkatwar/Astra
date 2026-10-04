@@ -50,17 +50,28 @@ twice, and an in-process mutex cannot prevent that across processes.
    therefore refuses, releases the (provably untransmitted) reservation and sends nothing.
    Tracking is advanced from the fresh snapshot and persisted MONOTONICALLY (`saveTracking`
    merges under a row lock; peaks and counters never decrease, an older observation never replaces
-   a newer one), so a stale cache in another instance cannot lower a drawdown/daily-loss reference.
+   a newer one), so a stale cache in another instance cannot lower a drawdown/daily-loss reference. The merge is
+   same-day aware: peaks/counters take the max; within one trading day the day-start references
+   never loosen (a measured/reported value beats a late guess, equal trust takes the higher),
+   completed-day history is unioned, and a genuine day reset takes the NEW day's references
+   (yesterday's floor is never carried over). Fresh tracking is built from the persisted state.
 5. **Dispatch intent.** `markDispatching` durably records that submit is about to start (and fails
    once the reservation is released). Orders reserved but never marked dispatched are provably
    untransmitted: the gateway (final-check failure) or restart reconciliation releases them.
 6. **Release only on evidence.** A reservation is released by: broker REJECTED/CANCELLED/EXPIRED
-   with nothing filled; proof the broker was never contacted (above); or a recorded closure
-   linked to the same `clientOrderId`. A partially filled order that ended keeps only its filled
-   quantity. Time, leases and a temporarily flat snapshot never release. Network uncertainty
-   (`UNKNOWN`, lost response, post-submit persistence failure) keeps the reservation, activates the
-   account EXECUTION kill switch, and new entries refuse while any order is unresolved. A lost
-   response is resolved by polling the broker by `clientOrderId`, never by resending.
+   with nothing ever filled; proof the broker was never contacted (above); or recorded closures
+   for the SAME `clientOrderId` whose CUMULATIVE quantity covers everything the order filled (a
+   partial closure, e.g. fill 1 → close 1 → 2 more fill, keeps the whole reservation). A partially
+   filled order that ended keeps its cumulative fill. Time, leases and a temporarily flat snapshot
+   never release. Broker evidence is applied monotonically (`applyOrderState`): fills never
+   decrease and the lifecycle never moves backwards; malformed, decreasing, overfilled, stale
+   (out-of-order) or self-contradicting evidence (e.g. partial 1 then CANCELLED/FILLED reporting 0) is NOT applied as stated: the cumulative known fill is preserved, the full reservation is
+   kept, the order becomes UNKNOWN (`STATE_CONTRADICTORY` event, execution halted by the callers)
+   until a consistent authoritative state resolves it. Network uncertainty (`UNKNOWN`, lost
+   response, a synchronous or asynchronous adapter failure, post-submit persistence failure) keeps
+   the reservation, activates the account EXECUTION kill switch, and new entries refuse while any
+   order is unresolved. A lost response is resolved by polling the broker by `clientOrderId`,
+   never by resending.
 7. **Positions are not netted.** `OpenPosition` carries no originating order id. A visible
    position therefore never reduces or releases a reservation: a filled order is counted twice
    (position + reservation) until its closure is recorded. This is deliberately conservative.
@@ -82,11 +93,18 @@ twice, and an in-process mutex cannot prevent that across processes.
   reservation stays until an operator-audited release exists (not built). Only the paper adapter
   provides closure linkage today. An in-flight commit whose acknowledgement was lost keeps its
   symbol reserved until the next restart reconciliation.
+- Known limitation: evidence arriving AFTER a reservation was released as "ended with nothing
+  filled" (a cancelled order that later reports a fill) is not re-checked against the released
+  reservation; the order row is not protected by it.
 - Reservation counts the entry/stop exposure through the existing engines; costs are exactly those
   the existing sizing and rules already include. Nothing here relaxes any limit.
 
 ## Consequences
 
-Migration `0010` adds the ledger and reservations (and back-fills in-flight orders). Gateways
+Migration `0010` adds the ledger and reservations (and back-fills in-flight orders); `0011`
+back-fills ended orders whose fills are not yet covered by recorded closures (unknown legacy fill
+→ the full approved quantity is held; two unresolved exposures on one account/symbol make the
+migration FAIL so a human reconciles them — it never invents flatness; no order is submitted
+while migrations run, which happen before the runtime starts). Gateways
 require `revalidate` and `revalidationTimeoutMs`. SHADOW keeps its semantics: re-checked control
 plane, recorded, never transmitted, no reservation, no revalidation.

@@ -95,3 +95,40 @@ describe.skipIf(!available)('API — pre-submit revalidation (S001)', () => {
     }
   });
 });
+
+describe.skipIf(!available)(
+  "API — fresh tracking vs another instance's same-day state (S001)",
+  () => {
+    it('builds from the persisted state and never loosens the same-day reference or drops history', async () => {
+      h = await createHarness();
+      await bringOnline(h);
+      const account = h.runtime.config.accounts.get('paper-demo')!;
+      const repo = h.runtime.repos.accounts;
+      const cached = (await repo.getTracking(account.id))!; // what this instance's cache believes
+      // Another instance advanced the SAME trading day: higher references + an extra completed day.
+      h.clock.advance(1_000);
+      await repo.saveTracking({
+        ...cached,
+        dayStartBalance: cached.dayStartBalance + 500,
+        dayStartEquity: cached.dayStartEquity + 500,
+        completedDays: [{ day: '2026-09-25', pnl: 321 }],
+        updatedAt: h.clock.now().toISOString(),
+      });
+      h.clock.advance(1_000);
+      const snap = await h.runtime.execution
+        .paper()
+        .getAccountSnapshot(account.broker.accountRef, account.id);
+      const t = await h.runtime.accounts.freshTracking(account.id, snap, 'SIMULATED');
+      expect(t.status).toBe('OK');
+      if (t.status === 'OK') {
+        expect(t.value.dayStartBalance).toBe(cached.dayStartBalance + 500);
+        expect(t.value.dayStartEquity).toBe(cached.dayStartEquity + 500);
+        expect(t.value.completedDays).toEqual([{ day: '2026-09-25', pnl: 321 }]);
+      }
+      // And what is persisted afterwards is the same merged state.
+      expect(await repo.getTracking(account.id)).toMatchObject({
+        dayStartBalance: cached.dayStartBalance + 500,
+      });
+    });
+  },
+);

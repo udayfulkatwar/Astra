@@ -146,7 +146,8 @@ export class ExecutionService {
         const state = await adapter.getOrder(account.broker.accountRef, o.clientOrderId);
         // A resting LIMIT the broker still holds is a known state (the safety loop tracks it).
         if (state && (isTerminal(state.status) || isWorking(state))) {
-          await this.deps.store.updateOrder(o.clientOrderId, state);
+          const applied = await this.deps.store.updateOrder(o.clientOrderId, state);
+          if (applied.contradiction) unresolved++; // contradictory evidence is never resolution
           await this.deps.store.appendOrderEvent({
             clientOrderId: o.clientOrderId,
             at: this.deps.clock.now().toISOString(),

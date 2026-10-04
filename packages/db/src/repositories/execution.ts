@@ -12,6 +12,7 @@ import type {
   OrderEvent,
   OrderRecord,
   OrderStatus,
+  OrderUpdateResult,
   ReserveResult,
 } from '@astra/execution';
 import type { Queryable, Sql } from '../client';
@@ -245,26 +246,38 @@ export class ExecutionRepository implements ExecutionStore {
     }
   }
 
-  async updateOrder(clientOrderId: string, s: BrokerOrderState): Promise<void> {
-    await this.sql.begin(async (tx) => {
+  async updateOrder(clientOrderId: string, s: BrokerOrderState): Promise<OrderUpdateResult> {
+    return this.sql.begin(async (tx) => {
       const accountId = await accountOf(tx, clientOrderId);
       await lockLedger(tx, accountId, s.updatedAt);
-      await tx`
-        update orders set status = ${s.status}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
-               filled_quantity = ${s.filledQuantity}, average_fill_price = ${s.averageFillPrice},
-               reject_reason = ${s.rejectReason}, updated_at = ${s.updatedAt}
-         where client_order_id = ${clientOrderId}`;
       const rows = await tx<ReservationRow[]>`
-        select * from exposure_reservations where client_order_id = ${clientOrderId} and released_at is null`;
-      if (!rows[0]) return;
-      const u = applyOrderState(mapReservation(rows[0]), s);
+        select * from exposure_reservations where client_order_id = ${clientOrderId} and released_at is null for update`;
+      const u = rows[0] ? applyOrderState(mapReservation(rows[0]), s) : null;
+      const status = u ? u.orderStatus : s.status;
+      const filled = u ? u.filledQuantity : s.filledQuantity;
+      const avg = u ? u.averageFillPrice : s.averageFillPrice;
+      const reason = u?.contradiction
+        ? `contradictory broker evidence: ${u.contradiction}`
+        : s.rejectReason;
+      await tx`
+        update orders set status = ${status}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
+               filled_quantity = ${filled}, average_fill_price = ${avg},
+               reject_reason = ${reason}, updated_at = ${s.updatedAt}
+         where client_order_id = ${clientOrderId}`;
+      if (!u) return { contradiction: null };
       await tx`
         update exposure_reservations
            set reserved_quantity = ${u.reservedQuantity}, filled_quantity = ${u.filledQuantity},
                average_fill_price = ${u.averageFillPrice}, order_status = ${u.orderStatus},
                released_at = ${u.release ? s.updatedAt : null}, release_reason = ${u.release}
          where client_order_id = ${clientOrderId}`;
+      if (u.contradiction)
+        await tx`
+          insert into order_events (client_order_id, at, type, detail)
+          values (${clientOrderId}, ${s.updatedAt}, 'STATE_CONTRADICTORY',
+                  ${jsonb(tx, { reason: u.contradiction, incoming: { ...s } })})`;
       await bumpLedger(tx, accountId, s.updatedAt);
+      return { contradiction: u.contradiction };
     });
   }
 
@@ -432,10 +445,14 @@ export class ExecutionRepository implements ExecutionStore {
       const closed =
         ids.length === 0
           ? []
-          : await tx<{ client_order_id: string }[]>`
-              select client_order_id from closed_trades
-               where account_id = ${accountId} and client_order_id in ${tx(ids)}`;
-      const done = confirmedClosures(active, new Set(closed.map((c) => c.client_order_id)));
+          : await tx<{ client_order_id: string; closed: string }[]>`
+              select client_order_id, sum(quantity) as closed from closed_trades
+               where account_id = ${accountId} and client_order_id in ${tx(ids)}
+               group by client_order_id`;
+      const done = confirmedClosures(
+        active,
+        new Map(closed.map((c) => [c.client_order_id, Number(c.closed)])),
+      );
       for (const t of done) {
         await tx`
           update exposure_reservations set released_at = ${at}, release_reason = ${t.reason}

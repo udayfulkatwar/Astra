@@ -474,32 +474,33 @@ export class ExecutionGateway {
     if (!finalGate.ok) return notSent(...finalGate.reasons);
     const last = this.control(approval);
     if (!last.ok) return notSent(...last.reasons);
-    const pending = adapter.submitOrder({
-      clientOrderId: order.clientOrderId,
-      accountRef: account.broker.accountRef,
-      symbol: plan.symbol,
-      direction: plan.direction,
-      quantity: plan.quantity,
-      entryType: plan.entryType,
-      ...(plan.entryType === 'LIMIT'
-        ? { limitPrice: plan.entry, ...(plan.expiresAt ? { expiresAt: plan.expiresAt } : {}) }
-        : {}),
-      stopLoss: plan.stop,
-      takeProfit: plan.target,
-    });
-
     let submitted: BrokerOrderState | null = null;
     let submitError: string | null = null;
     let recordError: string | null = null;
     try {
-      submitted = await pending;
+      // Initiation is INSIDE the uncertainty handling: an adapter that throws synchronously after
+      // (possibly) dispatching is as uncertain as one whose promise rejects — poll, never resend.
+      submitted = await adapter.submitOrder({
+        clientOrderId: order.clientOrderId,
+        accountRef: account.broker.accountRef,
+        symbol: plan.symbol,
+        direction: plan.direction,
+        quantity: plan.quantity,
+        entryType: plan.entryType,
+        ...(plan.entryType === 'LIMIT'
+          ? { limitPrice: plan.entry, ...(plan.expiresAt ? { expiresAt: plan.expiresAt } : {}) }
+          : {}),
+        stopLoss: plan.stop,
+        takeProfit: plan.target,
+      });
     } catch (err) {
       // The broker may or may not have received it: the outcome is unknown until confirmed.
       submitError = errorMessage(err);
     }
     try {
       if (submitted) {
-        await store.updateOrder(order.clientOrderId, submitted);
+        const applied = await store.updateOrder(order.clientOrderId, submitted);
+        if (applied.contradiction) recordError = applied.contradiction;
         await store.appendOrderEvent({
           clientOrderId: order.clientOrderId,
           at: clock.now().toISOString(),
@@ -535,13 +536,21 @@ export class ExecutionGateway {
     }
 
     try {
-      await store.updateOrder(order.clientOrderId, confirmed);
+      const applied = await store.updateOrder(order.clientOrderId, confirmed);
       await store.appendOrderEvent({
         clientOrderId: order.clientOrderId,
         at: clock.now().toISOString(),
         type: 'CONFIRMED',
         detail: { ...confirmed },
       });
+      if (applied.contradiction) {
+        return this.unknown(
+          order,
+          `contradictory broker evidence (${applied.contradiction}); exposure stays reserved`,
+          confirmed,
+          plan.quantity,
+        );
+      }
     } catch (err) {
       return this.unknown(
         order,
@@ -658,13 +667,18 @@ export class ExecutionGateway {
         await this.deps.onExecutionUnknown(req.accountId, req.clientOrderId, reason);
         return result('UNKNOWN', reason, null);
       }
-      await store.updateOrder(req.clientOrderId, state);
+      const applied = await store.updateOrder(req.clientOrderId, state);
       await store.appendOrderEvent({
         clientOrderId: req.clientOrderId,
         at: clock.now().toISOString(),
         type: 'CANCEL_REQUESTED',
         detail: { reason: req.reason, result: { ...state } },
       });
+      if (applied.contradiction) {
+        const reason = `cancel of ${req.clientOrderId}: contradictory broker evidence (${applied.contradiction})`;
+        await this.deps.onExecutionUnknown(req.accountId, req.clientOrderId, reason);
+        return result('UNKNOWN', reason, state);
+      }
       if (state.status === 'CANCELLED') return result('CANCELLED', req.reason, state);
       if (state.status === 'FILLED') return result('FILLED', 'the order filled first', state);
       if (isTerminal(state.status))
@@ -695,13 +709,18 @@ export class ExecutionGateway {
       state.filledQuantity !== order.filledQuantity ||
       state.averageFillPrice !== order.averageFillPrice;
     if (changed) {
-      await this.deps.store.updateOrder(order.clientOrderId, state);
+      const applied = await this.deps.store.updateOrder(order.clientOrderId, state);
       await this.deps.store.appendOrderEvent({
         clientOrderId: order.clientOrderId,
         at: this.deps.clock.now().toISOString(),
         type: 'STATE_CHANGED',
         detail: { from: order.status, ...state },
       });
+      if (applied.contradiction) {
+        const reason = `contradictory broker evidence (${applied.contradiction}); exposure stays reserved`;
+        await this.deps.onExecutionUnknown(order.accountId, order.clientOrderId, reason);
+        return { state, changed, error: reason };
+      }
     }
     return { state, changed };
   }

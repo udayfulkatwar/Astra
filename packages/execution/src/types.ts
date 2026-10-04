@@ -204,6 +204,11 @@ export type ReserveResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly code: ReserveFailure; readonly reason: string };
 
+export interface OrderUpdateResult {
+  /** null = the evidence was consistent and applied. */
+  readonly contradiction: string | null;
+}
+
 /** Persistence port for execution. Implementations must enforce uniqueness atomically. */
 export interface ExecutionStore {
   getApproval(approvalId: string): Promise<ApprovalRecord | null>;
@@ -215,7 +220,12 @@ export interface ExecutionStore {
   ): Promise<boolean>;
   /** Must throw if an order already exists for the approvalId or clientOrderId. */
   createOrder(order: OrderRecord): Promise<void>;
-  updateOrder(clientOrderId: string, state: BrokerOrderState): Promise<void>;
+  /**
+   * Applies broker evidence. Fills only ever grow and the lifecycle only moves forward: evidence
+   * that contradicts what is known is NOT applied as stated — the order becomes UNKNOWN, its
+   * reservation is kept, and `contradiction` says why (callers must halt/poll, never assume).
+   */
+  updateOrder(clientOrderId: string, state: BrokerOrderState): Promise<OrderUpdateResult>;
   appendOrderEvent(event: OrderEvent): Promise<void>;
   /** Non-terminal orders for the account and symbol. */
   workingOrders(accountId: string, symbol: string): Promise<OrderRecord[]>;
@@ -247,8 +257,9 @@ export interface ExecutionStore {
     opts?: { onlyIfUndispatched?: boolean },
   ): Promise<boolean>;
   /**
-   * Releases ended reservations whose resulting position has a closure recorded for the SAME
-   * clientOrderId. Position visibility alone never releases (positions carry no order id).
+   * Releases ended reservations whose cumulative recorded closure quantity (same clientOrderId)
+   * covers everything the order filled. Partial closures retain the reservation; position
+   * visibility alone never releases (positions carry no order id).
    * Returns how many were released.
    */
   reconcileReservations(accountId: string, at: string): Promise<number>;

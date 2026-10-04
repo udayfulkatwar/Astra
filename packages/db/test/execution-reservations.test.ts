@@ -23,6 +23,7 @@ import { AccountRepository } from '../src/repositories/accounts';
 import { AuditRepository } from '../src/repositories/audit';
 import { DecisionRepository } from '../src/repositories/decisions';
 import { ExecutionRepository } from '../src/repositories/execution';
+import { runEvidenceScenarios } from '../../execution/test/evidence-scenarios';
 import { TEST_DB_URL, createTestDb, dbAvailable, type TestDb } from './helpers';
 
 const available = await dbAvailable();
@@ -313,6 +314,72 @@ describe.skipIf(!available)('reservations on PostgreSQL', () => {
       expect((await reservations()).find((r) => r.clientOrderId === id)).toBeUndefined();
     });
 
+    it('partial closure retains exposure: qty 3, fill 1, close 1 (linked), then 2 more fill → nothing released until all 3 are closed', async () => {
+      const w = fresh();
+      const a = await approve(w, { symbol: 'NQ' });
+      const e = await store.accountExposure('acct-a');
+      const id = `astra-${a.approval.approvalId}`;
+      const order: OrderRecord = {
+        orderId: `o_${id}`,
+        clientOrderId: id,
+        approvalId: a.approval.approvalId,
+        decisionId: a.decision.decisionId,
+        accountId: 'acct-a',
+        strategyId: 'test-strategy',
+        signalId: a.approval.signalId,
+        adapterId: 'paper',
+        mode: 'PAPER',
+        symbol: 'NQ',
+        direction: 'LONG',
+        quantity: 3,
+        entryType: 'MARKET',
+        plannedEntry: 20_000,
+        stopLoss: 19_990,
+        takeProfit: 20_030,
+        status: 'PENDING_SUBMIT',
+        brokerOrderId: null,
+        filledQuantity: 0,
+        averageFillPrice: null,
+        rejectReason: null,
+        expiresAt: null,
+        createdAt: AT,
+        updatedAt: AT,
+      };
+      expect(
+        await store.reserveAndConsume({ order, expectedVersion: e.version, at: AT, intent: {} }),
+      ).toEqual({ ok: true });
+      await store.markDispatching(id, AT);
+      const accounts = new AccountRepository(db.sql);
+      const close = (cid: string, qty: number) =>
+        accounts.recordClosedTrade({
+          id: cid,
+          accountId: 'acct-a',
+          clientOrderId: id,
+          symbol: 'NQ',
+          direction: 'LONG',
+          quantity: qty,
+          entryPrice: 20_000,
+          exitPrice: 19_990,
+          exitReason: 'STOP',
+          realizedPnl: -1,
+          openedAt: AT,
+          closedAt: AT,
+        });
+      await store.updateOrder(id, state(id, 'PARTIALLY_FILLED', 1));
+      await close('ct_p1', 1);
+      await store.updateOrder(id, state(id, 'FILLED', 3));
+      expect(await store.reconcileReservations('acct-a', AT)).toBe(0);
+      expect((await reservations()).find((r) => r.clientOrderId === id)).toMatchObject({
+        reservedQuantity: 3,
+        orderStatus: 'FILLED',
+      });
+      await close('ct_p2', 1);
+      expect(await store.reconcileReservations('acct-a', AT)).toBe(0); // 2 of 3
+      await close('ct_p3', 1);
+      expect(await store.reconcileReservations('acct-a', AT)).toBe(1);
+      expect((await reservations()).find((r) => r.clientOrderId === id)).toBeUndefined();
+    });
+
     it('UNKNOWN survives a restart (new pool, new gateway): still reserved, new entries blocked, never resent', async () => {
       const w = fresh();
       const a = await approve(w, { symbol: 'NQ' });
@@ -417,6 +484,75 @@ describe.skipIf(!available)('reservations on PostgreSQL', () => {
     });
   });
 
+  describe('contradictory broker evidence', () => {
+    it('zero/decreasing/malformed fills and out-of-order states, through two repository instances, never free risk', async () => {
+      const w = fresh();
+      await runEvidenceScenarios({
+        a: store,
+        b: store2,
+        async newOrder(symbol, quantity) {
+          const ap = await approve(w, { symbol: 'NQ' });
+          const e = await store.accountExposure('acct-a');
+          const id = `astra-${ap.approval.approvalId}`;
+          const order: OrderRecord = {
+            orderId: `o_${id}`,
+            clientOrderId: id,
+            approvalId: ap.approval.approvalId,
+            decisionId: ap.decision.decisionId,
+            accountId: 'acct-a',
+            strategyId: 'test-strategy',
+            signalId: ap.approval.signalId,
+            adapterId: 'paper',
+            mode: 'PAPER',
+            symbol,
+            direction: 'LONG',
+            quantity,
+            entryType: 'MARKET',
+            plannedEntry: 20_000,
+            stopLoss: 19_990,
+            takeProfit: 20_030,
+            status: 'PENDING_SUBMIT',
+            brokerOrderId: null,
+            filledQuantity: 0,
+            averageFillPrice: null,
+            rejectReason: null,
+            expiresAt: null,
+            createdAt: AT,
+            updatedAt: AT,
+          };
+          expect(
+            await store.reserveAndConsume({
+              order,
+              expectedVersion: e.version,
+              at: AT,
+              intent: {},
+            }),
+          ).toEqual({ ok: true });
+          await store.markDispatching(id, AT);
+          return id;
+        },
+        async recordClosure(id, q) {
+          await new AccountRepository(db.sql).recordClosedTrade({
+            id: `ct_ev_${id}_${q}`,
+            accountId: 'acct-a',
+            clientOrderId: id,
+            symbol: 'NQ',
+            direction: 'LONG',
+            quantity: q,
+            entryPrice: 1,
+            exitPrice: 1,
+            exitReason: 'STOP',
+            realizedPnl: 0,
+            openedAt: AT,
+            closedAt: AT,
+          });
+        },
+        order: (id) => store2.orderByClientId(id),
+        events: async (id) => (await store.orderEvents(id)).map((e) => e.type),
+      });
+    });
+  });
+
   describe('database failures', () => {
     it('reserve failure: nothing transmitted, nothing consumed', async () => {
       const w = fresh();
@@ -465,6 +601,143 @@ describe.skipIf(!available)('reservations on PostgreSQL', () => {
       rejectReason: null,
       updatedAt: AT,
     });
+  });
+});
+
+describe.skipIf(!available)('migration 0011 backfill of unclosed ended orders', () => {
+  async function upgradeFrom0010(seed: (sql: ReturnType<typeof createDb>) => Promise<void>) {
+    const schema = `mig11_${Math.random().toString(36).slice(2, 8)}`;
+    const admin = postgres(TEST_DB_URL, { max: 1, onnotice: () => undefined });
+    await admin.unsafe(`create schema ${schema}`);
+    const sql = createDb({
+      url: TEST_DB_URL,
+      schema,
+      maxConnections: 2,
+      applicationName: 'astra-mig11',
+    });
+    const old = mkdtempSync(join(tmpdir(), 'astra-mig11-'));
+    for (const f of readdirSync(DEFAULT_MIGRATIONS_DIR))
+      if (f < '0011') copyFileSync(join(DEFAULT_MIGRATIONS_DIR, f), join(old, f));
+    await migrate(sql, old); // 0010 already applied, as on an upgraded installation
+    await seed(sql);
+    return {
+      sql,
+      store: new ExecutionRepository(sql),
+      async done() {
+        await sql.end({ timeout: 5 });
+        await admin.unsafe(`drop schema if exists ${schema} cascade`);
+        await admin.end();
+      },
+    };
+  }
+  let seq = 0;
+  async function legacyOrder(
+    sql: ReturnType<typeof createDb>,
+    o: { symbol: string; status: string; qty: number; filled: number; closed?: number[] },
+  ) {
+    const id = `m${++seq}`;
+    await sql`insert into trade_decisions (id, decided_at, account_id, strategy_id, signal_id, symbol, direction, mode, status,
+                reasons, checks, sizing, order_plan, explanation, config_hash, inputs, approval_id, approval_expires_at, approval_state)
+              values (${`d_${id}`}, now(), 'acct-m', 's', ${`sg_${id}`}, ${o.symbol}, 'LONG', 'PAPER', 'APPROVED', '[]', '[]', 'null',
+                      'null', '{}', 'h', '{}', ${`apr_${id}`}, now(), 'CONSUMED')`;
+    await sql`insert into orders (id, client_order_id, approval_id, decision_id, account_id, strategy_id, signal_id, adapter_id, mode,
+                symbol, direction, quantity, entry_type, planned_entry, stop_loss, take_profit, status, filled_quantity, created_at, updated_at)
+              values (${`o_${id}`}, ${`astra-apr_${id}`}, ${`apr_${id}`}, ${`d_${id}`}, 'acct-m', 's', ${`sg_${id}`}, 'paper', 'PAPER',
+                      ${o.symbol}, 'LONG', ${o.qty}, 'MARKET', 20000, 19990, 20030, ${o.status}, ${o.filled}, now(), now())`;
+    for (const [i, q] of (o.closed ?? []).entries())
+      await sql`insert into closed_trades (id, account_id, client_order_id, symbol, direction, quantity, entry_price, exit_price,
+                  exit_reason, realized_pnl, opened_at, closed_at)
+                values (${`ct_${id}_${i}`}, 'acct-m', ${`astra-apr_${id}`}, ${o.symbol}, 'LONG', ${q}, 1, 1, 'STOP', 0, now(), now())`;
+    return `astra-apr_${id}`;
+  }
+
+  it('reserves unclosed fills conservatively and never invents flatness', async () => {
+    let ids: Record<string, string> = {};
+    const h = await upgradeFrom0010(async (sql) => {
+      ids = {
+        filled: await legacyOrder(sql, { symbol: 'NQ', status: 'FILLED', qty: 2, filled: 2 }),
+        cancelledPartial: await legacyOrder(sql, {
+          symbol: 'ES',
+          status: 'CANCELLED',
+          qty: 3,
+          filled: 1,
+        }),
+        expiredPartiallyClosed: await legacyOrder(sql, {
+          symbol: 'MNQ',
+          status: 'EXPIRED',
+          qty: 3,
+          filled: 2,
+          closed: [1],
+        }),
+        fullyClosed: await legacyOrder(sql, {
+          symbol: 'YM',
+          status: 'FILLED',
+          qty: 2,
+          filled: 2,
+          closed: [1, 1],
+        }),
+        unknownFill: await legacyOrder(sql, { symbol: 'GC', status: 'FILLED', qty: 2, filled: 0 }),
+        rejectedNothing: await legacyOrder(sql, {
+          symbol: 'CL',
+          status: 'REJECTED',
+          qty: 1,
+          filled: 0,
+        }),
+      };
+    });
+    try {
+      await migrate(h.sql);
+      const e = await h.store.accountExposure('acct-m');
+      const by = new Map(e.reservations.map((r) => [r.clientOrderId, r]));
+      expect(by.get(ids.filled!)).toMatchObject({
+        reservedQuantity: 2,
+        filledQuantity: 2,
+        orderStatus: 'FILLED',
+        dispatched: true,
+      });
+      expect(by.get(ids.cancelledPartial!)).toMatchObject({
+        reservedQuantity: 1,
+        filledQuantity: 1,
+        orderStatus: 'CANCELLED',
+      });
+      // Partially closed (1 of 2 filled): the whole fill stays reserved until closures cover it.
+      expect(by.get(ids.expiredPartiallyClosed!)).toMatchObject({
+        reservedQuantity: 2,
+        orderStatus: 'EXPIRED',
+      });
+      // Fully linked closure and a rejection with nothing filled: nothing to hold.
+      expect(by.has(ids.fullyClosed!)).toBe(false);
+      expect(by.has(ids.rejectedNothing!)).toBe(false);
+      // Unknown legacy fill: the full approved quantity is held.
+      expect(by.get(ids.unknownFill!)).toMatchObject({
+        reservedQuantity: 2,
+        filledQuantity: 0,
+        orderStatus: 'FILLED',
+      });
+      expect(e.reservations).toHaveLength(4);
+      expect(e.version).toBeGreaterThanOrEqual(1);
+      // The partially closed one is released only when cumulative closures cover the fill.
+      await h.sql`insert into closed_trades (id, account_id, client_order_id, symbol, direction, quantity, entry_price, exit_price,
+                    exit_reason, realized_pnl, opened_at, closed_at)
+                  values ('ct_more', 'acct-m', ${ids.expiredPartiallyClosed!}, 'MNQ', 'LONG', 1, 1, 1, 'STOP', 0, now(), now())`;
+      expect(await h.store.reconcileReservations('acct-m', AT)).toBe(1);
+    } finally {
+      await h.done();
+    }
+  });
+
+  it('ambiguous legacy exposure on one account/symbol blocks the migration (nothing applied)', async () => {
+    const h = await upgradeFrom0010(async (sql) => {
+      await legacyOrder(sql, { symbol: 'NQ', status: 'FILLED', qty: 1, filled: 1 });
+      await legacyOrder(sql, { symbol: 'NQ', status: 'FILLED', qty: 1, filled: 1 });
+    });
+    try {
+      await expect(migrate(h.sql)).rejects.toThrow(/unresolved legacy exposure/);
+      const applied = await h.sql`select name from schema_migrations where name like '0011%'`;
+      expect(applied).toHaveLength(0);
+    } finally {
+      await h.done();
+    }
   });
 });
 
@@ -526,6 +799,76 @@ describe.skipIf(!available)('tracking persistence is monotonic across store inst
         equityPeak: 60_000,
         updatedAt: '2026-09-28T14:00:31.000Z',
       });
+
+      // Same trading day, NEWER timestamp from a stale instance with a lower day-start reference and
+      // no knowledge of a completed day: the reference does not loosen and history is kept.
+      await a.saveTracking({
+        ...t0,
+        dayStartBalance: 50_400,
+        dayStartEquity: 50_400,
+        completedDays: [{ day: '2026-09-25', pnl: 250 }],
+        equityPeak: 60_000,
+        updatedAt: '2026-09-28T14:01:00.000Z',
+      });
+      const afterStale = await b.saveTracking({
+        ...t0,
+        dayStartBalance: 49_000,
+        dayStartEquity: 49_000,
+        completedDays: [],
+        equityPeak: 50_000,
+        updatedAt: '2026-09-28T14:02:00.000Z',
+      });
+      expect(afterStale).toMatchObject({
+        dayStartBalance: 50_400,
+        dayStartEquity: 50_400,
+        equityPeak: 60_000,
+      });
+      expect(afterStale.completedDays).toEqual([{ day: '2026-09-25', pnl: 250 }]);
+      // Equal timestamps with differing same-day references: the higher reference survives.
+      const eq = '2026-09-28T14:03:00.000Z';
+      await Promise.all([
+        a.saveTracking({
+          ...t0,
+          dayStartBalance: 50_500,
+          dayStartEquity: 50_500,
+          equityPeak: 60_000,
+          updatedAt: eq,
+        }),
+        b.saveTracking({
+          ...t0,
+          dayStartBalance: 50_450,
+          dayStartEquity: 50_600,
+          equityPeak: 60_000,
+          updatedAt: eq,
+        }),
+      ]);
+      expect(await a.getTracking('acct-a')).toMatchObject({
+        dayStartBalance: 50_500,
+        dayStartEquity: 50_600,
+      });
+      // A genuine day reset takes the new day's (lower) references; a stale yesterday writer cannot revert it.
+      await a.saveTracking({
+        ...t0,
+        tradingDayKey: '2026-09-29',
+        dayStartBalance: 49_700,
+        dayStartEquity: 49_700,
+        equityPeak: 60_000,
+        completedDays: [
+          { day: '2026-09-25', pnl: 250 },
+          { day: '2026-09-28', pnl: -80 },
+        ],
+        updatedAt: '2026-09-29T21:05:00.000Z',
+      });
+      const reverted = await b.saveTracking({
+        ...t0,
+        dayStartBalance: 50_900,
+        dayStartEquity: 50_900,
+        equityPeak: 60_000,
+        updatedAt: '2026-09-29T21:06:00.000Z',
+      });
+      expect(reverted).toMatchObject({ tradingDayKey: '2026-09-29' });
+      expect(reverted.dayStartBalance).toBe(49_700);
+      expect(reverted.completedDays.map((x) => x.day)).toEqual(['2026-09-25', '2026-09-28']);
     } finally {
       await db2.end({ timeout: 5 });
       await db.cleanup();
