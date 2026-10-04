@@ -43,6 +43,31 @@ DELETE FROM _tombstone_conflict c
     OR (c.tombstone_status = 'FILLED' AND c.tombstone_filled = 0 AND c.closed < c.tombstone_quantity)
     OR c.order_status = 'UNKNOWN');
 
+-- e. 0012 reinstatements. 0012 reinstated a released reservation when ONLY the order record looked
+--    consistent, and then OVERWROTE the tombstone with the order's weaker values (tombstone FILLED 3 /
+--    order FILLED 1 / closed 0 became an active FILLED 1). Its RESERVATION_REINSTATED event kept only the
+--    order's fill, so the original tombstone fill is irrecoverable and cannot be reconstructed here.
+--    Every 0012 reinstatement is therefore treated as UNPROVEN and quarantined (recorded as
+--    prior tombstone fill UNKNOWN), unless closures already cover the full ORDERED quantity (the
+--    tombstone fill cannot exceed it), or an active quarantine already exists. This deliberately
+--    over-blocks a reinstatement that was in fact correct: the account stays blocked until an audited
+--    reconciliation exists (no automatic clearing). The reinstated reservation itself, and any newer
+--    same-symbol active reservation, stay exactly as they are.
+INSERT INTO _tombstone_conflict
+SELECT r.id, r.account_id, r.client_order_id, r.symbol, NULL::timestamptz, 'unknown: overwritten by migration 0012 reinstatement',
+       'UNKNOWN', NULL::numeric, r.quantity, o.status, o.filled_quantity,
+       COALESCE((SELECT SUM(c.quantity) FROM closed_trades c
+                  WHERE c.account_id = r.account_id AND c.client_order_id = r.client_order_id), 0)
+  FROM exposure_reservations r
+  JOIN orders o ON o.client_order_id = r.client_order_id
+ WHERE r.client_order_id IN (SELECT e.client_order_id FROM order_events e
+                              WHERE e.type = 'RESERVATION_REINSTATED' AND e.detail ->> 'migration' = '0012')
+   AND NOT EXISTS (SELECT 1 FROM exposure_quarantines q
+                    WHERE q.account_id = r.account_id AND q.client_order_id = r.client_order_id AND q.cleared_at IS NULL)
+   AND NOT EXISTS (SELECT 1 FROM _tombstone_conflict t WHERE t.reservation_id = r.id)
+   AND COALESCE((SELECT SUM(c.quantity) FROM closed_trades c
+                  WHERE c.account_id = r.account_id AND c.client_order_id = r.client_order_id), 0) < r.quantity;
+
 INSERT INTO order_events (client_order_id, at, type, detail)
 SELECT client_order_id, now(), 'TOMBSTONE_CONTRADICTION_QUARANTINED',
        jsonb_build_object('migration', '0013', 'tombstoneStatus', tombstone_status,
@@ -54,7 +79,7 @@ SELECT client_order_id, now(), 'TOMBSTONE_CONTRADICTION_QUARANTINED',
 INSERT INTO exposure_quarantines (id, account_id, client_order_id, reason, evidence, created_at)
 SELECT 'qtn_0013_' || reservation_id, account_id, client_order_id,
        'migration 0013: released reservation of ' || client_order_id || ' (' || symbol || ') is contradicted or unproven: tombstone '
-         || tombstone_status || ' filled ' || tombstone_filled || ', order ' || order_status
+         || tombstone_status || ' filled ' || COALESCE(tombstone_filled::text, 'UNKNOWN') || ', order ' || order_status
          || ' filled ' || order_filled || ', closed ' || closed,
        jsonb_build_object('releasedAt', released_at, 'releaseReason', release_reason,
                           'tombstone', jsonb_build_object('orderStatus', tombstone_status,

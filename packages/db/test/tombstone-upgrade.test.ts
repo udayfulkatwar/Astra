@@ -328,4 +328,85 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
       }
     });
   }
+
+  for (const from of ['0010', '0011', '0012'] as const) {
+    it(`upgrade from ${from}: a 0012 reinstatement that erased a stronger tombstone (3 -> 1, closed 0) is quarantined as unproven`, async () => {
+      let ids: Record<string, string> = {};
+      const h = await upgradeFrom(from, async (sql) => {
+        // From 0012 the damage is already done: active FILLED/1 plus the reinstatement event that
+        // recorded only the order's fill. From 0010/0011 the real 0012 performs the reinstatement.
+        const post = from === '0012';
+        const row = (filled: number) =>
+          post
+            ? { released: null, status: 'FILLED', filled, reserved: filled }
+            : { released: PREMATURE, status: 'FILLED', filled: 3 };
+        ids = {
+          erased: await legacy(sql, {
+            account: 'acct-r1',
+            symbol: 'NQ',
+            status: 'FILLED',
+            qty: 3,
+            filled: 1,
+            tomb: row(1),
+          }),
+          // a newer commitment on another symbol of the same account
+          newer: await legacy(sql, {
+            account: 'acct-r1',
+            symbol: 'ES',
+            status: 'ACCEPTED',
+            qty: 1,
+            filled: 0,
+            tomb: { released: null, status: 'ACCEPTED', filled: 0, reserved: 1 },
+          }),
+          // fully covered by closures of the ORDERED quantity: provably nothing is missing
+          covered: await legacy(sql, {
+            account: 'acct-r2',
+            symbol: 'YM',
+            status: 'FILLED',
+            qty: 3,
+            filled: 1,
+            closed: [1, 2],
+            tomb: row(1),
+          }),
+        };
+        if (post)
+          for (const k of ['erased', 'covered'])
+            await sql`insert into order_events (client_order_id, at, type, detail)
+                      values (${ids[k]!}, now(), 'RESERVATION_REINSTATED',
+                              ${sql.json({ migration: '0012', filled: 1, closed: 0 })})`;
+      });
+      try {
+        await migrate(h.sql);
+        const e = await h.store.accountExposure('acct-r1');
+        expect(e.quarantines.map((x) => x.clientOrderId)).toEqual([ids.erased]);
+        expect(e.quarantines[0]!.reason).toMatch(/tombstone UNKNOWN filled UNKNOWN/);
+        // The reinstated reservation and the newer commitment are untouched.
+        expect(e.reservations.map((r) => r.clientOrderId).sort()).toEqual(
+          [ids.erased!, ids.newer!].sort(),
+        );
+        expect(e.reservations.find((r) => r.clientOrderId === ids.erased)).toMatchObject({
+          orderStatus: 'FILLED',
+          filledQuantity: 1,
+        });
+        expect(e.reservations.find((r) => r.clientOrderId === ids.newer)).toMatchObject({
+          orderStatus: 'ACCEPTED',
+          reservedQuantity: 1,
+        });
+        expect(await newEntry(h.sql, h.store, 'acct-r1', 'RTY')).toMatchObject({
+          ok: false,
+          code: 'ACCOUNT_QUARANTINED',
+        });
+        // Control: closures cover the whole ordered quantity, so the fill cannot have been larger.
+        expect((await h.store.accountExposure('acct-r2')).quarantines).toHaveLength(0);
+        // Idempotent.
+        const n = async () =>
+          (await h.sql`select count(*)::int as n from exposure_quarantines`)[0]!.n as number;
+        const before = await n();
+        expect((await migrate(h.sql)).applied).toEqual([]);
+        expect(await n()).toBe(before);
+      } finally {
+        await h.done();
+      }
+    });
+  }
 });

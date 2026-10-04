@@ -438,7 +438,9 @@ describe.skipIf(!available)('migration 0012: released-row repair and legacy unkn
           filledQuantity: 3,
           orderStatus: 'FILLED',
         });
-        expect(e.quarantines).toHaveLength(0);
+        // M001 (0013): 0012 overwrote the tombstone when it reinstated, so the original fill is
+        // unproven and the account is quarantined conservatively (no automatic clearing).
+        expect(e.quarantines.map((q) => q.clientOrderId)).toEqual([ids.premature]);
         expect(e.version).toBeGreaterThan(before);
         const ev = (await h.store.orderEvents(ids.premature!)).find(
           (x) => x.type === 'RESERVATION_REINSTATED',
