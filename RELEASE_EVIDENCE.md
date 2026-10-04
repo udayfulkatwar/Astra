@@ -316,3 +316,58 @@ so the full suite was not rerun. Source tiers: CEO primary reads (2026-10-04 UTC
 Claude leads (unverified) and third-party pages (never facts). My direct fetches of the official
 domains were blocked by this environment's egress proxy; I did not fetch the pages the CEO read. No
 profile is VERIFIED and no spend, account, route or contract is selected.
+
+## D001 strict research import calendar timestamps (candidate, pending CEO review)
+
+| Field      | Value                                                                                                                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/d001-import-timestamps` from `aac79c0eb0b0ef5f10a5d93b625b110392b9b630` (P001 docs head; Stage 1 PASS evidence unchanged)                                                              |
+| Tested SHA | code `a432fe860a9cdc9f0d6ebaa04127213c4108993a` (clean committed tree); earlier code heads `a2ca62f2` (rejected by incremental review: ISO 24:00 treated as invalid) not the candidate         |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL`; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before each push), tests 0, build 0                                                        |
+| Tests      | 101 files, 1026 passed, 0 failed, 0 skipped (Stage 1 baseline 100 / 945; +81 tests in `packages/research/test/import-timestamps.test.ts`); self-reported until independent CI                  |
+| Scope      | `packages/research/src/data.ts`, `packages/research/kit/lsfvg_kit.py`, one new test file; no application code, migrations, `docs/research` archives, engine, strategy, sizing or costs changed |
+
+**Observed defect (reproduced on `aac79c0e` in an isolated worktree with synthetic fixtures).**
+`parseBars` used `Date.UTC` for HistData and fixed-offset MT5 and `Date.parse` for generic times, so
+impossible components were normalised into a DIFFERENT valid instant and passed the finite-time and
+OHLC checks. HistData `20240230 120000` → 2024-03-01T17:00Z; `20230229` → 1 March; month 13 →
+2025-01-01; day 0 → 31 Dec; hour 25, minute 60 and second 60 all rolled forward (invalid 0 in each
+case). MT5 with a fixed offset behaved the same (`NY+7`, via Luxon, already rejected impossible dates);
+a two-digit year (`24.01.02`) became 1924 (fixed) or 0024 (`NY+7`). Generic `Date.parse` (V8)
+accepted `2024-02-30` (date-only, `T`, space) as 1 March. The Python kit never shifted (it raised
+`ValueError`) but **aborted the whole file** instead of counting the row invalid — a mismatch with the
+`ParseReport` contract; it also accepted a two-digit MT5 year in fixed-offset mode.
+
+**Correction (parsing boundary only).** New exported `utcMs` validates month 1–12, day against the
+month and the leap rule (incl. century rules), hour 0–23, minute/second 0–59, ms 0–999, year 1–9999
+and builds the instant without `Date.UTC`'s two-digit-year mapping; an impossible value is NaN →
+counted `invalid` ("unreadable time"), dropped, never repaired. HistData, MT5 (fixed offset and
+`NY+7`; 4-digit year, `H[H]:MM[:SS]`) and generic ISO (extended `YYYY-MM-DD`, optional `T`/space time,
+seconds, fraction, `Z`/±hh[:]mm, date-only = UTC midnight) use it. **ISO-8601 end-of-day `24:00`,
+`24:00:00` and `24:00:00.000` is a valid convention and is preserved** as the next midnight of the
+already-validated date (also with a zone; Dec 31 and Feb 29 roll correctly); `24:01`, `24:00:01`,
+`24:00:00.5`, hour 25, `Feb 30 T24:00` and a non-leap `Feb 29 T24:00` are invalid. HistData and MT5
+clocks keep hour 24 invalid (not part of those formats). Epoch seconds/ms are unchanged. The Python
+kit now counts impossible HistData/MT5 fields invalid (no abort), uses the same strict MT5 shapes
+(`re.ASCII`) and implements the same narrow ISO `24:00` rule; `KIT_VERSION` stays `1.0.0` because
+valid-input results and archived outputs are unaffected (previously impossible rows crashed the kit or
+were shifted by the TypeScript loader; the only newly accepted input is generic ISO `24:00`).
+
+**Valid-input compatibility.** HistData fixed UTC−5, MT5 explicit fixed offset and `NY+7` (winter and
+summer), spread values, ordering, de-duplication and the absent-server-offset behaviour are covered by
+positive cases and unchanged; the existing 100 research tests pass. Old real backtests and archived
+no-edge results are byte-identical (`docs/research` untouched; no engine change).
+
+**Tests.** 81 tests in the new file: 77 table cases run through the production `parseBars` (impossible vs valid leap /
+month-end / century boundaries per format, ISO 24:00 positive and negative), a mixed-file ordering/
+duplicate test, `utcMs` boundaries, and a TypeScript-vs-Python-kit parity test over every case (same
+parsed/invalid counts and the same UTC instant). On the base (`aac79c0e`) the first 66-test version of the file failed
+31 tests (every impossible-date case and the Python abort); the valid-input cases passed.
+
+**Out-of-scope concerns recorded, not fixed:** (1) `NY+7` uses Luxon in TypeScript but the kit's built-in
+New York rules start in 2007 — pre-2007 `NY+7` rows are now counted invalid in the kit while TypeScript
+converts them; nonexistent local times in a DST gap are shifted by Luxon (data-quality/DST policy);
+(2) generic ISO basic format (`20240102T120000Z`) is accepted by the Python kit but not by TypeScript;
+(3) non-ISO generic shapes (e.g. `2024/02/05 12:00`) are now unreadable in TypeScript (previously a
+V8 fallback), matching the documented "ISO-8601 or epoch" and the kit; (4) no spread/overlap/resampling
+or data-quality change. No real data was downloaded; no strategy run; no untouched-data or edge claim.
