@@ -181,12 +181,18 @@ async function ownerFence(
   tx: Queryable,
   adapterId: string | null,
   owner: string | undefined,
+  fenced: ReadonlySet<string>,
 ): Promise<string | null> {
   if (!adapterId) return null;
   const rows = await tx<{ session_id: string; state: string }[]>`
     select session_id, state from paper_owner where adapter_id = ${adapterId} for share`;
   const row = rows[0];
-  if (!row) return null;
+  if (!row)
+    // A configured owner-fenced (PAPER) adapter with NO owner record has no DIRTY ACK at all (a
+    // fresh install, a deleted row): fail closed. Other adapters have no owner concept.
+    return fenced.has(adapterId)
+      ? `paper adapter ${adapterId} has no owner record (no DIRTY session ACKed); not admitting`
+      : null;
   if (row.state !== 'DIRTY')
     return `paper adapter ${adapterId} has no live owner session (${row.state}); not admitting`;
   if (owner !== row.session_id) return `the caller is not the current paper owner session (fenced)`;
@@ -248,7 +254,18 @@ async function insertOrderInTx(tx: Queryable, o: OrderRecord): Promise<void> {
 }
 
 export class ExecutionRepository implements ExecutionStore {
-  constructor(private readonly sql: Sql) {}
+  private readonly fencedAdapters: ReadonlySet<string>;
+
+  /**
+   * `fencedAdapters`: adapters whose entries REQUIRE a live DIRTY owner session (the production
+   * wiring passes the PAPER adapter). Any adapter that has an owner row is fenced regardless.
+   */
+  constructor(
+    private readonly sql: Sql,
+    opts: { fencedAdapters?: readonly string[] } = {},
+  ) {
+    this.fencedAdapters = new Set(opts.fencedAdapters ?? []);
+  }
 
   async getApproval(approvalId: string): Promise<ApprovalRecord | null> {
     const rows = await this.sql<
@@ -450,7 +467,7 @@ export class ExecutionRepository implements ExecutionStore {
       ({ ok: false, code, reason }) as const;
     try {
       return await this.sql.begin(async (tx): Promise<ReserveResult> => {
-        const fenced = await ownerFence(tx, o.adapterId, req.owner);
+        const fenced = await ownerFence(tx, o.adapterId, req.owner, this.fencedAdapters);
         if (fenced) return refuse('OWNER_FENCE', fenced);
         const version = await lockLedger(tx, o.accountId, at);
         const quarantine = (await activeQuarantines(tx, o.accountId))[0];
@@ -519,7 +536,12 @@ export class ExecutionRepository implements ExecutionStore {
     await this.sql.begin(async (tx) => {
       const adapter = await tx<{ adapter_id: string | null }[]>`
         select adapter_id from orders where client_order_id = ${clientOrderId}`;
-      const fenced = await ownerFence(tx, adapter[0]?.adapter_id ?? null, owner);
+      const fenced = await ownerFence(
+        tx,
+        adapter[0]?.adapter_id ?? null,
+        owner,
+        this.fencedAdapters,
+      );
       if (fenced) throw new AstraError('CONFLICT', `${fenced}; not dispatching`);
       const accountId = await accountOf(tx, clientOrderId);
       await lockLedger(tx, accountId, at);

@@ -40,6 +40,18 @@ import type { HealthService } from './health-service';
 import type { KillSwitchService } from './kill-switch-service';
 import type { ModeService } from './mode-service';
 
+/** Broker methods that read or change paper state: admitted (or refused) before they run. */
+const GUARDED_BROKER_CALLS: ReadonlySet<string> = new Set([
+  'submitOrder',
+  'getOrder',
+  'cancelOrder',
+  'listOpenOrders',
+  'getAccountSnapshot',
+  'closePosition',
+  'closeAtMarket',
+  'onQuote',
+]);
+
 export class ExecutionService {
   readonly adapters = new Map<string, BrokerAdapter>();
   /** Every public call is an admitted, tracked activity (drained by a clean stop). */
@@ -179,13 +191,29 @@ export class ExecutionService {
     return this.phase !== 'RUNNING';
   }
 
-  /** Every promise-returning broker call (readers included) is counted until it settles. */
+  /**
+   * Every public broker boundary: admission is decided BEFORE the method is invoked (so a refused
+   * reader/mutator never reaches the broker), and every promise-returning call is counted until it
+   * settles. The ONLY internal exceptions, which never go through this proxy, are `exportAccount`
+   * (the final checkpoint's immutable snapshot) and the restore calls (`openAccount`,
+   * `importAccount`, `hasAccount`) that run under the DIRTY ACK; `paper()` is the same raw object
+   * and every state-touching method on it carries the same owner guard (`blocked`).
+   */
   private trackedAdapter(adapter: PaperBrokerAdapter): BrokerAdapter {
     return new Proxy(adapter, {
       get: (target, prop, receiver) => {
         const v: unknown = Reflect.get(target, prop, receiver);
         if (typeof v !== 'function') return v;
         return (...args: unknown[]) => {
+          if (typeof prop === 'string' && GUARDED_BROKER_CALLS.has(prop)) {
+            const why = this.blockReason();
+            if (why) {
+              if (prop === 'onQuote') return undefined;
+              const refusal = new Error(`paper broker unavailable: ${why}`);
+              if (prop === 'closeAtMarket') throw refusal;
+              return Promise.reject(refusal);
+            }
+          }
           const out: unknown = (v as (...a: unknown[]) => unknown).apply(target, args);
           if (out instanceof Promise) this.register(out);
           return out;
@@ -224,6 +252,10 @@ export class ExecutionService {
     if (this.persistenceError)
       return `paper state could not be persisted: ${this.persistenceError}`;
     if (this.phase === 'SEALED') return 'paper is sealed for shutdown';
+    // While closing, ONLY work started inside an admitted activity (same async scope) may touch
+    // paper; a new top-level reader/mutator is refused before it can run.
+    if (this.phase === 'CLOSING' && !this.scope.getStore())
+      return 'execution is shutting down: new paper calls are refused';
     return null;
   }
 

@@ -101,6 +101,61 @@ describe.skipIf(!available)('R004 — drain before CLEAN', () => {
     expect(stored?.state.positions).toHaveLength(0); // the late mutation is in the checkpoint
   });
 
+  it('a NEW top-level broker reader or mutator arriving during a held drain is refused before it runs; admitted work finishes; CLEAN only after', async () => {
+    const h = await online();
+    const d = await approve(h);
+    expect((await execute(h, d.approval.approvalId)).outcome).toBe('CONFIRMED');
+    const paper = h.runtime.execution.paper();
+    const tracked = h.runtime.execution.adapters.get('paper')!;
+    const account = ref(h);
+    const position = paper.exportAccount(account).positions[0]!;
+    const order = (await h.runtime.repos.execution.listOrders({ accountId: 'paper-demo' }))[0]!;
+    const before = JSON.stringify(paper.exportAccount(account));
+    const entered = gateOf();
+    const gate = gateOf();
+    (h.runtime as any).workingOrders.run = async () => {
+      entered.open();
+      await gate.p;
+      // admitted work (same async scope) may still use the broker while the stop drains
+      await tracked.getOrder(account, order.clientOrderId);
+    };
+    const cycle = h.runtime.cycle();
+    await entered.p;
+    let stopped = false;
+    const stopP = h.runtime.stop().then(() => (stopped = true));
+    await sleep(300);
+    // top-level, through the tracked boundary and straight on the raw object
+    const refusals = await Promise.allSettled([
+      tracked.getAccountSnapshot(account, 'paper-demo'),
+      tracked.getOrder(account, order.clientOrderId),
+      tracked.listOpenOrders(account),
+      tracked.cancelOrder(account, order.clientOrderId),
+      tracked.closePosition({
+        accountRef: account,
+        clientCloseId: 'close-late',
+        positionId: position.positionId,
+      } as never),
+      tracked.submitOrder({ clientOrderId: 'astra-late', accountRef: account } as never),
+      paper.getAccountSnapshot(account, 'paper-demo'),
+      paper.getOrder(account, order.clientOrderId),
+    ]);
+    expect(refusals.every((r) => r.status === 'rejected')).toBe(true);
+    expect(() => paper.closeAtMarket(account, position.positionId)).toThrow(/unavailable/);
+    expect(
+      h.runtime.execution.readiness(h.runtime.config.accounts.get('paper-demo')!).reconciled,
+    ).toBe(false);
+    // the internal checkpoint export is NOT a broker call and stays available
+    expect(JSON.stringify(paper.exportAccount(account))).toBe(before); // zero mutation
+    expect(stopped).toBe(false);
+    expect((await owner(h))?.state).toBe('DIRTY');
+    gate.open();
+    await cycle;
+    await stopP;
+    expect((await owner(h))?.state).toBe('CLEAN');
+    const stored = await h.runtime.repos.paperState.loadWithRevision('paper', account);
+    expect(stored?.state.positions).toEqual(JSON.parse(before).positions);
+  });
+
   it('a held entry finishes before CLEAN; an entry that arrives while closing is refused with zero submissions', async () => {
     const h = await online();
     const d1 = await approve(h);

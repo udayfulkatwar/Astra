@@ -241,7 +241,7 @@ describe.skipIf(!available)('paper owner on PostgreSQL (R004 corrections)', () =
   });
 
   describe('durable session fencing of reserve/dispatch', () => {
-    async function seed(n: number) {
+    async function seed(n: number, adapterId = 'paper', fenced = false) {
       const w = makeWorld();
       const d = decide(w, {
         approvalId: `apr_f${n}`,
@@ -249,7 +249,7 @@ describe.skipIf(!available)('paper owner on PostgreSQL (R004 corrections)', () =
         decisionId: `dec_f${n}`,
       });
       await new DecisionRepository(db.sql).record(d.decision, d.inputs);
-      const store = new ExecutionRepository(db.sql);
+      const store = new ExecutionRepository(db.sql, fenced ? { fencedAdapters: ['paper'] } : {});
       const e = await store.accountExposure('acct-a');
       const order = {
         orderId: `ord_f${n}`,
@@ -259,7 +259,7 @@ describe.skipIf(!available)('paper owner on PostgreSQL (R004 corrections)', () =
         accountId: 'acct-a',
         strategyId: 'test-strategy',
         signalId: `sig-f${n}`,
-        adapterId: 'paper',
+        adapterId,
         mode: 'PAPER' as const,
         symbol: 'NQ',
         direction: 'LONG' as const,
@@ -308,6 +308,43 @@ describe.skipIf(!available)('paper owner on PostgreSQL (R004 corrections)', () =
           owner: 'X',
         }),
       ).toMatchObject({ ok: false, code: 'OWNER_FENCE' });
+    });
+
+    it('a PAPER-fenced repository with NO owner record (fresh install / deleted row) fails closed; unfenced and non-paper adapters are unaffected', async () => {
+      const paper = await seed(11, 'paper', true);
+      const req = { order: paper.order, expectedVersion: paper.version, at: AT, intent: {} };
+      expect(await paper.store.reserveAndConsume({ ...req, owner: 'X' })).toMatchObject({
+        ok: false,
+        code: 'OWNER_FENCE',
+      });
+      expect(await paper.store.reserveAndConsume(req)).toMatchObject({
+        ok: false,
+        code: 'OWNER_FENCE',
+      });
+      // a repository that is not owner-fenced (unit fixtures) keeps working with no row at all
+      const plain = await seed(12, 'paper', false);
+      expect(
+        await plain.store.reserveAndConsume({
+          order: plain.order,
+          expectedVersion: plain.version,
+          at: AT,
+          intent: {},
+        }),
+      ).toEqual({ ok: true });
+      // …but the SAME stored PAPER order cannot be dispatched through a fenced repository
+      await expect(paper.store.markDispatching(plain.order.clientOrderId, AT, 'X')).rejects.toThrow(
+        /no owner record/,
+      );
+      // a non-paper adapter is never owner-fenced, even by a fenced repository
+      const other = await seed(13, 'sim', true);
+      expect(
+        await other.store.reserveAndConsume({
+          order: { ...other.order, symbol: 'ES' },
+          expectedVersion: (await other.store.accountExposure('acct-a')).version,
+          at: AT,
+          intent: {},
+        }),
+      ).toEqual({ ok: true });
     });
 
     it('an ownership change DURING the wait of a reserve fails closed', async () => {

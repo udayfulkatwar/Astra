@@ -193,7 +193,8 @@ export class AstraRuntime {
       configVersions: new ConfigVersionRepository(sql),
       killSwitches: new KillSwitchRepository(sql),
       decisions: new DecisionRepository(sql),
-      execution: new ExecutionRepository(sql),
+      // PAPER entries need a live DIRTY owner session in the database (R004 fence).
+      execution: new ExecutionRepository(sql, { fencedAdapters: ['paper'] }),
       accounts: new AccountRepository(sql),
       paperState: new PaperBrokerStateRepository(sql),
       paperOwner: new PaperOwnerRepository(sql),

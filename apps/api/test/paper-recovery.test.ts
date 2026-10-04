@@ -188,6 +188,35 @@ describe.skipIf(!available)('R004 — exclusive ownership', () => {
   });
 });
 
+describe.skipIf(!available)('R004 — a missing owner record fails closed', () => {
+  it('a deleted paper_owner row (no DIRTY ACK) stops the running owner and fences direct repository reserve/dispatch', async () => {
+    const a = await online();
+    const d1 = await approve(a);
+    const d2 = await approve(a);
+    expect((await execute(a, d1.approval.approvalId)).outcome).toBe('CONFIRMED');
+    const order = (await a.runtime.repos.execution.listOrders({ accountId: ACCOUNT }))[0]!;
+    await a.db.sql`delete from paper_owner`;
+    const submit = vi.spyOn(a.runtime.execution.paper(), 'submitOrder');
+    const r = await execute(a, d2.approval.approvalId);
+    expect(r.outcome).toBe('REJECTED');
+    expect(submit).not.toHaveBeenCalled();
+    const repo = a.runtime.repos.execution;
+    await expect(
+      repo.markDispatching(order.clientOrderId, a.clock.now().toISOString(), 'any'),
+    ).rejects.toThrow(/no owner record/);
+    const v = (await repo.accountExposure(ACCOUNT)).version;
+    expect(
+      await repo.reserveAndConsume({
+        order: { ...order, orderId: 'ord_n', clientOrderId: 'astra-n', approvalId: 'apr_n' },
+        expectedVersion: v,
+        at: a.clock.now().toISOString(),
+        intent: {},
+        owner: 'any',
+      }),
+    ).toMatchObject({ ok: false, code: 'OWNER_FENCE' });
+  });
+});
+
 describe.skipIf(!available)('R004 — crash and restart', () => {
   it('terminal/ended orders only, no persisted kill switch: the dirty restart still blocks the gateway AND direct DB reserve/dispatch', async () => {
     const a = await online();
