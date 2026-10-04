@@ -205,6 +205,29 @@ UNKNOWN/kill-switch write lost in an outage) while every order looks terminal or
   matching checkpoints instead of assuming either outcome. No DB/broker atomicity or client ACK
   receipt is claimed.
 - `unknown()` reports the real persistence outcome of the UNKNOWN state, evidence and halt writes.
+- **Review corrections.** (1) The lock lives on a pinned dedicated connection (no idle close, no
+  max-lifetime recycling); `verify()` proves the ORIGINAL backend pid still holds the granted
+  advisory lock (`pg_locks`) and the DIRTY row is ours, and any loss — including the connection
+  closing, observed at once — latches permanently; a later successful query on a reconnected
+  backend never revives it. (2) No owner row is NONE only on a truly empty install: paper
+  snapshots, orders or reservations without an ownership record are legacy evidence ⇒ UNCLEAN. (3)
+  CLEAN requires the checkpoint account set to EQUAL the stored snapshot set with matching
+  revisions and session (a deleted, extra or changed row quarantines; `markClean` refuses a
+  mismatch). (4) Durable session fence: `reserveAndConsume`/`markDispatching` take the owner
+  session id and refuse unless it is the DIRTY session in `paper_owner`, read FOR SHARE FIRST
+  (same lock order as acquire, markClean and snapshot saves: owner row, then ledger/snapshot), so
+  an ownership change during the wait also refuses; the production repository is PAPER-fenced and
+  a missing owner row fails closed (unit fixtures and non-paper adapters are unaffected).
+  Snapshot saves run in one transaction under that same owner lock; an identical-content resend of
+  the same revision is an ACK, different content or any stale session is refused. (5) Recovery
+  pages through EVERY ended order by primary key. (6) Drain: all paper work is an admitted
+  activity (gateway calls, the safety cycle, entries, startup); once closing, new top-level
+  activity and every top-level broker call are refused BEFORE they run, work started inside an
+  admitted activity may finish (async-local scope), the in-flight set is drained until empty
+  (including work admitted after the first snapshot) and the broker is sealed in the same
+  synchronous step; only then is the final checkpoint taken. `exportAccount` (the checkpoint
+  snapshot) and the DIRTY-ACKed restore calls are the only internal exceptions; `paper()` is the
+  same object and every state-touching method carries the same owner guard.
 
 Not solved: distributed takeover, an audited quarantine clearing path, recovery that proves and
 re-applies lost mutations (every unclean paper session blocks the account until one exists), a

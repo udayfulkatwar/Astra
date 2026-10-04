@@ -47,7 +47,11 @@ restored, mutated or read; the row stays DIRTY until a clean stop ACKs a final c
 revisions the next start verifies. Any other previous session quarantines every paper account
 (gateway AND DB reserve/dispatch refuse, no kill switch needed); lock loss halts local admission.
 Snapshots are immutable and revisioned, failed saves are never absorbed. Conservative by design:
-no automatic clearing, no recovery that re-applies lost mutations.
+no automatic clearing, no recovery that re-applies lost mutations. Review lessons: lock identity is
+proved on the original backend (never by "a query succeeded"), legacy evidence without an owner
+record is unclean, CLEAN means exact checkpoint sets, the owner fence lives in the database
+operations (missing row fails closed for PAPER), and a clean stop admits-or-refuses before running
+and drains all paper activity before the checkpoint.
 
 ## F003 design (summary; detail in ADR-0027 §4a)
 

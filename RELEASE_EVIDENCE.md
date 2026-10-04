@@ -130,3 +130,43 @@ takeover); ownership is verified by the caller just before — not inside — th
 SQL; the keepalive interval bounds detection of a silent lock loss between boundary checks;
 legacy sessions from before 0015 cannot be proven clean; S002 queued cancel / protective-close
 permissions unchanged.
+
+## R004 corrections (review rounds 2–3)
+
+| Field      | Value                                                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/r004-paper-recovery` (base F003 docs head `aa75c01e`; F003/M001/default untouched)                                                                                                                                                                            |
+| Rejected   | `484c9a5c` — CI run 37232550276 / job 111525132255 PASS (CEO-located; install/format/lint/typecheck/test/build, 95 files, 874 tests) but the safety review rejected it. `230478e8` — local 97 files / 894 tests / 0 skips; review rejected (see below); no CI located |
+| Tested SHA | code `8c57e6be5b7f9757bb381be26985a405804ab2c5` (clean committed tree); later commits on the branch are documentation only                                                                                                                                            |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before each push), tests 0, build 0                                                                                                                           |
+| Tests      | 97 files, 897 passed, 0 failed, 0 skipped (self-reported until independent CI)                                                                                                                                                                                        |
+| CI         | Triggered by the branch push; result not claimed here                                                                                                                                                                                                                 |
+| Migrations | 0015 only; 0010–0014 unchanged                                                                                                                                                                                                                                        |
+| Software   | IN_PROGRESS — local PASS only; fresh exact-head CI and independent review required. Stage 1 NOT accepted; live DISABLED; no readiness, edge or real-broker claim                                                                                                      |
+
+Fixed (reproduced first in isolated temporary worktrees; the implementation tree was never
+replaced): lock identity pinned and permanently latched (no idle/lifetime recycling, original
+backend pid + granted advisory lock proved on every verify, close observed at once); legacy paper
+evidence without an owner record is UNCLEAN while an empty install is NONE; CLEAN requires exact
+checkpoint/snapshot account sets (deleted/extra/changed rows quarantine, `markClean` refuses);
+durable owner-session fence in `reserveAndConsume`/`markDispatching` (owner row FOR SHARE first,
+consistent lock order with acquire/markClean/save; PAPER-fenced production repository fails closed
+without an owner row; non-paper adapters and unit fixtures unaffected); snapshot saves in one
+transaction under the owner lock (held save vs owner change, stale-owner retry refused, same
+revision with different content never ACKed); recovery pages through every ended order (1,100
+tested; the old 1,000 cap skipped 100); drain: all paper work is an admitted activity, new top-level
+work and top-level broker calls are refused before they run once closing, admitted work (including
+work admitted after the first in-flight snapshot, a held safety cycle, a held entry, startup)
+finishes before the broker is sealed and the checkpoint/CLEAN transition.
+
+Old-base repro: on `484c9a5c` 16 of the 20 then-new tests failed (12/16 `paper-owner`, 4/4
+`paper-drain`; the 4 that passed there were the empty-install, exact-positive, extra-row and
+competitor-BUSY cases); on `230478e8` the 3 tests added for the last review (missing owner row
+direct repository, composed deleted-row, broker call during held drain) failed.
+
+Remaining risks: every unclean paper session still blocks its accounts (no clearing path); recovery
+does not re-apply lost mutations; removing a paper account from config makes the next start
+unclean (strict exact-set rule); PAPER only, no real broker or distributed takeover; a hung
+in-flight operation leaves the session DIRTY after the drain timeout (never CLEAN); S002 queued
+cancel / protective-close permissions unchanged (a protective close arriving while closing is
+refused).
