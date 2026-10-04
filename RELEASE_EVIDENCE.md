@@ -309,8 +309,10 @@ No application behavior changed after the tested code. Standing limitations are 
 
 ## P001 Stage 2 platform-readiness audit (documentation only)
 
-Branch `claude/p001-platform-readiness` from `b9c3b890`; deliverable `docs/ledger/P001_PLATFORM_AUDIT.md`.
-Markdown-only validation: `prettier --check` and a consistency/source review (no code or tests
-changed, so the full suite was not rerun). Source access: official domains blocked by the egress
-proxy; facts are official-domain URLs surfaced by search (O-S), none read verbatim; conflicts and
-unknowns are listed, no profile is VERIFIED, no spend is proposed.
+Branch `claude/p001-platform-readiness` from `b9c3b890`; deliverable `docs/ledger/P001_PLATFORM_AUDIT.md`
+(first published `206c9461`, corrected after CEO review; the final head is named in the hand-off).
+Markdown-only validation: `prettier --check` and a source/consistency review; no code or tests changed,
+so the full suite was not rerun. Source tiers: CEO primary reads (2026-10-04 UTC / 2026-10-05 IST),
+Claude leads (unverified) and third-party pages (never facts). My direct fetches of the official
+domains were blocked by this environment's egress proxy; I did not fetch the pages the CEO read. No
+profile is VERIFIED and no spend, account, route or contract is selected.

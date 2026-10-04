@@ -275,14 +275,17 @@ completed-day conflicts; unclean paper sessions block accounts and recovery does
 mutations; PAPER only — a real broker adapter must supply position↔order linkage (blocks LIVE);
 no distributed takeover. **Live trading is DISABLED; no strategy has a verified edge.**
 
-## Stage 2 — firm/platform selection (IN_PROGRESS; P001 audit done)
+## Stage 2 — firm/platform selection (IN_PROGRESS; P001 audit under CEO review)
 
-`docs/ledger/P001_PLATFORM_AUDIT.md` (2026-10-04): official firm/platform domains could not be
-fetched directly; sourced leads show Lucid (CME futures) permits automation with an unresolved API
-route and cloud-hosting rule, and FundingPips 2 Step Flex pages report VPN/VPS prohibition,
-third-party-EA limits and weekend closure. The founder's named programs are targets, not confirmed
-accounts; no profile is VERIFIED; no strategy is promoted. The minimum founder inputs are listed in
-§9 of the audit.
+`docs/ledger/P001_PLATFORM_AUDIT.md` separates CEO primary reads (P, 2026-10-04 UTC / 2026-10-05 IST),
+unverified Claude leads (L) and third-party pages (never facts). Current P facts: FundingPips 2 Step
+Flex targets 10%/8%, static 12% max loss, VPN/VPS forbidden, own-EA automation needs firm-assessed
+proof (external own-software/API acceptance unresolved), evaluation permits overnight/weekend while
+the Master closes unless Swing; Lucid LucidFlex 25K end-of-day trailing (MLL $1,000, floor $25,100),
+optional DLL, automation permitted with the API/cloud route unresolved; CME MYM/MNQ point values.
+The founder's named programs are targets, not confirmed accounts; no profile is VERIFIED, no
+strategy is promoted, and rule mapping to the profile schema is a gap needing proof. R004 fences are
+PAPER-only. The minimum founder unknown is the exact current account (or none) with its options.
 
 ## Remaining (by phase)
 

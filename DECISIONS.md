@@ -42,12 +42,14 @@ simultaneous workers.
 
 ## P001 (Stage 2) — sourcing rule
 
-Firm/platform facts count only when sourced to the official domain with URL and access date; a
-paraphrase from a search tool is marked O-S (unread verbatim) and third-party pages are never facts.
-The founder's named programs are intended targets, not purchased accounts. No profile is VERIFIED
-without the evidence and owner confirmation; futures contracts and broker CFD symbols are never
-mapped by assumption; no adapter, data purchase or provider activation before the founder's inputs.
-Detail: `docs/ledger/P001_PLATFORM_AUDIT.md`.
+Three evidence tiers: **P** CEO primary read (official URL, access date, short paraphrase), **L** Claude
+search lead (unverified, never a current fact) and **T** third-party (never a fact). A Claude-environment
+`EGRESS_BLOCKED` is not proof a source is unavailable. The founder's named programs are intended
+targets, not purchased accounts; public text never overrides the account's own terms. No profile is
+VERIFIED without the evidence and owner confirmation; futures contracts and broker CFD symbols are
+never mapped by assumption; schema/engine mapping of a firm rule is a gap until proven; R004 fences are
+PAPER-only; no adapter, data purchase or provider activation before the founder's input. Detail:
+`docs/ledger/P001_PLATFORM_AUDIT.md`.
 
 ## Stage 1 integration
 
