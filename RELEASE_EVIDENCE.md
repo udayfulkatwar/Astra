@@ -245,3 +245,46 @@ new/updated tests fail there.
 
 Remaining risks: as in the S002 section above; additionally an unpersisted halt blocks ALL paper
 admission for the session (conservative) until restart/recovery.
+
+## Stage 1 integrated release candidate
+
+| Field      | Value                                                                                                                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/stage1-integrated-release` from accepted S002 docs head `728ac6d796d3de83f4312e8aef86e51d79a233e1`; default branch not touched                                                                          |
+| Ancestry   | Verified in this branch: I001 pieces (`babf911`, `0c0aff9`, `d39129a`), `ba8c487`, S001-R3 `c1ba531`, M001 `3cd84145`, F003 `2e75b104` / `aa75c01e`, R004 `8c57e6be` / `05fc2ef0`, S002 `cee9b7a1` / `728ac6d7` |
+| Tested SHA | code `dcb4f692882137d4b8081c45b393cfe24952b223` (clean committed tree); later commits on the branch are documentation only                                                                                      |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before the push), tests 0, build 0                                                                      |
+| Tests      | 100 files, 945 passed, 0 failed, 0 skipped (S002 accepted baseline 99 / 938; +7 integration tests); self-reported until independent CI                                                                          |
+| CI         | Triggered by the branch push; result not claimed here                                                                                                                                                           |
+| Migrations | 0010–0015 unchanged (empty diff vs M001 `3cd84145` and R004 `8c57e6be`; content hashes now pinned by a test)                                                                                                    |
+| Software   | IN_PROGRESS — integrated candidate for CEO exact-head review. Stage 1 NOT complete; live DISABLED; no readiness, edge or real-broker claim; Stage 2 not started                                                 |
+
+Changes (cleanup and integration blockers only; no behavior change to accepted code):
+
+- Status documents made consistent: `CEO_STATE.md` (one accepted-chain table, rejected history,
+  next step), `docs/PROJECT_STATE.md` (the three "review pending" S001/R3/F003 sections replaced by
+  one Stage 1 section), `docs/WORK_LEDGER.md` (M001, F003, R004, S002, integrated rows; S001/R3 rows
+  marked superseded; lessons 8–10), the stale header of this file replaced by the evidence index above,
+  `CLAUDE.md` (two lessons), `DECISIONS.md`.
+- ADR-0027 "what is and is not safe": the obsolete "run ONE execution process per paper account" and
+  "contradictory-evidence write fails" residuals now point at §9/§10 (R004/S002).
+- New `packages/db/test/upgrade-0015.test.ts` (7 tests): SHA-256 pins of migrations 0010–0015
+  (immutability) and a real-PostgreSQL 0014→0015 upgrade over pre-R004 paper state (legacy snapshot
+  kept with revision 0, empty owner table, first owner start UNCLEAN + quarantine, idempotent re-run).
+- Retained deliberately: `.github/workflows/ci.yml` (required gate), and the two Claude workflows
+  (`claude.yml` routine bridge, `claude-direct-connection-test.yml` diagnostic) — operator tooling
+  that does not affect the product gate; their removal is an owner decision, not a cleanup guess.
+
+Migration evidence in the suite: fresh install (every PostgreSQL suite migrates a new schema),
+idempotence and modified-applied-migration refusal (`migrate-audit`), upgrades from 0010/0011/0012/
+0013 databases (`tombstone-upgrade`), and the 0014→0015 upgrade (`upgrade-0015`).
+
+Cross-component regressions still green in the full run: F003 final guard (decision, gateway, composed
+API with held final ledger wait), R004 (`paper-owner`, `paper-recovery`, `paper-recovery-seam`,
+`paper-drain`), S002 (`queued-actions`, in-memory and composed), S001 pre-submit/late-evidence/
+reservation suites, plus the entire pre-existing suite.
+
+Unresolved (not weakened): no audited quarantine clearing path; unclean paper session blocks its
+accounts; recovery does not re-apply lost mutations; PAPER only (real-broker linkage blocks LIVE);
+no distributed takeover; an unpersisted halt blocks all paper admission until restart; a protective
+close waits behind a long entry validation. LIVE needs the owner (ADR-0008).
