@@ -31,15 +31,6 @@ revalidation/reservation input blocks transmission; reservations release only on
 evidence; evidence contradicting a released reservation quarantines the account durably (never a
 silent re-open or a time-based expiry); conservative refusal over invented headroom.
 
-## Accepted safety rules
-
-Default NO TRADE; any non-OK input rejects; no fabricated data/rules; AI context only (veto, never
-approve); risk, sizing, rules, kill switches and execution permission are deterministic code;
-secrets only via env; live trading never enabled without ADR-0008's six factors; a missing
-revalidation/reservation input blocks transmission; reservations release only on authoritative
-evidence; evidence contradicting a released reservation quarantines the account durably (never a
-silent re-open or a time-based expiry); conservative refusal over invented headroom.
-
 ## Next priorities (in order)
 
 1. F003 acceptance (independent review + CI on the exact final head).
@@ -61,8 +52,16 @@ was meant to match. Every scripted edit must assert its expected match count, th
 read, and the regression must exercise the exact production path (here `AccountService.tracking()`
 and `freshTracking()` are both tested through the composed runtime).
 
+## Process lesson (F003)
+
+Reproduce old-base bugs in an isolated worktree or temp checkout, never by replacing source in a
+dirty implementation tree: a `git checkout HEAD -- <src>` restore discarded a pending guard fix.
+Scripted restorations must verify the resulting diff.
+
 ## Historical reviews (provenance only, not current work)
 
 I001 integration PASS (software-only). S001 candidate `c765554`/`6caeb71`: FAIL. S001 round 2
 `ce12040`/`ba8c487`: FAIL. S001-R3 `c1ba5318`: FAIL despite 813-test CI PASS
-(`docs/ledger/S001_R3_CEO_REVIEW.md`); its findings were repaired by M001 and F003.
+(`docs/ledger/S001_R3_CEO_REVIEW.md`). M001 repaired only its tombstone-upgrade findings and F003
+only the final entry-freshness finding; crash/restart ownership (R004) and queued safety actions
+(S002) remain open, so S001-R3 and Stage 1 are NOT accepted.

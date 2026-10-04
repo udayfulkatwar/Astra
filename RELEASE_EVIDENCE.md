@@ -68,3 +68,30 @@ Remaining risks: no clearing path for a quarantine or an unresolved history conf
 account); a contradictory-evidence write that fails outright is protected only by the
 process-local kill switch until re-applied; one bounded DB round trip separates the last ledger
 read from the adapter call; queued cancel / protective-close permission checks are unchanged.
+
+## F003 final synchronous entry freshness guard
+
+| Field      | Value                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/f003-final-freshness` from accepted M001 `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28` (ancestry verified, clean tree)                                                                                   |
+| Rejected   | `f0b2c283` (CI 37229648831 typecheck: invalid test health status; guard read current quote/calendar/news only for status). `9fc9b048` (source review PASS; CI 37230123250 typecheck: API test payload typing) |
+| Tested SHA | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (clean committed tree; this evidence commit is docs only)                                                                                                          |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0, tests 0, build 0                                                                                           |
+| Tests      | 92 files, 857 passed, 0 failed, 0 skipped (M001 baseline 89 files / 820)                                                                                                                                      |
+| CI         | Run 37230464693 / job 111518851649 on `2e75b104`: install/format/lint/typecheck PASS; test/build result to be recorded by the reviewer. Not claimed as passed here                                            |
+| Software   | IN_PROGRESS — pending independent acceptance. Stage 1 NOT accepted; live DISABLED; no edge claim; migrations unchanged                                                                                        |
+
+Old-base proof (executable, composed API + real PostgreSQL ledger + real `DecisionEngine`; final
+shared-ledger read held while the world changes): on `3cd84145` the stale-quote and event-blackout
+regressions fail (order CONFIRMED, i.e. submitted); against `f0b2c283` the calendar-revision (two
+variants) and news-risk-to-HIGH regressions fail; on the final head all pass, plus the positive
+unchanged path submits once. Unit/gateway coverage (`packages/decision|execution/test/final-guard.test.ts`):
+account/FX/quote/calendar/news aging, signal expiry, trading-day reset, health/provider revocation,
+changed current calendar/news/quote/FX values, adapter and accountRef rebinding, invalid and
+backward clock, missing/throwing/thenable/malformed guard (reservation kept if release fails), no
+call between guard and `submitOrder`, delayed second FX fetch expiring the first rate.
+
+Remaining gaps: R004 durable failure/restart ownership; S002 queued cancel / protective-close
+permissions; no quarantine clearing path; ledger evidence committed inside the last round trip is
+applied after submit; stored AI analysis has no provider to re-read (age only); activity/tracking
+age reuses the account-snapshot limit; real-broker linkage absent.
