@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-10-03 · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-04 (I001 integration) · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -62,7 +62,7 @@ so the gate still says NO TRADE until the platform's quotes arrive.
 | Free chart feed     | ADR-0026: `YahooStreamAdapter` (protobuf decoder checked on a genuine yfinance message; backoff, connect timeout, error-without-close handling, silent-socket reconnect, per-symbol delay), `yahooBackfill` + `rollUp` (complete candles only), price-only path `ingestPrice` / `seedBars`, `ASTRA_FEEDS`, `GET /api/v1/market/feeds` and `/prices`, dashboard **Charts** page                                                                                                                                                                                                                                                                                                                                                                                                                                             | 27 + 4 API + 2 UI                           |
 | n8n                 | `@astra/n8n` (ADR-0021): 8 workflows generated from typed, tested code-node logic; drift and secret checks; `/api/v1/reports`; tested in n8n 2.40.7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | JSON validated                              |
 
-**Total: 659 automated tests passing.** Verified manually: production bundle boots and runs the
+**Total: 716 automated tests passing** (82 files, PostgreSQL 16, no skips; I001 combined result — earlier per-branch counts 659 / 674 / 697 / 663 were separate runs, not cumulative). Verified manually: production bundle boots and runs the
 full paper flow over HTTP; dashboard walkthrough in headless Chromium with zero console errors;
 Phase 2: production bundle with the simulation adapter builds and persists M1 bars, serves the
 scanner, and reloads the bars after a SIGTERM restart.
@@ -232,6 +232,36 @@ Remaining:
   drawdown, losing streaks; eleven breakdowns; execution quality; observations only when both
   sides have ≥ 30 trades, with a multiple-comparisons caution. Dashboard **Learning Metrics**
   page; also in the demo. Nothing is ever applied automatically.
+
+## Demo / paper / live boundaries (honest status, I001)
+
+- **Demo** (in-browser simulation, `build:demo`): works; simulated data only.
+- **Paper**: runs end to end on simulated or ingested data. No tradable broker quote feed exists
+  (Yahoo prices are chart-only), so the gate says NO TRADE on real data until the owner's platform
+  adapter exists. Extended paper run on a live feed has NOT been done.
+- **Live**: not enabled and not ready. No broker adapter, no live authorization (ADR-0008's six
+  factors need the owner). **No approved profitable strategy exists in this repository.**
+  LSFVG v1.0 showed no edge on HistData 2010-2019 (historical result preserved, unchanged).
+- **Unverified external research:** the Claude project chat "Project access granted"
+  (611bf957-bb1b-486e-ac01-69e2ef0f3a8f) mentions a separate `/home/claude/astra` Cowork prototype and
+  Gold / Nasdaq / US30 backtest and payout claims, plus unfinished strategy code. Its files and
+  results are NOT in this repository and NOT reproduced. Treat as unverified research awaiting
+  reproducible artifacts (data, code, commit); do not cite as proven or live-ready.
+  The founder dropped the US30-only constraint; no instrument is selected.
+
+## Integration I001 (2026-10-04)
+
+Combined reviewed heads onto the default branch in one integration branch (no conflicts):
+Task 002 calendar persistence (`babf911`), F001+F002 frontend (`0c0aff9`), R001 validation
+(`d39129a`). Tracking: `docs/WORK_LEDGER.md`.
+
+## Next priority (documented, NOT implemented): execution race / pre-submit gate
+
+Execution checks expiry, mode and kill switches BEFORE waiting for its per-account lock, and does
+not re-run the full fresh quote / news / account-wide risk gate immediately before broker
+submission. Separate approvals on different symbols can compete for the same allowance (daily
+loss, drawdown, open-risk). An in-process mutex does not solve this across processes or hosts:
+needs a DB-level account-scoped lock/reservation and a re-gate after acquiring it.
 
 ## Remaining (by phase)
 

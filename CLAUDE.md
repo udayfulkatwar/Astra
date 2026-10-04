@@ -1,6 +1,6 @@
 # CLAUDE.md — working on ASTRA
 
-Read first: `docs/PROJECT_STATE.md` (current phase, gaps, owner inputs), `docs/ARCHITECTURE.md`,
+Read first: `docs/WORK_LEDGER.md` (task/branch/evidence ledger and lessons), `docs/PROJECT_STATE.md` (current phase, gaps, owner inputs), `docs/ARCHITECTURE.md`,
 `docs/adr/`. The owner's master instructions delegate implementation to Claude; ask only for
 information only the owner has (credentials, firm rules, platform, strategy, live authorization).
 
@@ -35,3 +35,9 @@ All times UTC; local zones only via Luxon for rule evaluation.
 - Schema changes → new numbered file in `packages/db/migrations` (never edit applied ones).
 - Postgres jsonb params: use `jsonb(sql, value)`, never `${JSON.stringify(v)}::jsonb`.
 - Keep `docs/PROJECT_STATE.md` current at each milestone.
+
+## Lessons (see `docs/WORK_LEDGER.md`)
+
+- Read the ledger before restarting work; never infer working code or passing tests from a chat claim.
+- Report the exact tested SHA, test count and DB skips; retain regression tests for reproduced bugs.
+- AI may veto only; never relax a safety rule to obtain a pass.
