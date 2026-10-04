@@ -69,30 +69,81 @@ function valid(b: Ohlc): boolean {
   );
 }
 
+const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * Epoch ms (UTC) of a calendar date and clock time, or NaN when ANY component is impossible
+ * (month 13, day 0, Feb 30, Feb 29 of a non-leap year, hour 24+, minute/second 60+, year 0).
+ * `Date.UTC` would silently normalise such values into a DIFFERENT valid instant; a timestamp is
+ * never shifted or repaired — the row is counted invalid instead. Years are full 4-digit years
+ * (`Date.UTC` would map 0–99 to 1900–1999).
+ */
+export function utcMs(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millis = 0,
+): number {
+  const ints = [year, month, day, hour, minute, second, millis];
+  if (!ints.every(Number.isInteger)) return NaN;
+  if (year < 1 || year > 9999 || month < 1 || month > 12) return NaN;
+  const maxDay = month === 2 && isLeap(year) ? 29 : DAYS[month - 1]!;
+  if (day < 1 || day > maxDay) return NaN;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return NaN;
+  if (millis < 0 || millis > 999) return NaN;
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  d.setUTCHours(hour, minute, second, millis);
+  return d.getTime();
+}
+
+// Extended ISO-8601 (`YYYY-MM-DD`, optional `T`/space time with optional seconds/fraction, optional
+// `Z` or ±hh[:]mm offset; no zone = UTC). Anything else is unreadable, never guessed.
+const ISO =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?([zZ]|[+-]\d{2}:?\d{2})?$/;
+
 function genericTime(s: string): number {
   const v = s.trim();
   if (/^\d+(\.\d+)?$/.test(v)) {
     const n = Number(v);
     return n > 1e12 ? n : n * 1000; // ms or s
   }
-  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(v) ? v : `${v.replace(' ', 'T')}Z`;
-  return Date.parse(iso);
+  const m = ISO.exec(v);
+  if (!m) return NaN;
+  const ms = m[7] ? Number(`0.${m[7]}`) * 1000 : 0;
+  const t = utcMs(+m[1]!, +m[2]!, +m[3]!, +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0), Math.floor(ms));
+  const z = m[8];
+  if (!Number.isFinite(t) || !z || /^[zZ]$/.test(z)) return t;
+  const sign = z.startsWith('-') ? -1 : 1;
+  const digits = z.slice(1).replace(':', '');
+  const oh = +digits.slice(0, 2);
+  const om = +digits.slice(2, 4);
+  if (oh > 23 || om > 59) return NaN;
+  return t - sign * (oh * 60 + om) * MINUTE;
 }
 
 function mt5Time(date: string, time: string, server: ServerTime | undefined): number {
   if (!server) return NaN;
-  const [y, mo, d] = date.trim().split('.').map(Number);
-  const [hh, mm, ss] = `${time.trim()}:00`.split(':').map(Number);
-  if ([y, mo, d, hh, mm].some((x) => !Number.isFinite(x))) return NaN;
+  // `YYYY.MM.DD` and `HH:MM[:SS]` — any other clock/date shape is unreadable, never repaired.
+  const dm = /^(\d{4})\.(\d{1,2})\.(\d{1,2})$/.exec(date.trim());
+  const tm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(time.trim());
+  if (!dm || !tm) return NaN;
+  const [y, mo, d, hh, mm, ss] = [+dm[1]!, +dm[2]!, +dm[3]!, +tm[1]!, +tm[2]!, +(tm[3] ?? 0)];
+  const wall = utcMs(y, mo, d, hh, mm, ss); // validates every component
+  if (!Number.isFinite(wall)) return NaN;
   if (server === 'NY+7') {
     // Server clock = New York time + 7 h (UTC+2 in US winter, UTC+3 in US summer).
     const ny = DateTime.fromObject(
-      { year: y, month: mo, day: d, hour: hh, minute: mm, second: ss ?? 0 },
+      { year: y, month: mo, day: d, hour: hh, minute: mm, second: ss },
       { zone: 'America/New_York' },
     ).minus({ hours: 7 });
     return ny.toMillis();
   }
-  return Date.UTC(y!, mo! - 1, d, hh, mm, ss ?? 0) - server.utcOffsetMinutes * MINUTE;
+  return wall - server.utcOffsetMinutes * MINUTE;
 }
 
 /** Parses one file's text into UTC candles (sorted, de-duplicated) and a report of what was dropped. */
@@ -128,7 +179,8 @@ export function parseBars(
         bad(line, 'unreadable time');
         continue;
       }
-      t = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!) + 5 * 60 * MINUTE;
+      // An impossible calendar date/clock is unreadable (NaN → counted invalid), never normalised.
+      t = utcMs(+m[1]!, +m[2]!, +m[3]!, +m[4]!, +m[5]!, +m[6]!) + 5 * 60 * MINUTE;
       bar = { o: num(f[1]), h: num(f[2]), l: num(f[3]), c: num(f[4]) };
     } else if (opts.format === 'mt5') {
       const idx = (name: string, fallback: number) => {

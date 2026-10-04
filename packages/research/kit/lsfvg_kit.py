@@ -321,21 +321,36 @@ def _generic_time(s):
         return math.nan
 
 
+def _utc_ms(y, mo, d, hh=0, mm=0, ss=0):
+    """Epoch ms (UTC) of a calendar date/clock, or NaN when ANY component is impossible (never
+    shifted or repaired; mirrors `utcMs` in packages/research/src/data.ts)."""
+    try:
+        return int(dt.datetime(y, mo, d, hh, mm, ss, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    except (ValueError, OverflowError):
+        return math.nan
+
+
+_MT5_DATE = re.compile(r"^(\d{4})\.(\d{1,2})\.(\d{1,2})$", re.ASCII)
+_MT5_TIME = re.compile(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", re.ASCII)
+
+
 def _mt5_time(date, tm, server):
     if server is None:
         return math.nan
-    try:
-        y, mo, d = (int(x) for x in date.strip().split("."))
-        parts = (tm.strip() + ":00").split(":")
-        hh, mm, ss = int(parts[0]), int(parts[1]), int(parts[2] or 0)
-    except (ValueError, IndexError):
+    dm, tmm = _MT5_DATE.match(date.strip()), _MT5_TIME.match(tm.strip())
+    if not dm or not tmm:
         return math.nan
-    wall = int(dt.datetime(y, mo, d, hh, mm, ss, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    wall = _utc_ms(int(dm[1]), int(dm[2]), int(dm[3]), int(tmm[1]), int(tmm[2]), int(tmm[3] or 0))
+    if not math.isfinite(wall):
+        return math.nan
     if server == "NY+7":
         # Server clock = New York time + 7 h: read it as New York wall time, then subtract 7 h.
-        guess = wall + 5 * HOUR
-        if ny_offset_ms(guess) == -4 * HOUR:
-            guess = wall + 4 * HOUR
+        try:
+            guess = wall + 5 * HOUR
+            if ny_offset_ms(guess) == -4 * HOUR:
+                guess = wall + 4 * HOUR
+        except ValueError:
+            return math.nan  # outside the built-in New York rules (pre-2007): counted invalid
         return guess - 7 * HOUR
     return wall - server * M1
 
@@ -369,12 +384,12 @@ def parse_bars(path, fmt, server_time=None):
                     examples.append(f"{why}: {line[:80]}")
 
             if fmt == "histdata":
-                m = re.match(r"^(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})$", fl[0] if fl else "")
+                m = re.match(r"^(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})$", fl[0] if fl else "", re.ASCII)
                 if not m:
                     bad("unreadable time")
                     continue
-                t = int(dt.datetime(int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6]),
-                                    tzinfo=dt.timezone.utc).timestamp() * 1000) + 5 * HOUR
+                # An impossible calendar date/clock is unreadable (counted invalid), never shifted.
+                t = _utc_ms(int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6])) + 5 * HOUR
                 g = lambda k: fl[k] if k < len(fl) else ""  # noqa: E731
                 o, h, lo, c = _num(g(1)), _num(g(2)), _num(g(3)), _num(g(4))
             elif fmt == "mt5":
