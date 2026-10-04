@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initAccountTracking, updateAccountTracking } from '../src/tracking';
+import { initAccountTracking, mergeAccountTracking, updateAccountTracking } from '../src/tracking';
 import { makeSnapshot, makeTracking } from './fixtures';
 
 const reset = { timeZone: 'America/New_York', time: '17:00' };
@@ -95,5 +95,51 @@ describe('account tracking', () => {
     expect(() =>
       updateAccountTracking(makeTracking(), makeSnapshot({ accountId: 'acct-b' }), opts),
     ).toThrow(/different account/);
+  });
+});
+
+describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
+  const base = makeTracking();
+  it('keeps the higher peaks of a newer stored state when an older, lower state arrives', () => {
+    const stored = {
+      ...base,
+      equityPeak: 55_000,
+      balancePeak: 54_000,
+      updatedAt: '2026-09-28T14:00:10.000Z',
+    };
+    const stale = {
+      ...base,
+      equityPeak: 50_000,
+      balancePeak: 50_000,
+      lastBalance: 49_000,
+      updatedAt: '2026-09-28T14:00:05.000Z',
+    };
+    const m = mergeAccountTracking(stored, stale);
+    expect(m).toMatchObject({
+      equityPeak: 55_000,
+      balancePeak: 54_000,
+      updatedAt: stored.updatedAt,
+      lastBalance: stored.lastBalance,
+    });
+  });
+  it('takes the newer observation as the state but never a lower peak', () => {
+    const stored = { ...base, equityPeak: 55_000, updatedAt: '2026-09-28T14:00:05.000Z' };
+    const newer = {
+      ...base,
+      equityPeak: 51_000,
+      lastBalance: 48_000,
+      updatedAt: '2026-09-28T14:00:10.000Z',
+    };
+    const m = mergeAccountTracking(stored, newer);
+    expect(m).toMatchObject({
+      equityPeak: 55_000,
+      lastBalance: 48_000,
+      updatedAt: newer.updatedAt,
+    });
+  });
+  it('refuses to merge different accounts', () => {
+    expect(() => mergeAccountTracking(base, { ...base, accountId: 'other' })).toThrow(
+      /different accounts/,
+    );
   });
 });

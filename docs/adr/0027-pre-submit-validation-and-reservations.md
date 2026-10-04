@@ -41,17 +41,27 @@ twice, and an in-process mutex cannot prevent that across processes.
    PENDING and unexpired, and no active reservation exists for the symbol; consumes the approval,
    creates the order, the reservation and the `SUBMIT_REQUESTED` intent plus audit entries, or
    nothing. No transaction is held across broker I/O.
-4. **Dispatch intent.** `markDispatching` durably records that submit is about to start (and fails
+4. **Final gate after the last durable wait.** Persistence (reservation commit, dispatch intent,
+   audit) can take time, and a mode/expiry check alone does not prove input freshness. So after
+   `markDispatching` the SAME gate runs again on a NEW broker snapshot, ledger read and
+   revalidation (the order's own reservation and working record excluded via `ownClientOrderId`),
+   and only then does the synchronous control-plane check precede `submitOrder` with no await in
+   between. An expired quote, a new blackout, a changed limit or a lower equity during any wait
+   therefore refuses, releases the (provably untransmitted) reservation and sends nothing.
+   Tracking is advanced from the fresh snapshot and persisted MONOTONICALLY (`saveTracking`
+   merges under a row lock; peaks and counters never decrease, an older observation never replaces
+   a newer one), so a stale cache in another instance cannot lower a drawdown/daily-loss reference.
+5. **Dispatch intent.** `markDispatching` durably records that submit is about to start (and fails
    once the reservation is released). Orders reserved but never marked dispatched are provably
    untransmitted: the gateway (final-check failure) or restart reconciliation releases them.
-5. **Release only on evidence.** A reservation is released by: broker REJECTED/CANCELLED/EXPIRED
+6. **Release only on evidence.** A reservation is released by: broker REJECTED/CANCELLED/EXPIRED
    with nothing filled; proof the broker was never contacted (above); or a recorded closure
    linked to the same `clientOrderId`. A partially filled order that ended keeps only its filled
    quantity. Time, leases and a temporarily flat snapshot never release. Network uncertainty
    (`UNKNOWN`, lost response, post-submit persistence failure) keeps the reservation, activates the
    account EXECUTION kill switch, and new entries refuse while any order is unresolved. A lost
    response is resolved by polling the broker by `clientOrderId`, never by resending.
-6. **Positions are not netted.** `OpenPosition` carries no originating order id. A visible
+7. **Positions are not netted.** `OpenPosition` carries no originating order id. A visible
    position therefore never reduces or releases a reservation: a filled order is counted twice
    (position + reservation) until its closure is recorded. This is deliberately conservative.
 

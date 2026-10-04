@@ -88,6 +88,11 @@ export interface EntryRevalidationRequest {
   readonly approval: ApprovalRecord;
   readonly snapshot: AccountSnapshot;
   readonly exposure: AccountExposure;
+  /**
+   * Set only by the final pre-submit gate: this order's own (already reserved) client order id,
+   * which the working-order duplicate check must not count against itself. Nothing else is exempt.
+   */
+  readonly ownClientOrderId: string | null;
 }
 
 type Control =
@@ -253,7 +258,7 @@ export class ExecutionGateway {
       const c = await this.freshControl(approvalId);
       if (!c.ok) return this.refuse(c.approval, approvalId, ...c.reasons);
       const { approval, ctx } = c;
-      const { account, mode, adapter } = ctx;
+      const { mode, adapter } = ctx;
       const plan = approval.orderPlan;
 
       const baseOrder = (adapterId: string | null, status: OrderRecord['status']): OrderRecord => {
@@ -308,71 +313,12 @@ export class ExecutionGateway {
         };
       }
 
-      const working = await store.workingOrders(approval.accountId, plan.symbol);
-      if (working.length > 0) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `order ${working[0]!.clientOrderId} for ${plan.symbol} is still working`,
-        );
-      }
-
-      // Broker truth first, then the durable ledger: positions may have changed since the decision.
-      let broker;
-      try {
-        broker = await adapter.getAccountSnapshot(account.broker.accountRef, account.id);
-      } catch (err) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `cannot verify broker positions before submission: ${errorMessage(err)}`,
-        );
-      }
-      if (broker.openPositions.some((p) => p.symbol === plan.symbol)) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `a ${plan.symbol} position is already open at the broker; re-evaluate before adding exposure`,
-        );
-      }
-      await store.reconcileReservations(approval.accountId, clock.now().toISOString());
-      const exposure = await store.accountExposure(approval.accountId);
-      const uncertain = exposure.reservations.find(isUncertain);
-      if (uncertain) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `order ${uncertain.clientOrderId} (${uncertain.symbol}) is unresolved (${uncertain.orderStatus}); new entries wait for reconciliation`,
-        );
-      }
-      const { snapshot } = snapshotWithReservations(broker, exposure.reservations);
-
-      // The world may have moved while the snapshot was read.
-      const c2 = await this.freshControl(approvalId);
-      if (!c2.ok) return this.refuse(c2.approval, approvalId, ...c2.reasons);
-
-      // Full deterministic gate on fresh data and the account-wide reserved exposure.
-      let verdict: EntryRevalidation;
-      try {
-        verdict = await withTimeout(
-          this.deps.revalidate({ approval: c2.approval, snapshot, exposure }),
-          this.deps.revalidationTimeoutMs,
-        );
-      } catch (err) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `pre-submit revalidation failed: ${errorMessage(err)}`,
-        );
-      }
-      if (!verdict.ok) return this.refuse(approval, approvalId, ...verdict.reasons);
-      if (!(verdict.permittedQuantity >= plan.quantity)) {
-        return this.refuse(
-          approval,
-          approvalId,
-          `permitted size ${verdict.permittedQuantity} is below the approved ${plan.quantity}`,
-        );
-      }
+      const gated = await this.gate(approval, ctx, adapter, null, async () => {
+        const again = await this.freshControl(approvalId);
+        return again.ok ? null : again.reasons;
+      });
+      if (!gated.ok) return this.refuse(approval, approvalId, ...gated.reasons);
+      const { exposure, verdict } = gated;
 
       const c3 = await this.freshControl(approvalId);
       if (!c3.ok) return this.refuse(c3.approval, approvalId, ...c3.reasons);
@@ -395,6 +341,89 @@ export class ExecutionGateway {
       approvalId,
       'account exposure kept changing during validation; refusing to guess',
     );
+  }
+
+  /**
+   * The entry gate on FRESH data: working orders, broker snapshot, reservation ledger and the
+   * deterministic revalidation, with `recheck` (control plane) after each awaited step. It runs
+   * once before the reservation and once more after the last durable wait before submit
+   * (`exclude` = the order's own reservation, so it is not counted against itself): a delay in
+   * persistence can therefore never carry an expired quote, a new blackout, a changed limit or a
+   * stale snapshot to the broker.
+   */
+  private async gate(
+    approval: ApprovalRecord,
+    ctx: Extract<Control, { ok: true }>,
+    adapter: BrokerAdapter,
+    exclude: string | null,
+    recheck: () => Promise<string[] | null>,
+  ): Promise<
+    | { ok: true; exposure: AccountExposure; verdict: Extract<EntryRevalidation, { ok: true }> }
+    | { ok: false; reasons: string[] }
+  > {
+    const { store, clock } = this.deps;
+    const { account } = ctx;
+    const plan = approval.orderPlan;
+    const no = (...reasons: string[]) => ({ ok: false as const, reasons });
+    try {
+      const working = (await store.workingOrders(approval.accountId, plan.symbol)).filter(
+        (o) => o.clientOrderId !== exclude,
+      );
+      if (working.length > 0)
+        return no(`order ${working[0]!.clientOrderId} for ${plan.symbol} is still working`);
+
+      // Broker truth first, then the durable ledger: positions may have changed since the decision.
+      let broker;
+      try {
+        broker = await adapter.getAccountSnapshot(account.broker.accountRef, account.id);
+      } catch (err) {
+        return no(`cannot verify broker positions before submission: ${errorMessage(err)}`);
+      }
+      if (broker.openPositions.some((p) => p.symbol === plan.symbol)) {
+        return no(
+          `a ${plan.symbol} position is already open at the broker; re-evaluate before adding exposure`,
+        );
+      }
+      await store.reconcileReservations(approval.accountId, clock.now().toISOString());
+      const full = await store.accountExposure(approval.accountId);
+      const exposure: AccountExposure = {
+        ...full,
+        reservations: full.reservations.filter((r) => r.clientOrderId !== exclude),
+      };
+      const uncertain = exposure.reservations.find(isUncertain);
+      if (uncertain) {
+        return no(
+          `order ${uncertain.clientOrderId} (${uncertain.symbol}) is unresolved (${uncertain.orderStatus}); new entries wait for reconciliation`,
+        );
+      }
+      const { snapshot } = snapshotWithReservations(broker, exposure.reservations);
+
+      // The world may have moved while the snapshot was read.
+      const moved = await recheck();
+      if (moved) return no(...moved);
+
+      // Full deterministic gate on fresh data and the account-wide reserved exposure.
+      let verdict: EntryRevalidation;
+      try {
+        verdict = await withTimeout(
+          this.deps.revalidate({ approval, snapshot, exposure, ownClientOrderId: exclude }),
+          this.deps.revalidationTimeoutMs,
+        );
+      } catch (err) {
+        return no(`pre-submit revalidation failed: ${errorMessage(err)}`);
+      }
+      if (!verdict.ok) return no(...verdict.reasons);
+      if (!(verdict.permittedQuantity >= plan.quantity)) {
+        return no(
+          `permitted size ${verdict.permittedQuantity} is below the approved ${plan.quantity}`,
+        );
+      }
+      const after = await recheck();
+      if (after) return no(...after);
+      return { ok: true, exposure: full, verdict };
+    } catch (err) {
+      return no(`entry gate failed: ${errorMessage(err)}; nothing was transmitted`);
+    }
   }
 
   /**
@@ -437,7 +466,12 @@ export class ExecutionGateway {
     } catch (err) {
       return notSent(`submit intent could not be persisted: ${errorMessage(err)}`);
     }
-    // Final check: no await between it and the adapter call.
+    // Everything below the last durable wait: the same fresh-data gate again (our own reservation
+    // excluded), then the control plane with no await before the adapter call.
+    const finalGate = await this.gate(approval, ctx, adapter, order.clientOrderId, () =>
+      Promise.resolve(((c) => (c.ok ? null : c.reasons))(this.control(approval))),
+    );
+    if (!finalGate.ok) return notSent(...finalGate.reasons);
     const last = this.control(approval);
     if (!last.ok) return notSent(...last.reasons);
     const pending = adapter.submitOrder({

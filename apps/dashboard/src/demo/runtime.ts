@@ -1521,7 +1521,11 @@ export class DemoRuntime {
                 d.decision.decisionId !== approval.decisionId,
             );
             const working = [...this.store.orders.values()].some(
-              (o) => o.accountId === accountId && o.symbol === symbol && !isTerminal(o.status),
+              (o) =>
+                o.accountId === accountId &&
+                o.symbol === symbol &&
+                !isTerminal(o.status) &&
+                o.clientOrderId !== req.ownClientOrderId,
             );
             return Promise.resolve(
               observed(

@@ -1,6 +1,11 @@
 /** Account tracking state, snapshot history, closed trades and activity (from ASTRA's records). */
 import type { AccountActivity, AccountSnapshot, Direction } from '@astra/core';
-import { AccountTrackingSchema, type AccountState, type AccountTracking } from '@astra/prop-firm';
+import {
+  AccountTrackingSchema,
+  mergeAccountTracking,
+  type AccountState,
+  type AccountTracking,
+} from '@astra/prop-firm';
 import type { Sql } from '../client';
 import { iso, jsonb } from '../client';
 
@@ -40,11 +45,25 @@ export class AccountRepository {
     return rows[0] ? AccountTrackingSchema.parse(rows[0].state) : null;
   }
 
-  async saveTracking(t: AccountTracking): Promise<void> {
-    await this.sql`
-      insert into account_tracking (account_id, state, updated_at)
-      values (${t.accountId}, ${jsonb(this.sql, t)}, ${t.updatedAt})
-      on conflict (account_id) do update set state = excluded.state, updated_at = excluded.updated_at`;
+  /**
+   * Persists tracking MONOTONICALLY: under a row lock the incoming state is merged with whatever
+   * is stored (another process may have written newer data), so peaks never decrease and an older
+   * observation never replaces a newer one. Returns the state now stored.
+   */
+  async saveTracking(t: AccountTracking): Promise<AccountTracking> {
+    return this.sql.begin(async (tx) => {
+      await tx`
+        insert into account_tracking (account_id, state, updated_at)
+        values (${t.accountId}, ${jsonb(tx, t)}, ${t.updatedAt})
+        on conflict (account_id) do nothing`;
+      const rows = await tx<{ state: unknown }[]>`
+        select state from account_tracking where account_id = ${t.accountId} for update`;
+      const merged = mergeAccountTracking(AccountTrackingSchema.parse(rows[0]!.state), t);
+      await tx`
+        update account_tracking set state = ${jsonb(tx, merged)}, updated_at = ${merged.updatedAt}
+         where account_id = ${t.accountId}`;
+      return merged;
+    });
   }
 
   async appendSnapshot(

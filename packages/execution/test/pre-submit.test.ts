@@ -188,6 +188,98 @@ describe('re-checks after relevant awaited work and right before submit', () => 
   });
 });
 
+describe('a wait after the fresh validation cannot carry stale inputs to the broker (final gate)', () => {
+  /** Delays one persistence step, and lets the world change while it waits. */
+  const delayed = (
+    s: ReturnType<typeof setup>,
+    step: 'reserveAndConsume' | 'markDispatching',
+    during: () => void,
+  ) => {
+    const real = s.store[step].bind(s.store) as (...a: unknown[]) => Promise<unknown>;
+    (s.store as unknown as Record<string, unknown>)[step] = async (...a: unknown[]) => {
+      const r = await real(...a);
+      during(); // the database/audit write "took" a while
+      return r;
+    };
+  };
+  const refusedUntransmitted = async (
+    s: ReturnType<typeof setup>,
+    r: { outcome: string; reasons: readonly string[] },
+  ) => {
+    expect(r.outcome).toBe('REJECTED');
+    expect(reasons(r)).toMatch(/nothing was transmitted/);
+    expect(s.submit).not.toHaveBeenCalled();
+    expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(0);
+    expect(s.store.orders.get('astra-a1')!.status).toBe('REJECTED');
+  };
+
+  it('quote that goes stale during the persistence wait', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    s.w.quoteAsOf = '2026-09-28T13:59:59.500Z'; // fresh now, 5s limit
+    delayed(s, 'markDispatching', () => s.w.clock.advance(10_000)); // approval (30s) still valid
+    const r = await s.gateway.execute('a1');
+    await refusedUntransmitted(s, r);
+    expect(reasons(r)).toMatch(/quote/i);
+  });
+
+  it('same, while waiting for the reservation commit itself', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    s.w.quoteAsOf = '2026-09-28T13:59:59.500Z';
+    delayed(s, 'reserveAndConsume', () => s.w.clock.advance(10_000));
+    await refusedUntransmitted(s, await s.gateway.execute('a1'));
+  });
+
+  it('calendar blackout that appears during the wait', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    delayed(s, 'markDispatching', () => {
+      s.w.calendarEvents = [
+        {
+          id: 'nfp',
+          title: 'Surprise NFP',
+          impact: 'HIGH',
+          scheduledAt: '2026-09-28T14:05:00.000Z',
+          affectedInstruments: [],
+        },
+      ];
+    });
+    const r = await s.gateway.execute('a1');
+    await refusedUntransmitted(s, r);
+    expect(reasons(r)).toMatch(/Surprise NFP/);
+  });
+
+  it('account limit changed during the wait', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    delayed(s, 'markDispatching', () => {
+      s.w.riskPolicy = {
+        ...s.w.riskPolicy,
+        perTrade: { ...s.w.riskPolicy.perTrade, riskPercentOfEquity: 0.05 },
+      };
+    });
+    await refusedUntransmitted(s, await s.gateway.execute('a1'));
+  });
+
+  it('equity that drops during the wait reaches the gate through a NEW broker snapshot', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    delayed(s, 'markDispatching', () => (s.w.equity = 20_000));
+    await refusedUntransmitted(s, await s.gateway.execute('a1'));
+  });
+
+  it('a clean run takes a fresh broker snapshot for the final gate as well (no stale snapshot reuse)', async () => {
+    const s = setup();
+    s.add({ approvalId: 'a1', signalId: 's1' });
+    let snapshots = 0;
+    s.w.onSnapshot = () => void snapshots++;
+    expect((await s.gateway.execute('a1')).outcome).toBe('CONFIRMED');
+    expect(snapshots).toBe(2);
+    expect(s.submit).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('entry revalidation on fresh data (real assembler + Decision Engine)', () => {
   it('passes unchanged conditions and sends exactly the approved quantity', async () => {
     const s = setup();

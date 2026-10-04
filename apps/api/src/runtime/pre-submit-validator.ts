@@ -82,7 +82,9 @@ export class PreSubmitValidator {
             const [prior, working] = await Promise.all([
               // Exempts exactly the original decision, in the query.
               decisions.priorApprovedForSignal(accountId, signalId, approval.decisionId),
-              this.deps.executionStore.workingOrders(accountId, symbol),
+              this.deps.executionStore
+                .workingOrders(accountId, symbol)
+                .then((o) => o.filter((x) => x.clientOrderId !== req.ownClientOrderId)),
             ]);
             return observed(
               { priorApprovedDecisionId: prior, workingOrderForSymbol: working.length > 0 },

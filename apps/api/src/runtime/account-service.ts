@@ -154,9 +154,9 @@ export class AccountService {
         tradedToday: activity.status === 'OK' && activity.value.tradesToday > 0,
         lateObservationThresholdMs: config.system.tracking.lateObservationThresholdMs,
       });
-      await repo.saveTracking(tracking);
-      entry.tracking = tracking;
-      return observed(tracking, {
+      const stored = await repo.saveTracking(tracking); // monotonic merge: peaks never decrease
+      entry.tracking = stored;
+      return observed(stored, {
         source: 'astra-account-tracking',
         sourceKind,
         asOf: snapshot.asOf,
@@ -232,7 +232,7 @@ export class AccountService {
         tradedToday: (activity?.tradesToday ?? 0) > 0,
         lateObservationThresholdMs: config.system.tracking.lateObservationThresholdMs,
       };
-      let tracking = entry.tracking ?? (await repo.getTracking(account.id));
+      let tracking = (await repo.getTracking(account.id)) ?? entry.tracking;
       tracking = tracking
         ? updateAccountTracking(tracking, snap.value, trackingOpts)
         : initAccountTracking({
@@ -241,7 +241,7 @@ export class AccountService {
             snapshot: snap.value,
             reset: profile.tradingDayReset,
           });
-      await repo.saveTracking(tracking);
+      tracking = await repo.saveTracking(tracking); // monotonic merge: peaks never decrease
       entry.tracking = tracking;
 
       const lookup = this.deps.valuation(account.currency);

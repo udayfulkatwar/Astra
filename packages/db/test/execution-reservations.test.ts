@@ -468,6 +468,71 @@ describe.skipIf(!available)('reservations on PostgreSQL', () => {
   });
 });
 
+describe.skipIf(!available)('tracking persistence is monotonic across store instances', () => {
+  it('a stale instance cannot overwrite a newer/higher persisted peak, and concurrent writers keep the max', async () => {
+    const db = await createTestDb();
+    const db2 = createDb({
+      url: TEST_DB_URL,
+      schema: db.schema,
+      maxConnections: 3,
+      applicationName: 'astra-track-2',
+    });
+    try {
+      const a = new AccountRepository(db.sql);
+      const b = new AccountRepository(db2);
+      const t0 = {
+        accountId: 'acct-a',
+        initialBalance: 50_000,
+        tradingDayKey: '2026-09-28',
+        dayStartBalance: 50_000,
+        dayStartEquity: 50_000,
+        dayStartSource: 'OBSERVED_AT_RESET' as const,
+        equityPeak: 50_000,
+        balancePeak: 50_000,
+        endOfDayBalancePeak: 50_000,
+        lastBalance: 50_000,
+        completedDays: [],
+        tradingDaysCount: 0,
+        currentDayCounted: false,
+        updatedAt: '2026-09-28T14:00:00.000Z',
+      };
+      await a.saveTracking(t0);
+      // Instance A advances: higher peak, later time.
+      await a.saveTracking({
+        ...t0,
+        equityPeak: 56_000,
+        lastBalance: 56_000,
+        updatedAt: '2026-09-28T14:00:20.000Z',
+      });
+      // Instance B still believes the old state (cached) and writes a lower peak from older data.
+      const merged = await b.saveTracking({
+        ...t0,
+        equityPeak: 51_000,
+        lastBalance: 49_000,
+        updatedAt: '2026-09-28T14:00:10.000Z',
+      });
+      expect(merged).toMatchObject({
+        equityPeak: 56_000,
+        lastBalance: 56_000,
+        updatedAt: '2026-09-28T14:00:20.000Z',
+      });
+      expect(await a.getTracking('acct-a')).toMatchObject({ equityPeak: 56_000 });
+      // Concurrent writers: the higher peak always survives, whichever commits last.
+      await Promise.all([
+        a.saveTracking({ ...t0, equityPeak: 60_000, updatedAt: '2026-09-28T14:00:30.000Z' }),
+        b.saveTracking({ ...t0, equityPeak: 58_000, updatedAt: '2026-09-28T14:00:31.000Z' }),
+      ]);
+      expect(await a.getTracking('acct-a')).toMatchObject({
+        equityPeak: 60_000,
+        updatedAt: '2026-09-28T14:00:31.000Z',
+      });
+    } finally {
+      await db2.end({ timeout: 5 });
+      await db.cleanup();
+    }
+  });
+});
+
 describe.skipIf(!available)('migration 0010 backfill', () => {
   it('reserves orders that were already in flight when the migration is applied', async () => {
     const schema = `mig_${Date.now().toString(36)}`;

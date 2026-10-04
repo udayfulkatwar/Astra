@@ -167,3 +167,29 @@ export function updateAccountTracking(
   next = AccountTrackingSchema.parse(next);
   return next;
 }
+
+/**
+ * Merges two tracking states of the SAME account (the persisted one and a newly computed one,
+ * possibly produced by another process from older data). The later observation provides the
+ * state; every peak/counter that can only grow is the larger of both, so a stale writer can never
+ * lower a peak or the drawdown/daily-loss references derived from it. The stored state wins ties.
+ */
+export function mergeAccountTracking(
+  stored: AccountTracking,
+  incoming: AccountTracking,
+): AccountTracking {
+  if (stored.accountId !== incoming.accountId) {
+    throw new AstraError('VALIDATION', 'cannot merge tracking of different accounts', {
+      stored: stored.accountId,
+      incoming: incoming.accountId,
+    });
+  }
+  const base = Date.parse(incoming.updatedAt) > Date.parse(stored.updatedAt) ? incoming : stored;
+  return AccountTrackingSchema.parse({
+    ...base,
+    equityPeak: Math.max(stored.equityPeak, incoming.equityPeak),
+    balancePeak: Math.max(stored.balancePeak, incoming.balancePeak),
+    endOfDayBalancePeak: Math.max(stored.endOfDayBalancePeak, incoming.endOfDayBalancePeak),
+    tradingDaysCount: Math.max(stored.tradingDaysCount, incoming.tradingDaysCount),
+  });
+}

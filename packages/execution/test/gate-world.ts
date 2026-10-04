@@ -49,6 +49,8 @@ export interface World {
   quotes: Record<string, { bid: number; ask: number }>;
   /** Age of every quote when served (ms). */
   quoteAgeMs: number;
+  /** When set, quotes keep THIS asOf however late they are served (so time can make them stale). */
+  quoteAsOf: string | null;
   calendarEvents: EconomicEvent[];
   riskPolicy: typeof riskPolicy;
   configHash: string;
@@ -74,6 +76,7 @@ export function makeWorld(): World {
     specs: { NQ, ES },
     quotes: { NQ: { bid: 19_999.75, ask: 20_000 }, ES: { bid: 19_999.75, ask: 20_000 } },
     quoteAgeMs: 500,
+    quoteAsOf: null,
     calendarEvents: [],
     riskPolicy,
     configHash: CONFIG_HASH,
@@ -212,8 +215,8 @@ export function realRevalidator(
       quote: (symbol): Promise<Observed<Quote>> =>
         Promise.resolve(
           observed(
-            { symbol, ...w.quotes[symbol]!, asOf: meta('q', w.quoteAgeMs).asOf },
-            meta('q', w.quoteAgeMs),
+            { symbol, ...w.quotes[symbol]!, asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
+            { ...meta('q', w.quoteAgeMs), asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
           ),
         ),
       accountSnapshot: () => Promise.resolve(observed(req.snapshot, meta('broker'))),
@@ -251,7 +254,10 @@ export function realRevalidator(
               signalId,
               req.approval.decisionId,
             ),
-            workingOrderForSymbol: (await store.workingOrders(accountId, symbol)).length > 0,
+            workingOrderForSymbol:
+              (await store.workingOrders(accountId, symbol)).filter(
+                (o) => o.clientOrderId !== req.ownClientOrderId,
+              ).length > 0,
           },
           meta('db'),
         ),
