@@ -312,11 +312,19 @@ def _generic_time(s):
         return n if n > 1e12 else n * 1000
     if not _ZONE.search(v):
         v = v.replace(" ", "T", 1) + "Z"
+    # ISO-8601 end-of-day `24:00[:00[.000]]` = the NEXT midnight of the (validated) date; Python's
+    # fromisoformat rejects it, so it is handled here (mirrors genericTime in data.ts). Any other
+    # hour-24 time stays invalid.
+    extra = 0
+    eod = re.match(r"^(\d{4}-\d{2}-\d{2})[T ]24:00(?::00(?:[.,]0+)?)?(?=$|[zZ]|[+-]\d\d:?\d\d$)", v)
+    if eod:
+        v = v[:10] + "T00:00:00" + v[eod.end():]
+        extra = 86_400_000
     try:
         v2 = v[:-1] + "+00:00" if v[-1] in "zZ" else v
         if re.search(r"[+-]\d\d\d\d$", v2):
             v2 = v2[:-2] + ":" + v2[-2:]
-        return dt.datetime.fromisoformat(v2).timestamp() * 1000
+        return dt.datetime.fromisoformat(v2).timestamp() * 1000 + extra
     except ValueError:
         return math.nan
 

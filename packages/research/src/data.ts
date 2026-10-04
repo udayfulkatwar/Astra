@@ -115,7 +115,13 @@ function genericTime(s: string): number {
   const m = ISO.exec(v);
   if (!m) return NaN;
   const ms = m[7] ? Number(`0.${m[7]}`) * 1000 : 0;
-  const t = utcMs(+m[1]!, +m[2]!, +m[3]!, +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0), Math.floor(ms));
+  const hour = +(m[4] ?? 0);
+  // ISO-8601's end-of-day convention `24:00[:00[.000]]` is the NEXT midnight of the (validated)
+  // date; any other hour-24 time (24:01, 24:00:01, 24:00:00.5) is not a valid time.
+  const endOfDay = hour === 24 && +(m[5] ?? 0) === 0 && +(m[6] ?? 0) === 0 && ms === 0;
+  const t = endOfDay
+    ? utcMs(+m[1]!, +m[2]!, +m[3]!) + 24 * 60 * MINUTE // NaN stays NaN: Feb 30 T24:00 is invalid
+    : utcMs(+m[1]!, +m[2]!, +m[3]!, hour, +(m[5] ?? 0), +(m[6] ?? 0), Math.floor(ms));
   const z = m[8];
   if (!Number.isFinite(t) || !z || /^[zZ]$/.test(z)) return t;
   const sign = z.startsWith('-') ? -1 : 1;
