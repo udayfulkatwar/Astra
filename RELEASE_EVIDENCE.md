@@ -71,15 +71,15 @@ read from the adapter call; queued cancel / protective-close permission checks a
 
 ## F003 final synchronous entry freshness guard
 
-| Field      | Value                                                                                                                                                                                                                                                             |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Branch     | `claude/f003-final-freshness` from accepted M001 `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28` (ancestry verified, clean tree)                                                                                                                                       |
-| Rejected   | `f0b2c283` (CI 37229648831 typecheck: invalid test health status; guard read current quote/calendar/news only for status). `9fc9b048` (source review PASS; CI 37230123250 typecheck: API test payload typing)                                                     |
-| Tested SHA | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (clean committed tree; this evidence commit is docs only)                                                                                                                                                              |
-| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0, tests 0, build 0                                                                                                                                               |
-| Tests      | 92 files, 857 passed, 0 failed, 0 skipped (M001 baseline 89 files / 820)                                                                                                                                                                                          |
-| CI         | Run 37230464693 / job 111518851649 on `2e75b104`: workflow conclusion success (completed 2026-10-04 20:05 UTC; install/format/lint/typecheck/test/build). Per-step test counts not independently re-read here; local counts above. Independent acceptance pending |
-| Software   | IN_PROGRESS — pending independent acceptance. Stage 1 NOT accepted; live DISABLED; no edge claim; migrations unchanged                                                                                                                                            |
+| Field      | Value                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/f003-final-freshness` from accepted M001 `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28` (ancestry verified, clean tree)                                                                                   |
+| Rejected   | `f0b2c283` (CI 37229648831 typecheck: invalid test health status; guard read current quote/calendar/news only for status). `9fc9b048` (source review PASS; CI 37230123250 typecheck: API test payload typing) |
+| Tested SHA | tested/accepted code `2e75b104d57b3ac7adfcac9d7c1053f506502534`; later commits on the branch are documentation only and were not themselves run through CI as code                                            |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0, tests 0, build 0                                                                                           |
+| Tests      | 92 files, 857 passed, 0 failed, 0 skipped (M001 baseline 89 files / 820)                                                                                                                                      |
+| CI         | Run 37230464693 / job 111518851649 on `2e75b104`: PASS frozen install/format/lint/typecheck/test/build, PostgreSQL 16.15, 92 files, 857 tests, 0 skips (independently verified by the CEO)                    |
+| Software   | F003 PASS for accepted code `2e75b104` (bounded software-safety scope). Stage 1 IN_PROGRESS, NOT accepted; live DISABLED; no edge or real-adapter claim; migrations unchanged                                 |
 
 Old-base proof (executable, composed API + real PostgreSQL ledger + real `DecisionEngine`; final
 shared-ledger read held while the world changes): on `3cd84145` the stale-quote and event-blackout
