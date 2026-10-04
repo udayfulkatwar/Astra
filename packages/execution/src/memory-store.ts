@@ -192,6 +192,10 @@ export class InMemoryExecutionStore implements ExecutionStore {
     return Promise.resolve();
   }
 
+  orderByClientId(clientOrderId: string): Promise<OrderRecord | null> {
+    return Promise.resolve(this.orders.get(clientOrderId) ?? null);
+  }
+
   workingOrders(accountId: string, symbol: string): Promise<OrderRecord[]> {
     return Promise.resolve(
       [...this.orders.values()].filter(

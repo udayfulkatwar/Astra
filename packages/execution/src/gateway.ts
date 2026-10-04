@@ -726,45 +726,73 @@ export class ExecutionGateway {
       reason,
       state,
     });
-    const account = this.deps.account(req.accountId);
-    if (!account) return result('REJECTED', `account ${req.accountId} not found`, null);
-    const mode = this.deps.mode();
-    if (mode === 'SHADOW' || mode === 'BACKTEST')
-      return result('SKIPPED', `mode ${mode} never transmits orders`, null);
-    const ks = this.deps.killSwitches({ accountId: req.accountId });
-    if (!ks.loaded) return result('SKIPPED', ks.reasons.join('; '), null);
-    const execution = ks.blocking.filter((s) => s.scope === 'EXECUTION');
-    if (execution.length > 0) {
-      return result(
-        'SKIPPED',
-        `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
-        null,
-      );
-    }
-    const adapter = this.deps.adapter(account.broker.adapterId);
-    if (!adapter)
-      return result('REJECTED', `adapter ${account.broker.adapterId} not registered`, null);
+    const asked = this.reductionControl(req.accountId, null);
+    if (!asked.ok) return result(asked.outcome, asked.reason, null);
+    const queued = asked.binding; // what the caller saw when it asked
     const { store, clock } = this.deps;
     return this.locks.run(req.accountId, async () => {
+      // Permission is re-read from CURRENT state inside the lock (the request may have queued
+      // behind another action), after each awaited step, and immediately before the broker call.
+      let c = this.reductionControl(req.accountId, queued);
+      if (!c.ok) return result(c.outcome, c.reason, null);
+      let target: OrderRecord | null;
+      try {
+        target = await store.orderByClientId(req.clientOrderId);
+      } catch (err) {
+        return result(
+          'REJECTED',
+          `order ${req.clientOrderId} could not be read: ${errorMessage(err)}`,
+          null,
+        );
+      }
+      if (!target || target.accountId !== req.accountId)
+        return result(
+          'REJECTED',
+          `order ${req.clientOrderId} does not belong to account ${req.accountId}`,
+          null,
+        );
+      c = this.reductionControl(req.accountId, queued);
+      if (!c.ok) return result(c.outcome, c.reason, null);
+      if (target.adapterId !== c.adapter.id)
+        return result(
+          'REJECTED',
+          `order ${req.clientOrderId} was placed through adapter ${target.adapterId}, not ${c.adapter.id}`,
+          null,
+        );
       let state: BrokerOrderState;
       try {
-        state = await adapter.cancelOrder(account.broker.accountRef, req.clientOrderId);
+        // No await between the final control read above and this call.
+        state = await c.adapter.cancelOrder(c.accountRef, req.clientOrderId);
       } catch (err) {
-        const reason = `cancel of ${req.clientOrderId} outcome unknown: ${errorMessage(err)}`;
-        await this.deps.onExecutionUnknown(req.accountId, req.clientOrderId, reason);
-        return result('UNKNOWN', reason, null);
+        return this.actionUnknown(
+          req.accountId,
+          req.clientOrderId,
+          `cancel of ${req.clientOrderId} outcome unknown: ${errorMessage(err)}`,
+          null,
+          result,
+        );
       }
-      const applied = await store.updateOrder(req.clientOrderId, state);
-      await store.appendOrderEvent({
-        clientOrderId: req.clientOrderId,
-        at: clock.now().toISOString(),
-        type: 'CANCEL_REQUESTED',
-        detail: { reason: req.reason, result: { ...state } },
-      });
-      if (applied.contradiction) {
-        const reason = `cancel of ${req.clientOrderId}: contradictory broker evidence (${applied.contradiction})`;
-        await this.deps.onExecutionUnknown(req.accountId, req.clientOrderId, reason);
-        return result('UNKNOWN', reason, state);
+      const failed: string[] = [];
+      let contradiction: string | null = null;
+      try {
+        contradiction = (await store.updateOrder(req.clientOrderId, state)).contradiction;
+        await store.appendOrderEvent({
+          clientOrderId: req.clientOrderId,
+          at: clock.now().toISOString(),
+          type: 'CANCEL_REQUESTED',
+          detail: { reason: req.reason, result: { ...state } },
+        });
+      } catch (err) {
+        failed.push(
+          `the broker answered ${state.status} but the evidence was NOT recorded (${errorMessage(err)})`,
+        );
+      }
+      if (failed.length > 0 || contradiction) {
+        const why =
+          failed.length > 0
+            ? `cancel of ${req.clientOrderId}: ${failed.join('; ')}; the reservation is kept`
+            : `cancel of ${req.clientOrderId}: contradictory broker evidence (${contradiction})`;
+        return this.actionUnknown(req.accountId, req.clientOrderId, why, state, result);
       }
       if (state.status === 'CANCELLED') return result('CANCELLED', req.reason, state);
       if (state.status === 'FILLED') return result('FILLED', 'the order filled first', state);
@@ -772,6 +800,89 @@ export class ExecutionGateway {
         return result('ALREADY_FINAL', `order is ${state.status}`, state);
       return result('REJECTED', `broker left the order ${state.status}`, state);
     });
+  }
+
+  /**
+   * Permission for a RISK-REDUCING action (cancel of a resting entry, protective close), judged NOW
+   * from current state. Synchronous. Unlike entries it is not blocked by mode HALTED or by
+   * GLOBAL / ACCOUNT / STRATEGY / INSTRUMENT kill switches (it only removes risk), but: SHADOW and
+   * BACKTEST never transmit; the kill-switch state must be loaded and no EXECUTION switch active
+   * (the execution path itself cannot be trusted); the account and its CURRENT adapter binding
+   * must exist; the adapter kind must match the mode (PAPER adapter in PAPER, LIVE in LIVE); and
+   * any LIVE adapter needs the existing environment + account authorization. When `queued` is
+   * given the binding must be the one the request was made against (never redirect a queued
+   * request to a different adapter or broker account).
+   */
+  private reductionControl(
+    accountId: string,
+    queued: { adapterId: string; accountRef: string } | null,
+  ):
+    | {
+        ok: true;
+        adapter: BrokerAdapter;
+        accountRef: string;
+        binding: { adapterId: string; accountRef: string };
+      }
+    | { ok: false; outcome: 'SKIPPED' | 'REJECTED'; reason: string } {
+    const no = (outcome: 'SKIPPED' | 'REJECTED', reason: string) =>
+      ({ ok: false, outcome, reason }) as const;
+    const account = this.deps.account(accountId);
+    if (!account) return no('REJECTED', `account ${accountId} not found`);
+    const mode = this.deps.mode();
+    if (mode === 'SHADOW' || mode === 'BACKTEST')
+      return no('SKIPPED', `mode ${mode} never transmits orders`);
+    const ks = this.deps.killSwitches({ accountId });
+    if (!ks.loaded) return no('SKIPPED', ks.reasons.join('; '));
+    const execution = ks.blocking.filter((s) => s.scope === 'EXECUTION');
+    if (execution.length > 0)
+      return no(
+        'SKIPPED',
+        `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
+      );
+    const binding = { adapterId: account.broker.adapterId, accountRef: account.broker.accountRef };
+    if (
+      queued &&
+      (queued.adapterId !== binding.adapterId || queued.accountRef !== binding.accountRef)
+    )
+      return no('REJECTED', "the account's broker binding changed since the request was queued");
+    const adapter = this.deps.adapter(binding.adapterId);
+    if (!adapter) return no('REJECTED', `adapter ${binding.adapterId} not registered`);
+    const policy = modePolicy(mode);
+    if (policy.brokerKind && adapter.kind !== policy.brokerKind)
+      return no(
+        'REJECTED',
+        `adapter ${adapter.id} is ${adapter.kind}; mode ${mode} requires ${policy.brokerKind}`,
+      );
+    if (
+      adapter.kind === 'LIVE' &&
+      !(this.deps.liveTradingEnvironmentAuthorized() && account.liveTradingAuthorized)
+    )
+      return no(
+        'REJECTED',
+        'live trading not authorized (environment and account authorization required)',
+      );
+    return { ok: true, adapter, accountRef: binding.accountRef, binding };
+  }
+
+  /**
+   * An action whose outcome (or whose recording) is not established: execution is halted for the
+   * account and the result says exactly which persistence step failed; nothing is released or
+   * resent.
+   */
+  private async actionUnknown<R>(
+    accountId: string,
+    id: string,
+    reason: string,
+    state: BrokerOrderState | null,
+    result: (outcome: 'UNKNOWN', reason: string, state: BrokerOrderState | null) => R,
+  ): Promise<R> {
+    let detail = reason;
+    try {
+      await this.deps.onExecutionUnknown(accountId, id, reason);
+    } catch (err) {
+      detail = `${reason}; execution halt NOT persisted (${errorMessage(err)})`;
+    }
+    return result('UNKNOWN', detail, state);
   }
 
   /**
@@ -831,29 +942,19 @@ export class ExecutionGateway {
       exitPrice: number | null = null,
       realizedPnl: number | null = null,
     ): ProtectiveCloseResult => ({ outcome, reason, exitPrice, realizedPnl });
-    const account = this.deps.account(req.accountId);
-    if (!account) return result('REJECTED', `account ${req.accountId} not found`);
-    const mode = this.deps.mode();
-    if (mode === 'SHADOW' || mode === 'BACKTEST') {
-      return result('SKIPPED', `mode ${mode} never transmits orders`);
-    }
-    const ks = this.deps.killSwitches({ accountId: req.accountId });
-    if (!ks.loaded) return result('SKIPPED', ks.reasons.join('; '));
-    const execution = ks.blocking.filter((s) => s.scope === 'EXECUTION');
-    if (execution.length > 0) {
-      return result(
-        'SKIPPED',
-        `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
-      );
-    }
-    const adapter = this.deps.adapter(account.broker.adapterId);
-    if (!adapter) return result('REJECTED', `adapter ${account.broker.adapterId} not registered`);
-
+    const asked = this.reductionControl(req.accountId, null);
+    if (!asked.ok) return result(asked.outcome, asked.reason);
+    const queued = asked.binding;
     return this.locks.run(req.accountId, async () => {
+      // Re-read from CURRENT state inside the lock; the broker is addressed only through the
+      // binding the request was made against, so a position id can never be applied to another
+      // account. No await between this last read and the broker call.
+      const c = this.reductionControl(req.accountId, queued);
+      if (!c.ok) return result(c.outcome, c.reason);
       try {
-        const r = await adapter.closePosition({
+        const r = await c.adapter.closePosition({
           clientCloseId: req.clientCloseId,
-          accountRef: account.broker.accountRef,
+          accountRef: c.accountRef,
           positionId: req.positionId,
           reason: req.reason,
         });
@@ -863,9 +964,13 @@ export class ExecutionGateway {
           return result('ALREADY_FLAT', r.detail ?? 'position not open');
         return result('REJECTED', r.detail ?? 'close rejected by the broker');
       } catch (err) {
-        const reason = `close of ${req.positionId} outcome unknown: ${err instanceof Error ? err.message : String(err)}`;
-        await this.deps.onExecutionUnknown(req.accountId, req.clientCloseId, reason);
-        return result('UNKNOWN', reason);
+        return this.actionUnknown(
+          req.accountId,
+          req.clientCloseId,
+          `close of ${req.positionId} outcome unknown: ${errorMessage(err)}`,
+          null,
+          (_o, reason) => result('UNKNOWN', reason),
+        );
       }
     });
   }

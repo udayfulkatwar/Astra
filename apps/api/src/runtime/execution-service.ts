@@ -116,12 +116,15 @@ export class ExecutionService {
       liveTradingEnvironmentAuthorized: () => deps.liveTradingEnvironmentAuthorized,
       onExecutionUnknown: async (accountId, clientOrderId, reason) => {
         this.reconciled.delete(accountId);
-        await deps.killSwitches.activate({
+        const halt = await deps.killSwitches.activate({
           scope: 'EXECUTION',
           target: accountId,
           reason: `order ${clientOrderId} state unknown: ${reason}`,
           actor: { type: 'SYSTEM', id: 'execution-gateway' },
         });
+        // The halt is already in force in this process; the caller must still learn it is not durable.
+        if (!halt.persisted)
+          throw new Error('the EXECUTION halt is active in memory only and was NOT persisted');
       },
       revalidate: (req) => deps.revalidate(req),
       // Providers run in parallel under their own timeout; this bounds the whole revalidation.

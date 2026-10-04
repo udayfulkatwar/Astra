@@ -251,6 +251,8 @@ export interface ExecutionStore {
    */
   updateOrder(clientOrderId: string, state: BrokerOrderState): Promise<OrderUpdateResult>;
   appendOrderEvent(event: OrderEvent): Promise<void>;
+  /** The stored order for a client order id (null when unknown). */
+  orderByClientId(clientOrderId: string): Promise<OrderRecord | null>;
   /** Non-terminal orders for the account and symbol. */
   workingOrders(accountId: string, symbol: string): Promise<OrderRecord[]>;
   /** Active reservations of the account (all symbols) and the ledger version they were read at. */
