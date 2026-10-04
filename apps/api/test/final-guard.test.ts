@@ -60,7 +60,7 @@ function holdFinalLedgerRead(x: Harness, during: () => unknown) {
   };
 }
 
-const post = (x: Harness, url: string, payload: unknown) =>
+const post = (x: Harness, url: string, payload: Record<string, unknown>) =>
   x.app.inject({ method: 'POST', url, headers: H.automation, payload });
 const calendarWindow = (x: Harness, events: unknown[]) =>
   post(x, '/api/v1/calendar/window', {
