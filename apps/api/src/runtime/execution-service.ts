@@ -3,6 +3,7 @@
  * open orders are reconciled with the broker before new trades are allowed) and persistence of
  * paper-broker state.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   AstraError,
   errorMessage,
@@ -30,6 +31,7 @@ import {
   type CancelResult,
   type EntryRevalidationRequest,
   type ExecutionResult,
+  type OrderRecord,
 } from '@astra/execution';
 import type { KillSwitchEvaluation } from '@astra/safety';
 import type { Logger } from 'pino';
@@ -40,7 +42,9 @@ import type { ModeService } from './mode-service';
 
 export class ExecutionService {
   readonly adapters = new Map<string, BrokerAdapter>();
+  /** Every public call is an admitted, tracked activity (drained by a clean stop). */
   readonly gateway: ExecutionGateway;
+  private readonly rawPaper: PaperBrokerAdapter;
   private readonly reconciled = new Set<string>();
   private readonly pendingSaves = new Map<string, Promise<void>>();
   /** Newest captured / durably ACKed snapshot revision per paper account. */
@@ -51,7 +55,10 @@ export class ExecutionService {
   private session: PaperOwnerSession | null = null;
   private keepalive: ReturnType<typeof setInterval> | undefined;
   private persistenceError: string | null = null;
-  private closing = false;
+  /** RUNNING → CLOSING (no new top-level work, quotes ignored) → SEALED (every paper call refused). */
+  private phase: 'RUNNING' | 'CLOSING' | 'SEALED' = 'RUNNING';
+  /** Marks async contexts started by an admitted activity: they may finish while CLOSING. */
+  private readonly scope = new AsyncLocalStorage<true>();
   private recovery: PaperPriorSession = 'NONE';
 
   constructor(
@@ -62,6 +69,8 @@ export class ExecutionService {
       paperOwner: PaperOwnerRepository;
       /** Ownership re-check interval (ms); 0 disables the timer (boundary checks still run). */
       ownerKeepaliveMs?: number;
+      /** Longest a clean stop waits for in-flight paper activity before staying DIRTY. */
+      drainTimeoutMs?: number;
       mode: ModeService;
       killSwitches: KillSwitchService;
       health: HealthService;
@@ -81,10 +90,12 @@ export class ExecutionService {
       instruments,
       onChange: (ref) => this.persistPaper(paper, ref),
       blocked: () => this.blockReason(),
+      ignoreQuotes: () => this.phase !== 'RUNNING',
     });
-    this.adapters.set(paper.id, paper);
+    this.rawPaper = paper;
+    this.adapters.set(paper.id, this.trackedAdapter(paper));
 
-    this.gateway = new ExecutionGateway({
+    const rawGateway = new ExecutionGateway({
       store: this.ownedStore(deps.store),
       adapter: (id) => this.adapters.get(id),
       account: (id) => config.accounts.get(id),
@@ -109,10 +120,101 @@ export class ExecutionService {
         pollIntervalMs: config.system.execution.confirmationPollIntervalMs,
       },
     });
+    this.gateway = new Proxy(rawGateway, {
+      get: (target, prop, receiver) => {
+        const v: unknown = Reflect.get(target, prop, receiver);
+        if (typeof v !== 'function') return v;
+        return (...args: unknown[]) =>
+          this.activity(
+            `gateway.${String(prop)}`,
+            async () => await (v as (...a: unknown[]) => unknown).apply(target, args),
+          );
+      },
+    });
   }
 
   paper(): PaperBrokerAdapter {
-    return this.adapters.get('paper') as PaperBrokerAdapter;
+    return this.rawPaper;
+  }
+
+  /** Throws unless new paper work may start now (see `phase`). */
+  private admit(name: string): void {
+    if (this.phase === 'SEALED') throw new Error(`paper is sealed for shutdown: ${name} refused`);
+    if (this.phase === 'CLOSING' && !this.scope.getStore())
+      throw new Error(`execution is shutting down: new ${name} refused`);
+  }
+
+  private register<T>(run: Promise<T>): void {
+    const done: Promise<unknown> = run
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => {
+        this.inflight.delete(done);
+      });
+    this.inflight.add(done);
+  }
+
+  /**
+   * Runs paper-touching work as a tracked, admitted ACTIVITY: refused when this process is
+   * closing (unless started from inside an already admitted activity), counted until it settles,
+   * and everything it starts runs in its scope. A clean stop drains every activity before the
+   * final checkpoint, so safety cycles, protection, reconciliation and entries cannot be
+   * outstanding when the session is marked CLEAN.
+   */
+  activity<T>(name: string, op: () => Promise<T>): Promise<T> {
+    try {
+      this.admit(name);
+    } catch (err) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+    const run = this.scope.run(true, op);
+    this.register(run);
+    return run;
+  }
+
+  /** True once a clean stop began: loops must not start new paper work. */
+  get closed(): boolean {
+    return this.phase !== 'RUNNING';
+  }
+
+  /** Every promise-returning broker call (readers included) is counted until it settles. */
+  private trackedAdapter(adapter: PaperBrokerAdapter): BrokerAdapter {
+    return new Proxy(adapter, {
+      get: (target, prop, receiver) => {
+        const v: unknown = Reflect.get(target, prop, receiver);
+        if (typeof v !== 'function') return v;
+        return (...args: unknown[]) => {
+          const out: unknown = (v as (...a: unknown[]) => unknown).apply(target, args);
+          if (out instanceof Promise) this.register(out);
+          return out;
+        };
+      },
+    });
+  }
+
+  /** Waits until nothing is in flight (work started meanwhile is awaited too), then SEALS. */
+  private async drain(): Promise<void> {
+    const limit = this.deps.drainTimeoutMs ?? 30_000;
+    const deadline = Date.now() + limit;
+    for (;;) {
+      if (this.inflight.size === 0) {
+        this.phase = 'SEALED'; // same synchronous step as the empty check: nothing can slip in
+        return;
+      }
+      const left = deadline - Date.now();
+      if (left <= 0)
+        throw new Error(
+          `paper activity did not drain within ${limit}ms (${this.inflight.size} in flight); the session stays DIRTY`,
+        );
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...this.inflight]),
+        new Promise<void>((r) => (timer = setTimeout(r, Math.min(left, 250)))),
+      ]);
+      clearTimeout(timer);
+    }
   }
 
   /** Why paper state must not be touched or admitted right now (null = this process may). */
@@ -121,7 +223,7 @@ export class ExecutionService {
     if (this.session.ownerLost) return this.session.ownerLost;
     if (this.persistenceError)
       return `paper state could not be persisted: ${this.persistenceError}`;
-    if (this.closing) return 'execution is shutting down';
+    if (this.phase === 'SEALED') return 'paper is sealed for shutdown';
     return null;
   }
 
@@ -139,13 +241,14 @@ export class ExecutionService {
       const why = this.blockReason();
       if (why) throw new Error(why);
     };
+    // The session id is the DB-level fence: the repository refuses any other caller.
     owned.reserveAndConsume = async (req) => {
       await guard();
-      return store.reserveAndConsume(req);
+      return store.reserveAndConsume({ ...req, owner: this.sessionId });
     };
     owned.markDispatching = async (id, at) => {
       await guard();
-      return store.markDispatching(id, at);
+      return store.markDispatching(id, at, this.sessionId);
     };
     return owned;
   }
@@ -322,9 +425,16 @@ export class ExecutionService {
     adapter: BrokerAdapter,
   ): Promise<number> {
     let unresolved = 0;
-    const ended = (
-      await this.deps.store.listOrders({ accountId: account.id, limit: 1_000 })
-    ).filter((o) => isTerminal(o.status));
+    // COMPLETE evidence: every ended order is visited (keyset pages), however many there are.
+    let after: string | null = null;
+    const ended: OrderRecord[] = [];
+    for (;;) {
+      const page: OrderRecord[] = await this.deps.store.endedOrdersPage(account.id, after, 200);
+      if (page.length === 0) break;
+      ended.push(...page);
+      const last = page[page.length - 1]!;
+      after = last.orderId;
+    }
     for (const o of ended) {
       try {
         const state = await adapter.getOrder(account.broker.accountRef, o.clientOrderId);
@@ -364,17 +474,11 @@ export class ExecutionService {
   }
 
   /** Tracks an operation so a clean stop can drain it; refuses once ownership is gone. */
-  private async track<T>(op: () => Promise<T>): Promise<T> {
-    const run = (async () => {
+  private track<T>(op: () => Promise<T>): Promise<T> {
+    return this.activity('operation', async () => {
       await this.verifyOwnership();
       return op();
-    })();
-    this.inflight.add(run);
-    try {
-      return await run;
-    } finally {
-      this.inflight.delete(run);
-    }
+    });
   }
 
   async execute(approvalId: string, actor: string): Promise<ExecutionResult> {
@@ -473,9 +577,9 @@ export class ExecutionService {
   async shutdown(): Promise<void> {
     clearInterval(this.keepalive);
     if (!this.session) return;
-    this.closing = true; // paper broker rejects new actions and ignores quotes from here on
+    this.phase = 'CLOSING'; // no new top-level work; quotes ignored; admitted work may finish
     try {
-      await Promise.allSettled([...this.inflight]);
+      await this.drain(); // ALL readers/actions/mutations settle, then the broker is sealed
       await this.flush();
       await this.verifyOwnership();
       const paper = this.paper();

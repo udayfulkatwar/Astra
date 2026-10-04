@@ -217,7 +217,8 @@ export type ReserveFailure =
   | 'APPROVAL_NOT_PENDING'
   | 'APPROVAL_EXPIRED'
   | 'SYMBOL_EXPOSED'
-  | 'DUPLICATE_ORDER';
+  | 'DUPLICATE_ORDER'
+  | 'OWNER_FENCE';
 
 export type ReserveResult =
   | { readonly ok: true }
@@ -266,12 +267,18 @@ export interface ExecutionStore {
     expectedVersion: number;
     at: string;
     intent: Record<string, unknown>;
+    /**
+     * Session fence of the single paper owner (R004). A database that holds an owner row for the
+     * order's adapter refuses (OWNER_FENCE) unless this is that row's DIRTY session, judged under
+     * a row lock so an ownership change during the wait also refuses. Other stores ignore it.
+     */
+    owner?: string;
   }): Promise<ReserveResult>;
   /**
    * Durably records that the submit call is about to start. Must throw if it cannot, or if the
    * account is quarantined.
    */
-  markDispatching(clientOrderId: string, at: string): Promise<void>;
+  markDispatching(clientOrderId: string, at: string, owner?: string): Promise<void>;
   /**
    * Marks an order the broker was never contacted for as REJECTED and releases its reservation.
    * Only the gateway, which knows it did not call the adapter, or restart reconciliation of an

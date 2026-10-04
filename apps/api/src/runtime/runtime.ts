@@ -496,6 +496,15 @@ export class AstraRuntime {
 
   /** Runs the startup sequence; on failure schedules a retry and stays fail-closed. */
   async start(): Promise<void> {
+    // Startup work (ownership, restore, reconciliation) is awaited by `stop()` before it drains.
+    const run = this.runStartup();
+    this.starting = run;
+    await run;
+  }
+
+  private starting: Promise<void> | null = null;
+
+  private async runStartup(): Promise<void> {
     try {
       await this.initialize();
     } catch (err) {
@@ -765,31 +774,35 @@ export class AstraRuntime {
 
   /** One pass of the in-core safety loop. Never overlaps with itself. */
   async cycle(): Promise<void> {
-    if (this.cycleRunning || !this.initialized) return;
+    if (this.cycleRunning || !this.initialized || this.execution.closed) return;
     this.cycleRunning = true;
     try {
-      this.market.advance();
-      // Bar persistence never delays the safety checks below (flush logs, never rejects).
-      void this.barPersister.flush();
-      await this.health.probe();
-      // Fills of resting LIMIT orders first, so the account sync sees the new positions.
-      await this.workingOrders.run();
-      await this.accounts.syncAll();
-      await this.monitor.evaluate();
-      this.journal.syncOpen(this.monitor.snapshot().accounts);
-      await this.protection.run(this.monitor.snapshot().accounts);
-      await this.killSwitches.autoClearDue();
-      const expired = await this.repos.decisions.expireStaleApprovals(
-        this.clock.now().toISOString(),
-      );
-      if (expired > 0) this.log.info({ expired }, 'expired stale approvals');
-      this.health.report('RISK_ENGINE', 'ONLINE', 'safety loop healthy');
+      // The whole pass (health probes, working orders, account sync, monitor, protection) is ONE
+      // paper activity: a clean stop waits for it, and it is refused once the stop began.
+      await this.execution.activity('safety-cycle', () => this.cyclePass());
     } catch (err) {
       this.health.report('RISK_ENGINE', 'ERROR', `safety loop failed: ${errorMessage(err)}`);
       this.log.error({ err: errorMessage(err) }, 'safety loop cycle failed');
     } finally {
       this.cycleRunning = false;
     }
+  }
+
+  private async cyclePass(): Promise<void> {
+    this.market.advance();
+    // Bar persistence never delays the safety checks below (flush logs, never rejects).
+    void this.barPersister.flush();
+    await this.health.probe();
+    // Fills of resting LIMIT orders first, so the account sync sees the new positions.
+    await this.workingOrders.run();
+    await this.accounts.syncAll();
+    await this.monitor.evaluate();
+    this.journal.syncOpen(this.monitor.snapshot().accounts);
+    await this.protection.run(this.monitor.snapshot().accounts);
+    await this.killSwitches.autoClearDue();
+    const expired = await this.repos.decisions.expireStaleApprovals(this.clock.now().toISOString());
+    if (expired > 0) this.log.info({ expired }, 'expired stale approvals');
+    this.health.report('RISK_ENGINE', 'ONLINE', 'safety loop healthy');
   }
 
   async stop(): Promise<void> {
@@ -800,6 +813,8 @@ export class AstraRuntime {
     this.newsPoller?.stop();
     this.yahoo?.cancel();
     await this.feedHistory;
+    // Startup work (ownership, restore, reconciliation) must finish before anything is drained.
+    await this.starting?.catch(() => undefined);
     for (const adapter of this.marketAdapters) {
       try {
         await adapter.stop();

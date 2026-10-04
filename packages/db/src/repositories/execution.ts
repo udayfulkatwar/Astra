@@ -171,6 +171,28 @@ async function bumpLedger(tx: Queryable, accountId: string, at: string): Promise
      where account_id = ${accountId}`;
 }
 
+/**
+ * Session fence (R004): when the order's adapter has a paper-owner row, the caller must be that
+ * row's DIRTY session. The row is read FOR SHARE, so a concurrent ownership change (which updates
+ * it under a row lock) is either ordered before this check (and refuses) or waits for this
+ * transaction. Always taken BEFORE the ledger lock (same order as the ownership change).
+ */
+async function ownerFence(
+  tx: Queryable,
+  adapterId: string | null,
+  owner: string | undefined,
+): Promise<string | null> {
+  if (!adapterId) return null;
+  const rows = await tx<{ session_id: string; state: string }[]>`
+    select session_id, state from paper_owner where adapter_id = ${adapterId} for share`;
+  const row = rows[0];
+  if (!row) return null;
+  if (row.state !== 'DIRTY')
+    return `paper adapter ${adapterId} has no live owner session (${row.state}); not admitting`;
+  if (owner !== row.session_id) return `the caller is not the current paper owner session (fenced)`;
+  return null;
+}
+
 async function accountOf(tx: Queryable, clientOrderId: string): Promise<string> {
   const rows = await tx<{ account_id: string }[]>`
     select account_id from orders where client_order_id = ${clientOrderId}`;
@@ -421,12 +443,15 @@ export class ExecutionRepository implements ExecutionStore {
     expectedVersion: number;
     at: string;
     intent: Record<string, unknown>;
+    owner?: string;
   }): Promise<ReserveResult> {
     const { order: o, at } = req;
     const refuse = (code: Exclude<ReserveResult, { ok: true }>['code'], reason: string) =>
       ({ ok: false, code, reason }) as const;
     try {
       return await this.sql.begin(async (tx): Promise<ReserveResult> => {
+        const fenced = await ownerFence(tx, o.adapterId, req.owner);
+        if (fenced) return refuse('OWNER_FENCE', fenced);
         const version = await lockLedger(tx, o.accountId, at);
         const quarantine = (await activeQuarantines(tx, o.accountId))[0];
         if (quarantine)
@@ -490,8 +515,12 @@ export class ExecutionRepository implements ExecutionStore {
     }
   }
 
-  async markDispatching(clientOrderId: string, at: string): Promise<void> {
+  async markDispatching(clientOrderId: string, at: string, owner?: string): Promise<void> {
     await this.sql.begin(async (tx) => {
+      const adapter = await tx<{ adapter_id: string | null }[]>`
+        select adapter_id from orders where client_order_id = ${clientOrderId}`;
+      const fenced = await ownerFence(tx, adapter[0]?.adapter_id ?? null, owner);
+      if (fenced) throw new AstraError('CONFLICT', `${fenced}; not dispatching`);
       const accountId = await accountOf(tx, clientOrderId);
       await lockLedger(tx, accountId, at);
       const quarantine = (await activeQuarantines(tx, accountId))[0];
@@ -632,6 +661,25 @@ export class ExecutionRepository implements ExecutionStore {
     const rows = await this.sql<OrderRow[]>`
       select * from orders where (${params.accountId ?? null}::text is null or account_id = ${params.accountId ?? null})
       order by created_at desc limit ${Math.min(params.limit ?? 50, 200)}`;
+    return rows.map(mapOrder);
+  }
+
+  /**
+   * Keyset page of ENDED broker-facing orders of an account (by order id), for recovery: callers
+   * loop until a page is empty, so no order is skipped however many exist.
+   */
+  async endedOrdersPage(
+    accountId: string,
+    afterOrderId: string | null,
+    limit: number,
+  ): Promise<OrderRecord[]> {
+    // Keyset on the primary key alone: exact, total and immune to timestamp precision.
+    const rows = await this.sql<OrderRow[]>`
+      select * from orders
+       where account_id = ${accountId} and adapter_id is not null
+         and status in ('FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED')
+         and id > ${afterOrderId ?? ''}
+       order by id limit ${limit}`;
     return rows.map(mapOrder);
   }
 

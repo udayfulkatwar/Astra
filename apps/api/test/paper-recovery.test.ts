@@ -212,7 +212,7 @@ describe.skipIf(!available)('R004 — crash and restart', () => {
     expect(order).toBeDefined();
     await expect(
       repo.markDispatching(order.clientOrderId, b.clock.now().toISOString()),
-    ).rejects.toThrow(/quarantined/);
+    ).rejects.toThrow(/fenced|quarantined/);
     const v = (await repo.accountExposure(ACCOUNT)).version;
     const reserve = await repo.reserveAndConsume({
       order: { ...order, orderId: 'ord_x', clientOrderId: 'astra-x', approvalId: 'apr_x' },

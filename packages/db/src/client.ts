@@ -19,10 +19,19 @@ const origins = new WeakMap<object, DbOptions>();
  * must live and die with ONE connection (the paper-owner advisory lock) uses this instead of a
  * reserved pool connection, so killing that backend never disturbs the shared pool.
  */
-export function dedicatedClient(sql: Sql, applicationName = 'astra-dedicated'): Sql {
+export function dedicatedClient(
+  sql: Sql,
+  applicationName = 'astra-dedicated',
+  onclose?: () => void,
+): Sql {
   const o = origins.get(sql);
   if (!o) throw new Error('dedicatedClient requires a client created by createDb');
-  return createDb({ ...o, maxConnections: 1, applicationName });
+  // Pinned lifetime: no idle close and no max-lifetime recycling, so the connection (and any
+  // session-level lock on it) ends only when it really dies; `onclose` reports that at once.
+  return createPool(
+    { ...o, maxConnections: 1, applicationName },
+    { idle_timeout: 0, max_lifetime: 0, ...(onclose ? { onclose: () => onclose() } : {}) },
+  );
 }
 
 export function createDb(opts: DbOptions): Sql {
@@ -31,10 +40,14 @@ export function createDb(opts: DbOptions): Sql {
   return sql;
 }
 
-function createPool(opts: DbOptions): Sql {
+function createPool(
+  opts: DbOptions,
+  extra: { idle_timeout?: number; max_lifetime?: number; onclose?: () => void } = {},
+): Sql {
   return postgres(opts.url, {
     max: opts.maxConnections ?? 10,
     idle_timeout: 30,
+    ...extra,
     connect_timeout: 10,
     // numeric → string by default in postgres.js; repositories convert explicitly.
     connection: {

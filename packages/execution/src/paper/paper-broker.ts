@@ -101,6 +101,8 @@ export interface PaperBrokerOptions {
    * every interaction rejects. Wired in production; absent only in unit fixtures.
    */
   readonly blocked?: () => string | null;
+  /** Quotes are ignored (not cached, no fills) while this returns true (clean shutdown). */
+  readonly ignoreQuotes?: () => boolean;
 }
 
 /** Serializable paper account state (persisted so paper trading survives restarts). */
@@ -184,7 +186,7 @@ export class PaperBrokerAdapter implements BrokerAdapter {
 
   /** Feeds a quote: fills or expires resting LIMIT entries, then triggers stops/targets. */
   onQuote(quote: Quote): void {
-    if (this.opts.blocked?.()) return; // not the DIRTY owner: no mutation, no cache
+    if (this.opts.blocked?.() || this.opts.ignoreQuotes?.()) return; // no mutation, no cache
     this.quotes.set(quote.symbol, quote);
     for (const [ref, acct] of this.accounts) {
       // Entries first: a position just filled is exposed to this same quote (pessimistic).
