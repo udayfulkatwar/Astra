@@ -234,6 +234,23 @@ re-applies lost mutations (every unclean paper session blocks the account until 
 real broker (this covers the PAPER adapter only), and the DB ownership check inside
 `reserveAndConsume` itself (ownership is verified by the caller just before it).
 
+## 10. Queued risk-reducing actions re-read permission (S002)
+
+`cancelWorking` and `protectiveClose` used to judge mode, kill switches and the adapter BEFORE
+waiting for the account lock, so a request queued behind another action could run on a stale
+permission or binding. Now `reductionControl` (synchronous, current state) runs once for an early
+refusal and records the broker binding the request was made against; inside the lock it runs again
+(and after every awaited read) and immediately before the broker call with no await in between.
+It requires: not SHADOW/BACKTEST (never transmit); kill-switch state loaded and no EXECUTION
+switch; the account and its CURRENT binding exist and equal the queued binding (never redirected to
+another adapter or broker account); the adapter kind matches the mode; any LIVE adapter has the
+existing environment + account authorization. HALTED mode and GLOBAL/ACCOUNT/STRATEGY/INSTRUMENT
+switches still never block a reduction. A cancel also verifies the stored order belongs to the
+requesting account and was placed through the current adapter. Evidence/halt write failures after
+the broker answered are reported exactly (UNKNOWN, execution halted, reservation kept, nothing
+released or resent); a halt that is only in memory is reported as not persisted. R004 ownership,
+admission and drain fencing are unchanged (gateway calls remain admitted activities).
+
 ## Consequences
 
 Migration `0010` adds the ledger and reservations (and back-fills in-flight orders); `0011`

@@ -170,3 +170,42 @@ unclean (strict exact-set rule); PAPER only, no real broker or distributed takeo
 in-flight operation leaves the session DIRTY after the drain timeout (never CLEAN); S002 queued
 cancel / protective-close permissions unchanged (a protective close arriving while closing is
 refused).
+
+## R004 acceptance (CEO) and S002 queued safety actions
+
+R004 PASS (PAPER crash/restart scope only): code `8c57e6be5b7f9757bb381be26985a405804ab2c5`, docs
+head `05fc2ef0589b4fa81c784818921de41e02910d88`; CI 37236216419 / job 111535726577 SUCCESS, 97
+files, 897 tests, 0 skips (independently verified). The earlier "remaining risks" paragraphs of the
+R004 sections above are historical; the standing limitations are listed in `CEO_STATE.md`.
+
+| Field      | Value                                                                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/s002-queued-safety-actions` from accepted R004 docs head `05fc2ef0` (R004/F003/M001/default untouched)                                 |
+| Tested SHA | code `0dd69ca216837232a4ca271940d24ad31efbd383` (clean committed tree); later commits on the branch are documentation only                     |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL` set; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before the push), tests 0, build 0     |
+| Tests      | 99 files, 931 passed, 0 failed, 0 skipped (R004 accepted baseline 97 / 897; self-reported until independent CI)                                |
+| CI         | Triggered by the branch push; result not claimed here                                                                                          |
+| Migrations | none added; 0010–0015 unchanged                                                                                                                |
+| Software   | IN_PROGRESS — local PASS only, pending independent review and CI. Stage 1 NOT accepted; live DISABLED; no readiness, edge or real-broker claim |
+
+Old-base repro (isolated temporary worktree at `05fc2ef0`, implementation tree never replaced):
+the new tests fail 27 of 34 there (23/29 in-memory, 4/5 composed PostgreSQL) — the queued action
+used the permission captured before the lock for SHADOW/BACKTEST, EXECUTION kill switch, unloaded
+controls, a changed adapter or broker account binding, LIVE authorization and adapter kind. (A few of
+those failures on base are the new store method rather than behaviour.)
+
+Coverage: protective close AND cancel re-read inside the lock for mode SHADOW/BACKTEST, EXECUTION
+switch, unloaded controls, adapter and account binding change, LIVE account and environment
+revocation, adapter kind vs mode; a change during the final asynchronous read (target lookup) still
+prevents the call; entry-only GLOBAL/ACCOUNT/INSTRUMENT switches and HALTED never block the
+permitted reduction; orders of another account or placed through another adapter are never
+cancelled; queued duplicates are idempotent; unknown broker outcome, failed evidence writes and
+failed (or memory-only) halt writes are reported exactly with the reservation kept; composed
+runtime on real PostgreSQL for SHADOW, EXECUTION switch, binding change, entry-only switch and a
+failed kill-switch persistence. Fake adapters only; no LIVE.
+
+Remaining risks: a protective close still takes the account lock (it waits behind a long entry
+validation); a close whose broker position id exists on the NEW binding is refused by the
+binding check rather than reconciled; the first early refusal can pre-empt a reduction that would
+have become permitted a moment later (conservative); integrated cleanup and fresh combined
+evidence remain.

@@ -40,6 +40,14 @@ Reuse the current session unless a concrete context, access or model reason warr
 handoff always pins the accepted baseSHA and the reviewed evidence. Old chats are historical, not
 simultaneous workers.
 
+## S002 design (summary; detail in ADR-0027 §10)
+
+Queued cancel / protective close judge permission INSIDE the account lock from current state
+(mode, loaded controls, EXECUTION switch, current binding equal to the queued one, adapter kind,
+LIVE authorization), after awaited reads and immediately before the broker call; entry-only
+switches and HALTED never block risk reduction; persistence failures after a broker answer are
+reported exactly and keep the halt and reservation.
+
 ## R004 design (summary; detail in ADR-0027 §9)
 
 One PAPER owner at a time: advisory lock plus a DIRTY session row ACKed before any paper state is

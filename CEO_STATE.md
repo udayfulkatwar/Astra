@@ -2,16 +2,16 @@
 
 Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL. Updated 4 October 2026.
 
-| Item              | Value                                                                                                                                                                                                                                                     |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                                   |
-| Accepted baseline | F003 PASS: code `2e75b104d57b3ac7adfcac9d7c1053f506502534` (CI 37230464693 / job 111518851649, PostgreSQL 16.15, 92 files, 857 tests, 0 skips); docs-only `aa75c01e421007ba1e2a1291a4c73bb2b3cf67c6` (CEO exact-diff PASS). Under it M001 PASS `3cd84145` |
-| Active task       | R004 — single-owner PAPER crash/restart safety, branch `claude/r004-paper-recovery` from `aa75c01e…`; IN_PROGRESS pending fresh CI and independent review (evidence in `RELEASE_EVIDENCE.md`)                                                             |
-| R004 history      | `484c9a5c`: CI 37232550276 / job 111525132255 PASS (95 files, 874 tests) but safety review REJECTED. `230478e8`: review REJECTED (missing-owner-row bypass, broker admission while closing); local 97 files / 894 tests                                   |
-| Next              | After R004 acceptance: S002 queued risk-reduction permissions (NOT_STARTED) → integrated cleanup + fresh combined evidence                                                                                                                                |
+| Item              | Value                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                                                                                                                                                        |
+| Accepted baseline | R004 PASS (PAPER crash/restart scope only): code `8c57e6be5b7f9757bb381be26985a405804ab2c5`, docs head `05fc2ef0589b4fa81c784818921de41e02910d88` (Markdown-only after code), independent review PASS, CI 37236216419 / job 111535726577 SUCCESS (97 files, 897 tests, 0 skips; install/format/lint/typecheck/test/build). Under it F003 PASS `2e75b104`, M001 PASS `3cd84145` |
+| Active task       | S002 — queued risk-reduction permissions, branch `claude/s002-queued-safety-actions` from `05fc2ef0…`; IN_PROGRESS, candidate published for review (evidence in `RELEASE_EVIDENCE.md`)                                                                                                                                                                                         |
+| R004 history      | `484c9a5c` (CI 37232550276 / job 111525132255 PASS, 95 files / 874 tests) and `230478e8` (local 97 / 894) were rejected by safety review before acceptance. R004 limitations stand: unclean paper sessions block accounts with no clearing path, recovery does not re-apply lost mutations, PAPER only, no real broker or distributed takeover                                 |
+| Next              | After S002 acceptance: integrated cleanup + fresh combined evidence (NOT_STARTED)                                                                                                                                                                                                                                                                                              |
 
-Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ, reused for R004;
-S002 follows only after R004 acceptance; old chats are historical.
+Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ, reused for S002;
+integrated cleanup follows only after S002 acceptance; old chats are historical.
 
 Technical decisions (architecture, safety design, tests, migrations) are made by engineering and
 recorded in ADRs; they are not owner-managed.
@@ -33,10 +33,9 @@ silent re-open or a time-based expiry); conservative refusal over invented headr
 
 ## Next priorities (in order)
 
-1. R004 acceptance (independent review + CI on the exact final head).
-2. S002 — queued cancel / protective-close permission re-checks.
-3. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
-4. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
+1. S002 acceptance (independent review + CI on the exact final head).
+2. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
+3. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
 
 ## Founder-only decisions
 
