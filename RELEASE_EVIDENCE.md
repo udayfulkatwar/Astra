@@ -209,3 +209,28 @@ validation); a close whose broker position id exists on the NEW binding is refus
 binding check rather than reconciled; the first early refusal can pre-empt a reduction that would
 have become permitted a moment later (conservative); integrated cleanup and fresh combined
 evidence remain.
+
+## S002 review corrections
+
+| Field      | Value                                                                                                                                                                                                                   |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rejected   | `0dd69ca2` (code) / `11ffee72` (docs): safety review rejected — cancel persistence text overclaimed, queued binding did not pin the adapter instance/kind. Its local run: 99 files / 931 tests / 0 skips; no CI located |
+| Tested SHA | code `cee9b7a13f23ce374c189067953468a5fed45e76` (clean committed tree); later commits on the branch are documentation only                                                                                              |
+| Local run  | PostgreSQL 16.14; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before the push), tests 0, build 0                                                                                                       |
+| Tests      | 99 files, 938 passed, 0 failed, 0 skipped (self-reported until independent CI)                                                                                                                                          |
+| CI         | Triggered by the branch push; result not claimed here                                                                                                                                                                   |
+| Migrations | none added; 0010–0015 unchanged                                                                                                                                                                                         |
+| Software   | IN_PROGRESS — local PASS only. Stage 1 NOT accepted; live DISABLED; no readiness claim                                                                                                                                  |
+
+Corrected: the queued binding pins adapter instance + kind (same-id replacement refused before any
+call, for cancel, close and during the final asynchronous read); cancel reports the broker answer,
+order-state evidence, audit event and halt persistence separately and no longer asserts the
+reservation is kept (the composed PostgreSQL test shows the terminal update released it); an
+in-memory-only EXECUTION halt blocks local paper admission, refuses a clean stop and leaves the
+session DIRTY so a restart quarantines (composed test: audit append and halt persistence fail, then
+stop is refused and the restarted runtime is UNCLEAN with a quarantine). The entry-flow `unknown()`
+text no longer asserts retention either. Old-code repro (isolated worktree at `0dd69ca2`): 9 of 41
+new/updated tests fail there.
+
+Remaining risks: as in the S002 section above; additionally an unpersisted halt blocks ALL paper
+admission for the session (conservative) until restart/recovery.

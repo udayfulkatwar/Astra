@@ -251,6 +251,15 @@ the broker answered are reported exactly (UNKNOWN, execution halted, reservation
 released or resent); a halt that is only in memory is reported as not persisted. R004 ownership,
 admission and drain fencing are unchanged (gateway calls remain admitted activities).
 
+Review corrections: the queued binding pins the adapter INSTANCE and its kind as well as the
+adapter id and broker account, so a different object registered under the same id/ref while the
+request waited is refused before any call. A cancel reports each durable step separately (broker
+answer; order-state evidence recorded or NOT; audit event appended or NOT; halt persisted or NOT)
+and never asserts the reservation is kept: the recorded terminal state may already have released
+it, which the store (not the message) decides. An EXECUTION halt that is only in memory blocks local
+paper admission, refuses a clean stop (the session stays DIRTY, so the next start quarantines) and
+is reported to the caller as not persisted.
+
 ## Consequences
 
 Migration `0010` adds the ledger and reservations (and back-fills in-flight orders); `0011`

@@ -46,7 +46,8 @@ Queued cancel / protective close judge permission INSIDE the account lock from c
 (mode, loaded controls, EXECUTION switch, current binding equal to the queued one, adapter kind,
 LIVE authorization), after awaited reads and immediately before the broker call; entry-only
 switches and HALTED never block risk reduction; persistence failures after a broker answer are
-reported exactly and keep the halt and reservation.
+reported step by step (no claim about the reservation beyond what the store committed); the queued
+binding pins the adapter instance and kind; an in-memory-only halt blocks admission and CLEAN.
 
 ## R004 design (summary; detail in ADR-0027 §9)
 
