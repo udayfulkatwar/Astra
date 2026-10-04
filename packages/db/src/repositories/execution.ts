@@ -1,16 +1,20 @@
 /** ExecutionStore backed by PostgreSQL. Uniqueness is enforced by the schema, not by hope. */
 import { AstraError, type Direction, type EntryType, type TradingMode } from '@astra/core';
 import type { ApprovedOrderPlan } from '@astra/decision';
+import { applyOrderState, confirmedClosures } from '@astra/execution';
 import type {
+  AccountExposure,
   ApprovalRecord,
   ApprovalState,
   BrokerOrderState,
   ExecutionStore,
+  ExposureReservation,
   OrderEvent,
   OrderRecord,
   OrderStatus,
+  ReserveResult,
 } from '@astra/execution';
-import type { Sql } from '../client';
+import type { Queryable, Sql } from '../client';
 import { iso, jsonb, num } from '../client';
 import { appendAuditInTx } from './audit';
 
@@ -70,10 +74,122 @@ function mapOrder(r: OrderRow): OrderRecord {
   };
 }
 
+interface ReservationRow {
+  id: string;
+  account_id: string;
+  client_order_id: string;
+  approval_id: string;
+  strategy_id: string;
+  symbol: string;
+  direction: Direction;
+  entry: string;
+  stop: string;
+  target: string;
+  quantity: string;
+  reserved_quantity: string;
+  filled_quantity: string;
+  average_fill_price: string | null;
+  order_status: OrderStatus;
+  dispatched_at: Date | null;
+  reserved_at: Date;
+}
+
+function mapReservation(r: ReservationRow): ExposureReservation {
+  return {
+    reservationId: r.id,
+    accountId: r.account_id,
+    clientOrderId: r.client_order_id,
+    approvalId: r.approval_id,
+    strategyId: r.strategy_id,
+    symbol: r.symbol,
+    direction: r.direction,
+    entry: Number(r.entry),
+    stop: Number(r.stop),
+    target: Number(r.target),
+    quantity: Number(r.quantity),
+    reservedQuantity: Number(r.reserved_quantity),
+    filledQuantity: Number(r.filled_quantity),
+    averageFillPrice: num(r.average_fill_price),
+    orderStatus: r.order_status,
+    dispatched: r.dispatched_at !== null,
+    reservedAt: iso(r.reserved_at)!,
+  };
+}
+
 const TERMINAL = ['FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'SHADOW'];
+
+/**
+ * Serialisation point of an account's exposure across every process sharing this database: the
+ * ledger row lock. Always taken BEFORE any order/reservation row lock (fixed order → no deadlock).
+ * Returns the ledger version.
+ */
+async function lockLedger(tx: Queryable, accountId: string, at: string): Promise<number> {
+  await tx`
+    insert into account_exposure_ledger (account_id, version, updated_at)
+    values (${accountId}, 0, ${at}) on conflict (account_id) do nothing`;
+  const rows = await tx<{ version: string }[]>`
+    select version from account_exposure_ledger where account_id = ${accountId} for update`;
+  return Number(rows[0]!.version);
+}
+
+async function bumpLedger(tx: Queryable, accountId: string, at: string): Promise<void> {
+  await tx`
+    update account_exposure_ledger set version = version + 1, updated_at = ${at}
+     where account_id = ${accountId}`;
+}
+
+async function accountOf(tx: Queryable, clientOrderId: string): Promise<string> {
+  const rows = await tx<{ account_id: string }[]>`
+    select account_id from orders where client_order_id = ${clientOrderId}`;
+  if (!rows[0]) throw new AstraError('NOT_FOUND', `order ${clientOrderId} not found`);
+  return rows[0].account_id;
+}
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+async function transitionApprovalInTx(
+  tx: Queryable,
+  approvalId: string,
+  to: Exclude<ApprovalState, 'PENDING'>,
+  at: string,
+): Promise<boolean> {
+  const rows = await tx<{ id: string }[]>`
+    update trade_decisions set approval_state = ${to}, approval_state_changed_at = ${at}
+     where approval_id = ${approvalId} and approval_state = 'PENDING'
+    returning id`;
+  if (rows.length === 0) return false;
+  await appendAuditInTx(tx, {
+    actor: { type: 'SYSTEM', id: 'execution-gateway' },
+    category: 'EXECUTION',
+    action: `APPROVAL_${to}`,
+    entityType: 'trade_decision',
+    entityId: rows[0]!.id,
+    payload: { approvalId, to },
+    at,
+  });
+  return true;
+}
+
+async function insertOrderInTx(tx: Queryable, o: OrderRecord): Promise<void> {
+  await tx`
+    insert into orders (id, client_order_id, approval_id, decision_id, account_id, strategy_id, signal_id,
+      adapter_id, mode, symbol, direction, quantity, entry_type, planned_entry, stop_loss, take_profit,
+      status, broker_order_id, filled_quantity, average_fill_price, reject_reason, expires_at, created_at, updated_at)
+    values (${o.orderId}, ${o.clientOrderId}, ${o.approvalId}, ${o.decisionId}, ${o.accountId}, ${o.strategyId},
+      ${o.signalId}, ${o.adapterId}, ${o.mode}, ${o.symbol}, ${o.direction}, ${o.quantity}, ${o.entryType},
+      ${o.plannedEntry}, ${o.stopLoss}, ${o.takeProfit}, ${o.status}, ${o.brokerOrderId}, ${o.filledQuantity},
+      ${o.averageFillPrice}, ${o.rejectReason}, ${o.expiresAt}, ${o.createdAt}, ${o.updatedAt})`;
+  await appendAuditInTx(tx, {
+    actor: { type: 'SYSTEM', id: 'execution-gateway' },
+    category: 'EXECUTION',
+    action: 'ORDER_CREATED',
+    entityType: 'order',
+    entityId: o.clientOrderId,
+    payload: { ...o },
+    at: o.createdAt,
+  });
 }
 
 export class ExecutionRepository implements ExecutionStore {
@@ -115,46 +231,12 @@ export class ExecutionRepository implements ExecutionStore {
     to: Exclude<ApprovalState, 'PENDING'>,
     at: string,
   ): Promise<boolean> {
-    return this.sql.begin(async (tx) => {
-      const rows = await tx<{ id: string }[]>`
-        update trade_decisions set approval_state = ${to}, approval_state_changed_at = ${at}
-         where approval_id = ${approvalId} and approval_state = 'PENDING'
-        returning id`;
-      if (rows.length === 0) return false;
-      await appendAuditInTx(tx, {
-        actor: { type: 'SYSTEM', id: 'execution-gateway' },
-        category: 'EXECUTION',
-        action: `APPROVAL_${to}`,
-        entityType: 'trade_decision',
-        entityId: rows[0]!.id,
-        payload: { approvalId, to },
-        at,
-      });
-      return true;
-    });
+    return this.sql.begin((tx) => transitionApprovalInTx(tx, approvalId, to, at));
   }
 
   async createOrder(o: OrderRecord): Promise<void> {
     try {
-      await this.sql.begin(async (tx) => {
-        await tx`
-          insert into orders (id, client_order_id, approval_id, decision_id, account_id, strategy_id, signal_id,
-            adapter_id, mode, symbol, direction, quantity, entry_type, planned_entry, stop_loss, take_profit,
-            status, broker_order_id, filled_quantity, average_fill_price, reject_reason, expires_at, created_at, updated_at)
-          values (${o.orderId}, ${o.clientOrderId}, ${o.approvalId}, ${o.decisionId}, ${o.accountId}, ${o.strategyId},
-            ${o.signalId}, ${o.adapterId}, ${o.mode}, ${o.symbol}, ${o.direction}, ${o.quantity}, ${o.entryType},
-            ${o.plannedEntry}, ${o.stopLoss}, ${o.takeProfit}, ${o.status}, ${o.brokerOrderId}, ${o.filledQuantity},
-            ${o.averageFillPrice}, ${o.rejectReason}, ${o.expiresAt}, ${o.createdAt}, ${o.updatedAt})`;
-        await appendAuditInTx(tx, {
-          actor: { type: 'SYSTEM', id: 'execution-gateway' },
-          category: 'EXECUTION',
-          action: 'ORDER_CREATED',
-          entityType: 'order',
-          entityId: o.clientOrderId,
-          payload: { ...o },
-          at: o.createdAt,
-        });
-      });
+      await this.sql.begin((tx) => insertOrderInTx(tx, o));
     } catch (err) {
       if (isUniqueViolation(err)) {
         throw new AstraError('CONFLICT', `an order already exists for approval ${o.approvalId}`);
@@ -164,13 +246,26 @@ export class ExecutionRepository implements ExecutionStore {
   }
 
   async updateOrder(clientOrderId: string, s: BrokerOrderState): Promise<void> {
-    const rows = await this.sql`
-      update orders set status = ${s.status}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
-             filled_quantity = ${s.filledQuantity}, average_fill_price = ${s.averageFillPrice},
-             reject_reason = ${s.rejectReason}, updated_at = ${s.updatedAt}
-       where client_order_id = ${clientOrderId}
-      returning id`;
-    if (rows.length === 0) throw new AstraError('NOT_FOUND', `order ${clientOrderId} not found`);
+    await this.sql.begin(async (tx) => {
+      const accountId = await accountOf(tx, clientOrderId);
+      await lockLedger(tx, accountId, s.updatedAt);
+      await tx`
+        update orders set status = ${s.status}, broker_order_id = coalesce(${s.brokerOrderId}, broker_order_id),
+               filled_quantity = ${s.filledQuantity}, average_fill_price = ${s.averageFillPrice},
+               reject_reason = ${s.rejectReason}, updated_at = ${s.updatedAt}
+         where client_order_id = ${clientOrderId}`;
+      const rows = await tx<ReservationRow[]>`
+        select * from exposure_reservations where client_order_id = ${clientOrderId} and released_at is null`;
+      if (!rows[0]) return;
+      const u = applyOrderState(mapReservation(rows[0]), s);
+      await tx`
+        update exposure_reservations
+           set reserved_quantity = ${u.reservedQuantity}, filled_quantity = ${u.filledQuantity},
+               average_fill_price = ${u.averageFillPrice}, order_status = ${u.orderStatus},
+               released_at = ${u.release ? s.updatedAt : null}, release_reason = ${u.release}
+         where client_order_id = ${clientOrderId}`;
+      await bumpLedger(tx, accountId, s.updatedAt);
+    });
   }
 
   async appendOrderEvent(e: OrderEvent): Promise<void> {
@@ -184,6 +279,199 @@ export class ExecutionRepository implements ExecutionStore {
       select * from orders where account_id = ${accountId} and symbol = ${symbol}
          and status not in ${this.sql(TERMINAL)}`;
     return rows.map(mapOrder);
+  }
+
+  async accountExposure(accountId: string): Promise<AccountExposure> {
+    return this.sql.begin('isolation level repeatable read read only', async (tx) => {
+      const ledger = await tx<{ version: string }[]>`
+        select version from account_exposure_ledger where account_id = ${accountId}`;
+      const rows = await tx<ReservationRow[]>`
+        select * from exposure_reservations where account_id = ${accountId} and released_at is null
+         order by reserved_at`;
+      return {
+        accountId,
+        version: ledger[0] ? Number(ledger[0].version) : 0,
+        reservations: rows.map(mapReservation),
+      };
+    });
+  }
+
+  async reserveAndConsume(req: {
+    order: OrderRecord;
+    expectedVersion: number;
+    at: string;
+    intent: Record<string, unknown>;
+  }): Promise<ReserveResult> {
+    const { order: o, at } = req;
+    const refuse = (code: Exclude<ReserveResult, { ok: true }>['code'], reason: string) =>
+      ({ ok: false, code, reason }) as const;
+    try {
+      return await this.sql.begin(async (tx): Promise<ReserveResult> => {
+        const version = await lockLedger(tx, o.accountId, at);
+        if (version !== req.expectedVersion)
+          return refuse(
+            'LEDGER_CHANGED',
+            'account exposure changed while the order was being validated',
+          );
+        const approvals = await tx<{ approval_state: string; approval_expires_at: Date }[]>`
+          select approval_state, approval_expires_at from trade_decisions
+           where approval_id = ${o.approvalId} for update`;
+        const a = approvals[0];
+        if (!a || a.approval_state !== 'PENDING')
+          return refuse(
+            'APPROVAL_NOT_PENDING',
+            'approval already consumed (duplicate execution prevented)',
+          );
+        if (!(Date.parse(at) < a.approval_expires_at.getTime()))
+          return refuse('APPROVAL_EXPIRED', `approval expired at ${iso(a.approval_expires_at)}`);
+        const held = await tx<{ client_order_id: string }[]>`
+          select client_order_id from exposure_reservations
+           where account_id = ${o.accountId} and symbol = ${o.symbol} and released_at is null`;
+        if (held[0])
+          return refuse(
+            'SYMBOL_EXPOSED',
+            `${o.symbol} already has reserved exposure (${held[0].client_order_id})`,
+          );
+        await transitionApprovalInTx(tx, o.approvalId, 'CONSUMED', at);
+        await insertOrderInTx(tx, o);
+        await tx`
+          insert into exposure_reservations (id, account_id, client_order_id, approval_id, strategy_id, symbol,
+            direction, entry, stop, target, quantity, reserved_quantity, filled_quantity, order_status, reserved_at)
+          values (${`rsv_${o.orderId}`}, ${o.accountId}, ${o.clientOrderId}, ${o.approvalId}, ${o.strategyId},
+            ${o.symbol}, ${o.direction}, ${o.plannedEntry}, ${o.stopLoss}, ${o.takeProfit}, ${o.quantity},
+            ${o.quantity}, 0, ${o.status}, ${at})`;
+        await tx`
+          insert into order_events (client_order_id, at, type, detail)
+          values (${o.clientOrderId}, ${at}, 'SUBMIT_REQUESTED', ${jsonb(tx, req.intent)})`;
+        await appendAuditInTx(tx, {
+          actor: { type: 'SYSTEM', id: 'execution-gateway' },
+          category: 'EXECUTION',
+          action: 'EXPOSURE_RESERVED',
+          entityType: 'order',
+          entityId: o.clientOrderId,
+          payload: {
+            accountId: o.accountId,
+            symbol: o.symbol,
+            quantity: o.quantity,
+            ledgerVersion: version + 1,
+          },
+          at,
+        });
+        await bumpLedger(tx, o.accountId, at);
+        return { ok: true };
+      });
+    } catch (err) {
+      if (isUniqueViolation(err))
+        return refuse('DUPLICATE_ORDER', `an order already exists for approval ${o.approvalId}`);
+      throw err;
+    }
+  }
+
+  async markDispatching(clientOrderId: string, at: string): Promise<void> {
+    await this.sql.begin(async (tx) => {
+      const accountId = await accountOf(tx, clientOrderId);
+      await lockLedger(tx, accountId, at);
+      const rows = await tx`
+        update exposure_reservations set dispatched_at = ${at}
+         where client_order_id = ${clientOrderId} and released_at is null returning id`;
+      if (rows.length === 0)
+        throw new AstraError(
+          'CONFLICT',
+          `no active reservation for ${clientOrderId}: not dispatching`,
+        );
+      await tx`
+        insert into order_events (client_order_id, at, type, detail)
+        values (${clientOrderId}, ${at}, 'SUBMIT_DISPATCHING', ${jsonb(tx, {})})`;
+      await bumpLedger(tx, accountId, at);
+    });
+  }
+
+  async releaseUntransmitted(
+    clientOrderId: string,
+    reason: string,
+    at: string,
+    opts: { onlyIfUndispatched?: boolean } = {},
+  ): Promise<boolean> {
+    return this.sql.begin(async (tx) => {
+      const accountId = await accountOf(tx, clientOrderId);
+      await lockLedger(tx, accountId, at);
+      const only = opts.onlyIfUndispatched === true;
+      const rows = await tx`
+        update exposure_reservations set released_at = ${at}, release_reason = ${`not transmitted: ${reason}`}
+         where client_order_id = ${clientOrderId} and released_at is null
+           and (${only} = false or dispatched_at is null)
+        returning id`;
+      if (rows.length === 0) return false;
+      await tx`
+        update orders set status = 'REJECTED', reject_reason = ${reason}, updated_at = ${at}
+         where client_order_id = ${clientOrderId}`;
+      await tx`
+        insert into order_events (client_order_id, at, type, detail)
+        values (${clientOrderId}, ${at}, 'NOT_TRANSMITTED', ${jsonb(tx, { reason })})`;
+      await appendAuditInTx(tx, {
+        actor: { type: 'SYSTEM', id: 'execution-gateway' },
+        category: 'EXECUTION',
+        action: 'EXPOSURE_RELEASED_UNTRANSMITTED',
+        entityType: 'order',
+        entityId: clientOrderId,
+        payload: { reason },
+        at,
+      });
+      await bumpLedger(tx, accountId, at);
+      return true;
+    });
+  }
+
+  async reconcileReservations(accountId: string, at: string): Promise<number> {
+    return this.sql.begin(async (tx) => {
+      await lockLedger(tx, accountId, at);
+      const rows = await tx<ReservationRow[]>`
+        select * from exposure_reservations where account_id = ${accountId} and released_at is null`;
+      const active = rows.map(mapReservation);
+      const ids = active.map((r) => r.clientOrderId);
+      const closed =
+        ids.length === 0
+          ? []
+          : await tx<{ client_order_id: string }[]>`
+              select client_order_id from closed_trades
+               where account_id = ${accountId} and client_order_id in ${tx(ids)}`;
+      const done = confirmedClosures(active, new Set(closed.map((c) => c.client_order_id)));
+      for (const t of done) {
+        await tx`
+          update exposure_reservations set released_at = ${at}, release_reason = ${t.reason}
+           where client_order_id = ${t.reservation.clientOrderId}`;
+        await appendAuditInTx(tx, {
+          actor: { type: 'SYSTEM', id: 'execution-gateway' },
+          category: 'EXECUTION',
+          action: 'EXPOSURE_RELEASED',
+          entityType: 'order',
+          entityId: t.reservation.clientOrderId,
+          payload: { reason: t.reason, symbol: t.reservation.symbol },
+          at,
+        });
+      }
+      if (done.length > 0) await bumpLedger(tx, accountId, at);
+      return done.length;
+    });
+  }
+
+  async recordRejection(req: {
+    approvalId: string;
+    accountId: string | null;
+    reasons: readonly string[];
+    at: string;
+  }): Promise<void> {
+    await this.sql.begin((tx) =>
+      appendAuditInTx(tx, {
+        actor: { type: 'SYSTEM', id: 'execution-gateway' },
+        category: 'EXECUTION',
+        action: 'EXECUTION_REFUSED',
+        entityType: 'approval',
+        entityId: req.approvalId,
+        payload: { accountId: req.accountId, reasons: [...req.reasons], transmitted: false },
+        at: req.at,
+      }),
+    );
   }
 
   /** Every non-terminal order of an account (startup reconciliation). */

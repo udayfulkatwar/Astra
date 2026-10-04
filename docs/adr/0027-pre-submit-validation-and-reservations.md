@@ -1,0 +1,82 @@
+# ADR-0027: Fresh pre-submit validation and durable account-wide exposure reservations
+
+**Status:** Accepted · **Date:** 2026-10-04 · **Task:** S001
+
+## Context
+
+An approval is a statement about one moment. Between approval and broker submission it can wait
+for the account lock, for a broker snapshot and for persistence, during which a kill switch, the
+mode, an authorization, the quote, the calendar, the account's equity or another symbol's order can
+change. The baseline gateway checked expiry/mode/kill switches/authorization BEFORE the lock,
+checked working orders and positions only for the same symbol, then consumed the approval and sent
+a fixed quantity. Different symbols (and different gateway instances) could spend one allowance
+twice, and an in-process mutex cannot prevent that across processes.
+
+## Decision
+
+1. **Control plane, repeated.** `ExecutionGateway.control` judges expiry (invalid timestamps
+   refuse), LIMIT expiry, mode/policy, kill switches, account status, the current adapter and both
+   live authorizations from CURRENT state. It runs after the account lock, after the broker
+   snapshot, after revalidation, and twice more right before the adapter call (the last with no
+   `await` before `submitOrder`). The approval is re-read each time. Every refusal is audited
+   (`EXECUTION_REFUSED`) and transmits nothing.
+2. **Entry revalidation by the existing engines.** `revalidateApprovedEntry` (decision package)
+   re-assembles the ORIGINAL stored candidate with the same assembler and `DecisionEngine`: fresh
+   executable quote/spread, calendar and news, health/readiness, the broker snapshot just read,
+   tracking advanced from that snapshot (`AccountService.freshTracking`), live activity, and the
+   stored AI analysis judged by the gate's own validity/freshness check (no new AI call). It also
+   requires the same `configHash` and an unchanged signal/plan. It only confirms or refuses: the
+   permitted size must be at least the approved size and the approved size is what is sent. The
+   dependency is REQUIRED (no optional callback); errors and timeouts refuse.
+   The duplicate check exempts only the current decision, in SQL (`id <> $current`), so an exempted
+   row cannot mask another approval for the same signal (the schema independently forbids two
+   approved decisions per account + signal).
+3. **Durable account-wide reservations.** `account_exposure_ledger` (one row per account, locked
+   `FOR UPDATE`, with a `version`) is the serialisation point shared by every process. The gate
+   runs on `broker snapshot + reservations injected as pending orders`
+   (`snapshotWithReservations`), so every existing open-risk, position-count, correlation and firm
+   rule counts reserved exposure across all symbols with no parallel risk engine.
+   `reserveAndConsume` then, in ONE transaction: checks the ledger version is still the one the
+   gate read (else `LEDGER_CHANGED`, bounded retry with a fresh gate), the approval is still
+   PENDING and unexpired, and no active reservation exists for the symbol; consumes the approval,
+   creates the order, the reservation and the `SUBMIT_REQUESTED` intent plus audit entries, or
+   nothing. No transaction is held across broker I/O.
+4. **Dispatch intent.** `markDispatching` durably records that submit is about to start (and fails
+   once the reservation is released). Orders reserved but never marked dispatched are provably
+   untransmitted: the gateway (final-check failure) or restart reconciliation releases them.
+5. **Release only on evidence.** A reservation is released by: broker REJECTED/CANCELLED/EXPIRED
+   with nothing filled; proof the broker was never contacted (above); or a recorded closure
+   linked to the same `clientOrderId`. A partially filled order that ended keeps only its filled
+   quantity. Time, leases and a temporarily flat snapshot never release. Network uncertainty
+   (`UNKNOWN`, lost response, post-submit persistence failure) keeps the reservation, activates the
+   account EXECUTION kill switch, and new entries refuse while any order is unresolved. A lost
+   response is resolved by polling the broker by `clientOrderId`, never by resending.
+6. **Positions are not netted.** `OpenPosition` carries no originating order id. A visible
+   position therefore never reduces or releases a reservation: a filled order is counted twice
+   (position + reservation) until its closure is recorded. This is deliberately conservative.
+
+## What is and is not safe
+
+- **Safe (DB-tested, two pools = two processes):** two gateways/hosts on one PostgreSQL cannot
+  overspend the shared allowance across symbols; a stale validation commits nothing; one active
+  reservation per account + symbol is a DB invariant; UNKNOWN and in-flight state survive restart;
+  DB failure before submit sends nothing; DB failure after submit yields UNKNOWN, no resend.
+- **Loser behaviour:** a concurrent validator that loses the version race re-validates against the
+  winner's reservation, or refuses while the winner's order is still unconfirmed. Spurious refusals
+  are accepted; spurious approvals are not.
+- **Not solved:** PAPER broker state is in-memory per API process (persisted fire-and-forget), so
+  two API processes would hold two different paper brokers; the ledger protects ASTRA's own
+  commitments, not a broker it cannot see. Run ONE execution process per paper account.
+- **Not solved (blocks LIVE readiness):** a real broker adapter must expose position ↔ order
+  linkage or closed-trade records keyed by `clientOrderId`; without it a filled order's
+  reservation stays until an operator-audited release exists (not built). Only the paper adapter
+  provides closure linkage today. An in-flight commit whose acknowledgement was lost keeps its
+  symbol reserved until the next restart reconciliation.
+- Reservation counts the entry/stop exposure through the existing engines; costs are exactly those
+  the existing sizing and rules already include. Nothing here relaxes any limit.
+
+## Consequences
+
+Migration `0010` adds the ledger and reservations (and back-fills in-flight orders). Gateways
+require `revalidate` and `revalidationTimeoutMs`. SHADOW keeps its semantics: re-checked control
+plane, recorded, never transmitted, no reservation, no revalidation.

@@ -91,6 +91,10 @@ function setup(
     killSwitches: (ctx) => ks.evaluate(ctx),
     liveTradingEnvironmentAuthorized: () => opts.liveEnv ?? false,
     onExecutionUnknown: onUnknown,
+    // Gate behaviour is covered in pre-submit.test.ts; here the verdict is a fixed fake.
+    revalidate: () =>
+      Promise.resolve({ ok: true, permittedQuantity: 1_000, entry: 20_000, checks: 1 }),
+    revalidationTimeoutMs: 1_000,
     clock,
     confirmation: { timeoutMs: 2_000, pollIntervalMs: 250 },
     sleep: (ms) => {
@@ -122,6 +126,7 @@ describe('ExecutionGateway — happy path and duplicates', () => {
     });
     expect(store.events.map((e) => e.type)).toEqual([
       'SUBMIT_REQUESTED',
+      'SUBMIT_DISPATCHING',
       'SUBMIT_RESPONSE',
       'CONFIRMED',
     ]);

@@ -153,6 +153,57 @@ export interface OrderEvent {
   readonly detail: Record<string, unknown>;
 }
 
+/**
+ * Durable, account-wide exposure claimed by an entry order that may still open (or has opened) a
+ * position (ADR-0027). It spans every symbol and is created in the SAME atomic step that consumes
+ * the approval and creates the order. It is released only on authoritative evidence — never
+ * because time passed or a lease ran out.
+ */
+export interface ExposureReservation {
+  readonly reservationId: string;
+  readonly accountId: string;
+  readonly clientOrderId: string;
+  readonly approvalId: string;
+  readonly strategyId: string;
+  readonly symbol: string;
+  readonly direction: Direction;
+  readonly entry: number;
+  readonly stop: number;
+  readonly target: number;
+  /** Approved quantity. */
+  readonly quantity: number;
+  /**
+   * Quantity still counted: the approved quantity while the order may still fill (or its state is
+   * unknown); the filled quantity once the unfilled remainder is authoritatively gone.
+   */
+  readonly reservedQuantity: number;
+  readonly filledQuantity: number;
+  readonly averageFillPrice: number | null;
+  readonly orderStatus: OrderStatus;
+  /** The submit call may have started (written before the broker is contacted). */
+  readonly dispatched: boolean;
+  readonly reservedAt: string;
+}
+
+/** The active reservations of one account with the ledger version they were read at. */
+export interface AccountExposure {
+  readonly accountId: string;
+  /** Bumped by every change to the account's reservations (optimistic concurrency token). */
+  readonly version: number;
+  readonly reservations: readonly ExposureReservation[];
+}
+
+export type ReserveFailure =
+  | 'LEDGER_CHANGED'
+  | 'APPROVAL_NOT_PENDING'
+  | 'APPROVAL_EXPIRED'
+  | 'SYMBOL_EXPOSED'
+  | 'DUPLICATE_ORDER';
+
+export type ReserveResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: ReserveFailure; readonly reason: string };
+
 /** Persistence port for execution. Implementations must enforce uniqueness atomically. */
 export interface ExecutionStore {
   getApproval(approvalId: string): Promise<ApprovalRecord | null>;
@@ -168,4 +219,44 @@ export interface ExecutionStore {
   appendOrderEvent(event: OrderEvent): Promise<void>;
   /** Non-terminal orders for the account and symbol. */
   workingOrders(accountId: string, symbol: string): Promise<OrderRecord[]>;
+  /** Active reservations of the account (all symbols) and the ledger version they were read at. */
+  accountExposure(accountId: string): Promise<AccountExposure>;
+  /**
+   * ONE atomic step under the account's shared lock: the ledger version must still equal
+   * `expectedVersion`, the approval must still be PENDING and unexpired at `at`, and the account
+   * must hold no active reservation for the symbol; then the approval is consumed and the order,
+   * its reservation and the SUBMIT_REQUESTED intent are written together — or nothing is.
+   */
+  reserveAndConsume(req: {
+    order: OrderRecord;
+    expectedVersion: number;
+    at: string;
+    intent: Record<string, unknown>;
+  }): Promise<ReserveResult>;
+  /** Durably records that the submit call is about to start. Must throw if it cannot. */
+  markDispatching(clientOrderId: string, at: string): Promise<void>;
+  /**
+   * Marks an order the broker was never contacted for as REJECTED and releases its reservation.
+   * Only the gateway, which knows it did not call the adapter, or restart reconciliation of an
+   * order that was never marked dispatched, may call this.
+   */
+  releaseUntransmitted(
+    clientOrderId: string,
+    reason: string,
+    at: string,
+    opts?: { onlyIfUndispatched?: boolean },
+  ): Promise<boolean>;
+  /**
+   * Releases ended reservations whose resulting position has a closure recorded for the SAME
+   * clientOrderId. Position visibility alone never releases (positions carry no order id).
+   * Returns how many were released.
+   */
+  reconcileReservations(accountId: string, at: string): Promise<number>;
+  /** Audit trail for an execution request that was refused before anything was transmitted. */
+  recordRejection(req: {
+    approvalId: string;
+    accountId: string | null;
+    reasons: readonly string[];
+    at: string;
+  }): Promise<void>;
 }

@@ -1,5 +1,7 @@
 # CLAUDE.md — working on ASTRA
 
+Management state: [`CEO_STATE.md`](CEO_STATE.md), [`DECISIONS.md`](DECISIONS.md), [`RESEARCH_REGISTRY.md`](RESEARCH_REGISTRY.md), [`RELEASE_EVIDENCE.md`](RELEASE_EVIDENCE.md).
+
 Read first: `docs/WORK_LEDGER.md` (task/branch/evidence ledger and lessons), `docs/PROJECT_STATE.md` (current phase, gaps, owner inputs), `docs/ARCHITECTURE.md`,
 `docs/adr/`. The owner's master instructions delegate implementation to Claude; ask only for
 information only the owner has (credentials, firm rules, platform, strategy, live authorization).
@@ -11,6 +13,7 @@ information only the owner has (credentials, firm rules, platform, strategy, liv
   `UNVERIFIED` / `TEMPLATE`; LIVE refuses them.
 - AI is CONTEXT only (can veto, never approve). Risk, sizing, rules, kill switches and execution
   permission are deterministic code.
+- An entry is transmitted only after fresh deterministic revalidation and a committed DB reservation (ADR-0027); never add a permissive revalidation default.
 - Never enable live trading; ADR-0008's six factors require the owner.
 - Secrets only via env vars; config references env-var _names_.
 

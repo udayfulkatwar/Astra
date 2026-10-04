@@ -67,6 +67,7 @@ import { EventBus } from './event-bus';
 import { YahooFeed, type FeedId, type FeedTransport } from './feeds';
 import { marketValuation } from './valuation';
 import { StrategyRunner } from './strategy-runner';
+import { PreSubmitValidator } from './pre-submit-validator';
 import { WorkingOrderService } from './working-orders';
 import { ExecutionService } from './execution-service';
 import { HealthService } from './health-service';
@@ -151,6 +152,7 @@ export class AstraRuntime {
   readonly execution: ExecutionService;
   readonly accounts: AccountService;
   readonly decisions: DecisionService;
+  private preSubmit!: PreSubmitValidator;
   /** The owner's rule-based strategies run on closed M5 candles (ADR-0024). */
   readonly strategies: StrategyRunner;
   readonly simulation: SimulationAdapter | null;
@@ -282,6 +284,11 @@ export class AstraRuntime {
       clock,
       log,
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
+      // Bound after the services it needs exist; until then (or if unbound) every entry refuses.
+      revalidate: (req) =>
+        this.preSubmit
+          ? this.preSubmit.revalidate(req)
+          : Promise.reject(new Error('pre-submit validator not bound')),
     });
     this.market.onQuote((q) => this.execution.paper().onQuote(q));
     this.journal = new JournalService({
@@ -386,6 +393,22 @@ export class AstraRuntime {
       executionStore: this.repos.execution,
       execution: this.execution,
       events: this.events,
+      liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
+    });
+    this.preSubmit = new PreSubmitValidator({
+      config,
+      clock,
+      mode: this.mode,
+      killSwitches: this.killSwitches,
+      health: this.health,
+      market: this.market,
+      calendar: this.calendar,
+      news: this.news,
+      ai: this.ai,
+      accounts: this.accounts,
+      decisions: this.repos.decisions,
+      executionStore: this.repos.execution,
+      readiness: (account) => this.execution.readiness(account),
       liveTradingEnvironmentAuthorized: opts.liveTradingAuthorized,
     });
     this.strategies = new StrategyRunner({

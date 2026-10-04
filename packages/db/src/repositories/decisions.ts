@@ -161,9 +161,21 @@ export class DecisionRepository implements DecisionRecorder {
     return { ...summary(r), decision, inputs: r.inputs };
   }
 
-  async priorApprovedForSignal(accountId: string, signalId: string): Promise<string | null> {
+  /**
+   * An APPROVED decision for the signal, if any. `excludeDecisionId` exempts exactly one decision
+   * (the original one being revalidated) IN THE QUERY, so a row we exempt can never mask another
+   * approval for the same signal that `limit 1` would otherwise not have returned.
+   */
+  async priorApprovedForSignal(
+    accountId: string,
+    signalId: string,
+    excludeDecisionId: string | null = null,
+  ): Promise<string | null> {
     const rows = await this.sql<{ id: string }[]>`
-      select id from trade_decisions where account_id = ${accountId} and signal_id = ${signalId} and status = 'APPROVED' limit 1`;
+      select id from trade_decisions
+       where account_id = ${accountId} and signal_id = ${signalId} and status = 'APPROVED'
+         and (${excludeDecisionId}::text is null or id <> ${excludeDecisionId})
+       order by decided_at limit 1`;
     return rows[0]?.id ?? null;
   }
 

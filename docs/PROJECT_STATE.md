@@ -255,13 +255,15 @@ Combined reviewed heads onto the default branch in one integration branch (no co
 Task 002 calendar persistence (`babf911`), F001+F002 frontend (`0c0aff9`), R001 validation
 (`d39129a`). Tracking: `docs/WORK_LEDGER.md`.
 
-## Next priority (documented, NOT implemented): execution race / pre-submit gate
+## S001 — pre-submit validation and durable reservations (ADR-0027, implemented, review pending)
 
-Execution checks expiry, mode and kill switches BEFORE waiting for its per-account lock, and does
-not re-run the full fresh quote / news / account-wide risk gate immediately before broker
-submission. Separate approvals on different symbols can compete for the same allowance (daily
-loss, drawdown, open-risk). An in-process mutex does not solve this across processes or hosts:
-needs a DB-level account-scoped lock/reservation and a re-gate after acquiring it.
+The execution gateway re-checks mode, kill switches, authorizations, account, adapter and expiry
+after the account lock, after each awaited step and immediately before submit; revalidates the
+original candidate on fresh data through the real assembler and Decision Engine; and commits
+approval consumption, order, intent and an account-wide exposure reservation in one DB
+transaction guarded by a per-account ledger version. Release needs authoritative evidence.
+Evidence: `RELEASE_EVIDENCE.md`. Gaps: real-broker position↔order linkage (blocks LIVE),
+per-process paper broker, operator release of orphaned reservations (not built).
 
 ## Remaining (by phase)
 

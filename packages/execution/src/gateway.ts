@@ -13,14 +13,19 @@ import {
   modePolicy,
   newId,
   type AccountDefinition,
+  type AccountSnapshot,
   type Clock,
   type TradingMode,
 } from '@astra/core';
 import type { KillSwitchContext, KillSwitchEvaluation } from '@astra/safety';
+import type { EntryRevalidation } from '@astra/decision';
 import { KeyedMutex } from './mutex';
+import { isUncertain, snapshotWithReservations } from './reservations';
 import {
   isTerminal,
   isWorking,
+  type AccountExposure,
+  type ApprovalRecord,
   type BrokerAdapter,
   type BrokerOrderState,
   type ExecutionStore,
@@ -67,9 +72,42 @@ export interface ExecutionGatewayDeps {
     clientOrderId: string,
     reason: string,
   ) => Promise<void>;
+  /**
+   * REQUIRED deterministic revalidation of an entry on fresh data (see `revalidateApprovedEntry`).
+   * There is no permissive default: it must be supplied, an error or timeout refuses the order.
+   * `snapshot` is the broker snapshot plus every reserved exposure not yet visible in it.
+   */
+  readonly revalidate: (req: EntryRevalidationRequest) => Promise<EntryRevalidation>;
+  readonly revalidationTimeoutMs: number;
   readonly clock: Clock;
   readonly confirmation: { readonly timeoutMs: number; readonly pollIntervalMs: number };
   readonly sleep?: (ms: number) => Promise<void>;
+}
+
+export interface EntryRevalidationRequest {
+  readonly approval: ApprovalRecord;
+  readonly snapshot: AccountSnapshot;
+  readonly exposure: AccountExposure;
+}
+
+type Control =
+  | {
+      readonly ok: true;
+      readonly account: AccountDefinition;
+      readonly mode: TradingMode;
+      /** null in SHADOW (nothing is transmitted). */
+      readonly adapter: BrokerAdapter | null;
+    }
+  | { readonly ok: false; readonly reasons: string[]; readonly expired: boolean };
+
+const MAX_LEDGER_ATTEMPTS = 3;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -86,103 +124,92 @@ export class ExecutionGateway {
     this.sleep = deps.sleep ?? defaultSleep;
   }
 
+  /**
+   * Approval → broker. Every check that can change while an approval waits (for the account's
+   * lock, for a snapshot, for revalidation) is repeated AFTER those awaits, and once more
+   * immediately before the submit call. The entry is then validated against fresh data by the
+   * deterministic gate, and approval consumption, order creation and the account-wide exposure
+   * reservation commit in one atomic step of the shared store (ADR-0027). If any of that fails,
+   * nothing is transmitted and the refusal is audited.
+   */
   async execute(approvalId: string): Promise<ExecutionResult> {
-    const { store, clock } = this.deps;
-    const rejected = (...reasons: string[]): ExecutionResult => ({
-      outcome: 'REJECTED',
-      reasons,
-      order: null,
-      brokerState: null,
-    });
-
-    const approval = await store.getApproval(approvalId);
-    if (!approval) return rejected(`approval ${approvalId} not found`);
-    if (approval.state !== 'PENDING')
-      return rejected(`approval ${approvalId} is ${approval.state}`);
-    const now = clock.now();
-    if (now.getTime() >= Date.parse(approval.expiresAt)) {
-      await store.transitionApproval(approvalId, 'EXPIRED', now.toISOString());
-      return rejected(`approval expired at ${approval.expiresAt}`);
+    try {
+      const approval = await this.deps.store.getApproval(approvalId);
+      if (!approval) return await this.refuse(null, approvalId, `approval ${approvalId} not found`);
+      return await this.locks.run(approval.accountId, () => this.executeLocked(approvalId));
+    } catch (err) {
+      return this.refuse(
+        null,
+        approvalId,
+        `execution could not be validated (${errorMessage(err)}); nothing was transmitted`,
+      );
     }
+  }
+
+  private async refuse(
+    approval: ApprovalRecord | null,
+    approvalId: string,
+    ...reasons: string[]
+  ): Promise<ExecutionResult> {
+    try {
+      await this.deps.store.recordRejection({
+        approvalId,
+        accountId: approval?.accountId ?? null,
+        reasons,
+        at: this.deps.clock.now().toISOString(),
+      });
+    } catch {
+      // The refusal stands even when it cannot be audited: nothing was transmitted.
+    }
+    return { outcome: 'REJECTED', reasons, order: null, brokerState: null };
+  }
+
+  /**
+   * Everything that must hold for this approval to be acted on, judged NOW from current state.
+   * Synchronous and side-effect free, so it can be repeated at any point (and right before submit).
+   */
+  private control(approval: ApprovalRecord): Control {
+    const no = (...reasons: string[]): Control => ({ ok: false, reasons, expired: false });
+    const now = this.deps.clock.now().getTime();
+    const expires = Date.parse(approval.expiresAt);
+    if (!Number.isFinite(expires))
+      return no(`approval expiry ${approval.expiresAt} is not a valid timestamp`);
+    if (now >= expires)
+      return { ok: false, expired: true, reasons: [`approval expired at ${approval.expiresAt}`] };
 
     const mode = this.deps.mode();
     if (mode !== approval.mode) {
-      return rejected(
-        `mode changed from ${approval.mode} to ${mode} since the decision; re-evaluate`,
-      );
+      return no(`mode changed from ${approval.mode} to ${mode} since the decision; re-evaluate`);
     }
     const policy = modePolicy(mode);
-    if (!policy.newTradesAllowed) return rejected(`mode ${mode} does not permit new trades`);
+    if (!policy.newTradesAllowed) return no(`mode ${mode} does not permit new trades`);
 
     const plan = approval.orderPlan;
     if (plan.entryType === 'LIMIT') {
-      if (!plan.expiresAt) return rejected('LIMIT order plan has no expiry');
-      if (now.getTime() >= Date.parse(plan.expiresAt))
-        return rejected(`LIMIT order would already be expired (${plan.expiresAt})`);
+      if (!plan.expiresAt) return no('LIMIT order plan has no expiry');
+      const limitExpiry = Date.parse(plan.expiresAt);
+      if (!Number.isFinite(limitExpiry))
+        return no(`LIMIT expiry ${plan.expiresAt} is not a valid timestamp`);
+      if (now >= limitExpiry) return no(`LIMIT order would already be expired (${plan.expiresAt})`);
     }
     const ks = this.deps.killSwitches({
       accountId: approval.accountId,
       strategyId: approval.strategyId,
       symbol: plan.symbol,
     });
-    if (ks.blocked) return rejected(...ks.reasons);
+    if (ks.blocked) return no(...ks.reasons);
 
     const account = this.deps.account(approval.accountId);
-    if (!account) return rejected(`account ${approval.accountId} not found`);
-    if (account.status !== 'ACTIVE') return rejected(`account status ${account.status}`);
+    if (!account) return no(`account ${approval.accountId} not found`);
+    if (account.status !== 'ACTIVE') return no(`account status ${account.status}`);
 
-    const baseOrder = (adapterId: string | null, status: OrderRecord['status']): OrderRecord => ({
-      orderId: newId('order'),
-      clientOrderId: clientOrderIdFor(approvalId),
-      approvalId,
-      decisionId: approval.decisionId,
-      accountId: approval.accountId,
-      strategyId: approval.strategyId,
-      signalId: approval.signalId,
-      adapterId,
-      mode,
-      symbol: plan.symbol,
-      direction: plan.direction,
-      quantity: plan.quantity,
-      entryType: plan.entryType,
-      plannedEntry: plan.entry,
-      stopLoss: plan.stop,
-      takeProfit: plan.target,
-      status,
-      brokerOrderId: null,
-      filledQuantity: 0,
-      averageFillPrice: null,
-      rejectReason: null,
-      expiresAt: plan.expiresAt ?? null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    });
-
-    // SHADOW: record what would have been sent; never transmit.
-    if (!policy.transmitsOrders) {
-      if (!(await store.transitionApproval(approvalId, 'SHADOW_RECORDED', now.toISOString()))) {
-        return rejected('approval already used (concurrent execution)');
-      }
-      const order = baseOrder(null, 'SHADOW');
-      await store.createOrder(order);
-      await store.appendOrderEvent({
-        clientOrderId: order.clientOrderId,
-        at: now.toISOString(),
-        type: 'SHADOW_RECORDED',
-        detail: { plan },
-      });
-      return {
-        outcome: 'SHADOW_RECORDED',
-        reasons: [`${mode}: order recorded, not transmitted`],
-        order,
-        brokerState: null,
-      };
-    }
+    // SHADOW: record what would have been sent; never transmit (no adapter needed).
+    if (!policy.transmitsOrders) return { ok: true, account, mode, adapter: null };
 
     const adapter = this.deps.adapter(account.broker.adapterId);
-    if (!adapter) return rejected(`execution adapter ${account.broker.adapterId} not registered`);
+    if (!adapter) return no(`execution adapter ${account.broker.adapterId} not registered`);
     if (adapter.kind !== policy.brokerKind) {
-      return rejected(
+      return no(
         `adapter ${adapter.id} is ${adapter.kind}; mode ${mode} requires ${policy.brokerKind}`,
       );
     }
@@ -190,62 +217,254 @@ export class ExecutionGateway {
       mode === 'LIVE' &&
       !(this.deps.liveTradingEnvironmentAuthorized() && account.liveTradingAuthorized)
     ) {
-      return rejected(
-        'live trading not authorized (environment and account authorization required)',
-      );
+      return no('live trading not authorized (environment and account authorization required)');
     }
     if (!adapter.supportedEntryTypes.includes(plan.entryType)) {
-      return rejected(`adapter does not support ${plan.entryType} entries`);
+      return no(`adapter does not support ${plan.entryType} entries`);
     }
+    return { ok: true, account, mode, adapter };
+  }
 
-    // One order at a time per account: prevents races between concurrent approvals.
-    return this.locks.run(approval.accountId, async () => {
-      const working = await store.workingOrders(approval.accountId, plan.symbol);
-      if (working.length > 0)
-        return rejected(`order ${working[0]!.clientOrderId} for ${plan.symbol} is still working`);
+  /** Re-reads the approval from the store, then applies `control` to what is stored NOW. */
+  private async freshControl(
+    approvalId: string,
+  ): Promise<
+    | { ok: true; approval: ApprovalRecord; ctx: Extract<Control, { ok: true }> }
+    | { ok: false; approval: ApprovalRecord | null; reasons: string[] }
+  > {
+    const { store, clock } = this.deps;
+    const approval = await store.getApproval(approvalId);
+    if (!approval)
+      return { ok: false, approval: null, reasons: [`approval ${approvalId} not found`] };
+    if (approval.state !== 'PENDING')
+      return { ok: false, approval, reasons: [`approval ${approvalId} is ${approval.state}`] };
+    const ctx = this.control(approval);
+    if (!ctx.ok) {
+      if (ctx.expired)
+        await store.transitionApproval(approvalId, 'EXPIRED', clock.now().toISOString());
+      return { ok: false, approval, reasons: ctx.reasons };
+    }
+    return { ok: true, approval, ctx };
+  }
 
-      // Positions may have changed since the decision (e.g. two approvals decided concurrently).
-      let broker;
-      try {
-        broker = await adapter.getAccountSnapshot(account.broker.accountRef, account.id);
-      } catch (err) {
-        return rejected(`cannot verify broker positions before submission: ${errorMessage(err)}`);
-      }
-      if (broker.openPositions.some((p) => p.symbol === plan.symbol)) {
-        return rejected(
-          `a ${plan.symbol} position is already open at the broker; re-evaluate before adding exposure`,
-        );
-      }
+  private async executeLocked(approvalId: string): Promise<ExecutionResult> {
+    const { store, clock } = this.deps;
+    for (let attempt = 1; attempt <= MAX_LEDGER_ATTEMPTS; attempt++) {
+      const c = await this.freshControl(approvalId);
+      if (!c.ok) return this.refuse(c.approval, approvalId, ...c.reasons);
+      const { approval, ctx } = c;
+      const { account, mode, adapter } = ctx;
+      const plan = approval.orderPlan;
 
-      const at = clock.now().toISOString();
-      if (!(await store.transitionApproval(approvalId, 'CONSUMED', at))) {
-        return rejected('approval already consumed (duplicate execution prevented)');
-      }
-      const order = baseOrder(adapter.id, 'PENDING_SUBMIT');
-      await store.createOrder(order); // unique approvalId/clientOrderId: DB-level duplicate guard
-      await store.appendOrderEvent({
-        clientOrderId: order.clientOrderId,
-        at,
-        type: 'SUBMIT_REQUESTED',
-        detail: { adapter: adapter.id, plan },
-      });
-
-      let submitted: BrokerOrderState | null = null;
-      let submitError: string | null = null;
-      try {
-        submitted = await adapter.submitOrder({
-          clientOrderId: order.clientOrderId,
-          accountRef: account.broker.accountRef,
+      const baseOrder = (adapterId: string | null, status: OrderRecord['status']): OrderRecord => {
+        const at = clock.now().toISOString();
+        return {
+          orderId: newId('order'),
+          clientOrderId: clientOrderIdFor(approvalId),
+          approvalId,
+          decisionId: approval.decisionId,
+          accountId: approval.accountId,
+          strategyId: approval.strategyId,
+          signalId: approval.signalId,
+          adapterId,
+          mode,
           symbol: plan.symbol,
           direction: plan.direction,
           quantity: plan.quantity,
           entryType: plan.entryType,
-          ...(plan.entryType === 'LIMIT'
-            ? { limitPrice: plan.entry, ...(plan.expiresAt ? { expiresAt: plan.expiresAt } : {}) }
-            : {}),
+          plannedEntry: plan.entry,
           stopLoss: plan.stop,
           takeProfit: plan.target,
+          status,
+          brokerOrderId: null,
+          filledQuantity: 0,
+          averageFillPrice: null,
+          rejectReason: null,
+          expiresAt: plan.expiresAt ?? null,
+          createdAt: at,
+          updatedAt: at,
+        };
+      };
+
+      // SHADOW: record what would have been sent; never transmit.
+      if (!adapter) {
+        const at = clock.now().toISOString();
+        if (!(await store.transitionApproval(approvalId, 'SHADOW_RECORDED', at))) {
+          return this.refuse(approval, approvalId, 'approval already used (concurrent execution)');
+        }
+        const order = baseOrder(null, 'SHADOW');
+        await store.createOrder(order);
+        await store.appendOrderEvent({
+          clientOrderId: order.clientOrderId,
+          at,
+          type: 'SHADOW_RECORDED',
+          detail: { plan },
         });
+        return {
+          outcome: 'SHADOW_RECORDED',
+          reasons: [`${mode}: order recorded, not transmitted`],
+          order,
+          brokerState: null,
+        };
+      }
+
+      const working = await store.workingOrders(approval.accountId, plan.symbol);
+      if (working.length > 0) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `order ${working[0]!.clientOrderId} for ${plan.symbol} is still working`,
+        );
+      }
+
+      // Broker truth first, then the durable ledger: positions may have changed since the decision.
+      let broker;
+      try {
+        broker = await adapter.getAccountSnapshot(account.broker.accountRef, account.id);
+      } catch (err) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `cannot verify broker positions before submission: ${errorMessage(err)}`,
+        );
+      }
+      if (broker.openPositions.some((p) => p.symbol === plan.symbol)) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `a ${plan.symbol} position is already open at the broker; re-evaluate before adding exposure`,
+        );
+      }
+      await store.reconcileReservations(approval.accountId, clock.now().toISOString());
+      const exposure = await store.accountExposure(approval.accountId);
+      const uncertain = exposure.reservations.find(isUncertain);
+      if (uncertain) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `order ${uncertain.clientOrderId} (${uncertain.symbol}) is unresolved (${uncertain.orderStatus}); new entries wait for reconciliation`,
+        );
+      }
+      const { snapshot } = snapshotWithReservations(broker, exposure.reservations);
+
+      // The world may have moved while the snapshot was read.
+      const c2 = await this.freshControl(approvalId);
+      if (!c2.ok) return this.refuse(c2.approval, approvalId, ...c2.reasons);
+
+      // Full deterministic gate on fresh data and the account-wide reserved exposure.
+      let verdict: EntryRevalidation;
+      try {
+        verdict = await withTimeout(
+          this.deps.revalidate({ approval: c2.approval, snapshot, exposure }),
+          this.deps.revalidationTimeoutMs,
+        );
+      } catch (err) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `pre-submit revalidation failed: ${errorMessage(err)}`,
+        );
+      }
+      if (!verdict.ok) return this.refuse(approval, approvalId, ...verdict.reasons);
+      if (!(verdict.permittedQuantity >= plan.quantity)) {
+        return this.refuse(
+          approval,
+          approvalId,
+          `permitted size ${verdict.permittedQuantity} is below the approved ${plan.quantity}`,
+        );
+      }
+
+      const c3 = await this.freshControl(approvalId);
+      if (!c3.ok) return this.refuse(c3.approval, approvalId, ...c3.reasons);
+
+      const order = baseOrder(adapter.id, 'PENDING_SUBMIT');
+      const reserved = await store.reserveAndConsume({
+        order,
+        expectedVersion: exposure.version,
+        at: order.createdAt,
+        intent: { adapter: adapter.id, plan, revalidatedQuantity: verdict.permittedQuantity },
+      });
+      if (!reserved.ok) {
+        if (reserved.code === 'LEDGER_CHANGED' && attempt < MAX_LEDGER_ATTEMPTS) continue;
+        return this.refuse(approval, approvalId, reserved.reason);
+      }
+      return this.transmit(c3.approval, c3.ctx, adapter, order);
+    }
+    return this.refuse(
+      null,
+      approvalId,
+      'account exposure kept changing during validation; refusing to guess',
+    );
+  }
+
+  /**
+   * The reservation, consumed approval and intent are durable. Re-checks the control plane
+   * synchronously right before the submit call; only a failure BEFORE the adapter is called may
+   * release the reservation (the gateway knows it never transmitted).
+   */
+  private async transmit(
+    approval: ApprovalRecord,
+    ctx: Extract<Control, { ok: true }>,
+    adapter: BrokerAdapter,
+    order: OrderRecord,
+  ): Promise<ExecutionResult> {
+    const { store, clock } = this.deps;
+    const { account } = ctx;
+    const plan = approval.orderPlan;
+    const notSent = async (...reasons: string[]): Promise<ExecutionResult> => {
+      let kept = '';
+      try {
+        await store.releaseUntransmitted(
+          order.clientOrderId,
+          reasons.join('; '),
+          clock.now().toISOString(),
+        );
+      } catch (err) {
+        kept = ` (reservation kept until reconciliation: ${errorMessage(err)})`;
+      }
+      return {
+        outcome: 'REJECTED',
+        reasons: [...reasons.slice(0, -1), `${reasons.at(-1)}${kept}; nothing was transmitted`],
+        order,
+        brokerState: null,
+      };
+    };
+
+    const before = this.control(approval);
+    if (!before.ok) return notSent(...before.reasons);
+    try {
+      await store.markDispatching(order.clientOrderId, clock.now().toISOString());
+    } catch (err) {
+      return notSent(`submit intent could not be persisted: ${errorMessage(err)}`);
+    }
+    // Final check: no await between it and the adapter call.
+    const last = this.control(approval);
+    if (!last.ok) return notSent(...last.reasons);
+    const pending = adapter.submitOrder({
+      clientOrderId: order.clientOrderId,
+      accountRef: account.broker.accountRef,
+      symbol: plan.symbol,
+      direction: plan.direction,
+      quantity: plan.quantity,
+      entryType: plan.entryType,
+      ...(plan.entryType === 'LIMIT'
+        ? { limitPrice: plan.entry, ...(plan.expiresAt ? { expiresAt: plan.expiresAt } : {}) }
+        : {}),
+      stopLoss: plan.stop,
+      takeProfit: plan.target,
+    });
+
+    let submitted: BrokerOrderState | null = null;
+    let submitError: string | null = null;
+    let recordError: string | null = null;
+    try {
+      submitted = await pending;
+    } catch (err) {
+      // The broker may or may not have received it: the outcome is unknown until confirmed.
+      submitError = errorMessage(err);
+    }
+    try {
+      if (submitted) {
         await store.updateOrder(order.clientOrderId, submitted);
         await store.appendOrderEvent({
           clientOrderId: order.clientOrderId,
@@ -253,9 +472,7 @@ export class ExecutionGateway {
           type: 'SUBMIT_RESPONSE',
           detail: { ...submitted },
         });
-      } catch (err) {
-        // The broker may or may not have received it: the outcome is unknown until confirmed.
-        submitError = errorMessage(err);
+      } else {
         await store.appendOrderEvent({
           clientOrderId: order.clientOrderId,
           at: clock.now().toISOString(),
@@ -263,38 +480,27 @@ export class ExecutionGateway {
           detail: { error: submitError },
         });
       }
+    } catch (err) {
+      recordError = errorMessage(err); // keep going: polling the broker is still the truth
+    }
 
-      const confirmed = await this.confirm(
-        adapter,
-        account.broker.accountRef,
-        order.clientOrderId,
-        plan.entryType === 'LIMIT',
-      );
-      if (confirmed === null) {
-        const reason = submitError
-          ? `submission error (${submitError}) and order state could not be confirmed`
-          : `order state not confirmed within ${this.deps.confirmation.timeoutMs}ms`;
-        const unknownState: BrokerOrderState = {
-          clientOrderId: order.clientOrderId,
-          brokerOrderId: submitted?.brokerOrderId ?? null,
-          status: 'UNKNOWN',
-          quantity: plan.quantity,
-          filledQuantity: submitted?.filledQuantity ?? 0,
-          averageFillPrice: submitted?.averageFillPrice ?? null,
-          rejectReason: reason,
-          updatedAt: clock.now().toISOString(),
-        };
-        await store.updateOrder(order.clientOrderId, unknownState);
-        await store.appendOrderEvent({
-          clientOrderId: order.clientOrderId,
-          at: clock.now().toISOString(),
-          type: 'STATE_UNKNOWN',
-          detail: { reason },
-        });
-        await this.deps.onExecutionUnknown(approval.accountId, order.clientOrderId, reason);
-        return { outcome: 'UNKNOWN', reasons: [reason], order, brokerState: unknownState };
-      }
+    const confirmed = await this.confirm(
+      adapter,
+      account.broker.accountRef,
+      order.clientOrderId,
+      plan.entryType === 'LIMIT',
+    );
+    if (confirmed === null || recordError !== null) {
+      const reason =
+        confirmed === null
+          ? submitError
+            ? `submission error (${submitError}) and order state could not be confirmed`
+            : `order state not confirmed within ${this.deps.confirmation.timeoutMs}ms`
+          : `order state could not be recorded (${recordError}); exposure stays reserved`;
+      return this.unknown(order, reason, confirmed ?? submitted, plan.quantity);
+    }
 
+    try {
       await store.updateOrder(order.clientOrderId, confirmed);
       await store.appendOrderEvent({
         clientOrderId: order.clientOrderId,
@@ -302,29 +508,76 @@ export class ExecutionGateway {
         type: 'CONFIRMED',
         detail: { ...confirmed },
       });
-      if (
-        confirmed.status === 'REJECTED' ||
-        confirmed.status === 'CANCELLED' ||
-        confirmed.status === 'EXPIRED'
-      ) {
-        return {
-          outcome: 'REJECTED',
-          reasons: [`broker ${confirmed.status}: ${confirmed.rejectReason ?? 'no reason given'}`],
-          order,
-          brokerState: confirmed,
-        };
-      }
+    } catch (err) {
+      return this.unknown(
+        order,
+        `order state could not be recorded (${errorMessage(err)}); exposure stays reserved`,
+        confirmed,
+        plan.quantity,
+      );
+    }
+    if (
+      confirmed.status === 'REJECTED' ||
+      confirmed.status === 'CANCELLED' ||
+      confirmed.status === 'EXPIRED'
+    ) {
       return {
-        outcome: 'CONFIRMED',
-        reasons: [
-          isWorking(confirmed)
-            ? `WORKING: LIMIT ${plan.quantity} @ ${plan.entry} until ${plan.expiresAt}`
-            : `${confirmed.status} ${confirmed.filledQuantity}/${plan.quantity} @ ${confirmed.averageFillPrice}`,
-        ],
+        outcome: 'REJECTED',
+        reasons: [`broker ${confirmed.status}: ${confirmed.rejectReason ?? 'no reason given'}`],
         order,
         brokerState: confirmed,
       };
-    });
+    }
+    return {
+      outcome: 'CONFIRMED',
+      reasons: [
+        isWorking(confirmed)
+          ? `WORKING: LIMIT ${plan.quantity} @ ${plan.entry} until ${plan.expiresAt}`
+          : `${confirmed.status} ${confirmed.filledQuantity}/${plan.quantity} @ ${confirmed.averageFillPrice}`,
+      ],
+      order,
+      brokerState: confirmed,
+    };
+  }
+
+  /**
+   * Outcome not established: the reservation stays (a failed write here must not free it),
+   * execution is halted for the account, and nothing is ever resent.
+   */
+  private async unknown(
+    order: OrderRecord,
+    reason: string,
+    last: BrokerOrderState | null,
+    quantity: number,
+  ): Promise<ExecutionResult> {
+    const { store, clock } = this.deps;
+    const unknownState: BrokerOrderState = {
+      clientOrderId: order.clientOrderId,
+      brokerOrderId: last?.brokerOrderId ?? null,
+      status: 'UNKNOWN',
+      quantity,
+      filledQuantity: last?.filledQuantity ?? 0,
+      averageFillPrice: last?.averageFillPrice ?? null,
+      rejectReason: reason,
+      updatedAt: clock.now().toISOString(),
+    };
+    try {
+      await store.updateOrder(order.clientOrderId, unknownState);
+      await store.appendOrderEvent({
+        clientOrderId: order.clientOrderId,
+        at: clock.now().toISOString(),
+        type: 'STATE_UNKNOWN',
+        detail: { reason },
+      });
+    } catch {
+      // Still UNKNOWN: the stored order stays PENDING_SUBMIT/dispatched, which restart treats as unresolved.
+    }
+    try {
+      await this.deps.onExecutionUnknown(order.accountId, order.clientOrderId, reason);
+    } catch {
+      // The reservation still blocks new entries; reconciliation resolves the order.
+    }
+    return { outcome: 'UNKNOWN', reasons: [reason], order, brokerState: unknownState };
   }
 
   /**

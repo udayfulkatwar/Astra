@@ -6,3 +6,4 @@ export * from './pipeline';
 export * from './engine';
 export * from './record';
 export * from './assembler';
+export * from './revalidate';

@@ -9,6 +9,7 @@ import { DecisionRepository } from '../src/repositories/decisions';
 import { ExecutionRepository } from '../src/repositories/execution';
 import { KillSwitchRepository } from '../src/repositories/kill-switches';
 import { NQ, account, makeInputs, tracking } from '../../decision/test/fixtures';
+import { realRevalidator, makeWorld } from '../../execution/test/gate-world';
 import { createTestDb, dbAvailable, type TestDb } from './helpers';
 
 const available = await dbAvailable();
@@ -126,7 +127,10 @@ describe.skipIf(!available)('repositories', () => {
       const d = engine.evaluate(inputs);
       await decisions.record(d, inputs);
 
-      const clock = new ManualClock('2026-09-28T14:00:05.000Z');
+      const world = makeWorld();
+      world.clock.advance(5_000);
+      const clock = world.clock;
+      world.candidates.set(d.approval!.approvalId, inputs.candidate);
       const broker = new PaperBrokerAdapter({ clock, instruments: () => NQ });
       broker.openAccount('PAPER-A', 50_000);
       broker.onQuote({
@@ -146,6 +150,11 @@ describe.skipIf(!available)('repositories', () => {
         killSwitches: (c) => ks.evaluate(c),
         liveTradingEnvironmentAuthorized: () => false,
         onExecutionUnknown: vi.fn(() => Promise.resolve()),
+        // The real assembler + Decision Engine on fresh data; duplicates exempt only this decision.
+        revalidate: realRevalidator(world, store, (a, sig, ex) =>
+          decisions.priorApprovedForSignal(a, sig, ex),
+        ),
+        revalidationTimeoutMs: 1_000,
         clock,
         confirmation: { timeoutMs: 1_000, pollIntervalMs: 100 },
         sleep: (ms) => {
@@ -168,6 +177,7 @@ describe.skipIf(!available)('repositories', () => {
       });
       expect((await store.orderEvents(orders[0]!.clientOrderId)).map((e) => e.type)).toEqual([
         'SUBMIT_REQUESTED',
+        'SUBMIT_DISPATCHING',
         'SUBMIT_RESPONSE',
         'CONFIRMED',
       ]);

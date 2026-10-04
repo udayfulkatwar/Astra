@@ -28,6 +28,7 @@ export const ID_PREFIXES = {
   aiAnalysis: 'aia',
   aiReview: 'air',
   aiCall: 'aic',
+  reservation: 'rsv',
 } as const;
 export type IdKind = keyof typeof ID_PREFIXES;
 

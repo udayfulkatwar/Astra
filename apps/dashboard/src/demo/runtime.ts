@@ -47,7 +47,10 @@ import {
   DecisionEngine,
   assembleDecisionInputs,
   decideAndRecord,
+  revalidateApprovedEntry,
+  type AssembleOptions,
   type DecisionInputs,
+  type EntryRevalidation,
   type DecisionRecorder,
   type TradeDecision,
 } from '@astra/decision';
@@ -56,6 +59,7 @@ import {
   InMemoryExecutionStore,
   PaperBrokerAdapter,
   isTerminal,
+  type EntryRevalidationRequest,
   type ExecutionResult,
 } from '@astra/execution';
 import {
@@ -375,6 +379,8 @@ export class DemoRuntime {
         );
         return Promise.resolve();
       },
+      revalidate: (req) => this.revalidateEntry(req),
+      revalidationTimeoutMs: this.config.system.assembler.providerTimeoutMs * 4,
       clock: this.clock,
       confirmation: {
         timeoutMs: this.config.system.execution.confirmationTimeoutMs,
@@ -1451,9 +1457,90 @@ export class DemoRuntime {
   }
 
   private assemble(candidate: TradeCandidate, ai?: Observed<AiAnalysis>): Promise<DecisionInputs> {
+    return assembleDecisionInputs({ candidate, ...this.assembleOptions(ai) });
+  }
+
+  /** Same gate as the server's pre-submit validation: the ORIGINAL candidate on fresh data. */
+  private revalidateEntry(req: EntryRevalidationRequest): Promise<EntryRevalidation> {
+    const { approval, snapshot } = req;
+    const record = this.decisions.find(
+      (d) => d.decision.approval?.approvalId === approval.approvalId,
+    );
+    if (!record)
+      return Promise.resolve({
+        ok: false,
+        reasons: ['[revalidation] original decision not found'],
+      });
+    const profile = this.config.profiles.get(
+      this.config.accounts.get(approval.accountId)?.propFirmProfileId ?? '',
+    );
+    const prev = this.accounts.get(approval.accountId)?.tracking;
+    const base = this.assembleOptions();
+    return revalidateApprovedEntry({
+      engine: this.engine,
+      candidate: record.inputs.candidate,
+      plan: approval.orderPlan,
+      originalConfigHash: record.decision.configHash,
+      assemble: {
+        ...base,
+        data: {
+          ...base.data,
+          accountSnapshot: () =>
+            Promise.resolve(
+              observed(snapshot, {
+                source: 'demo-broker',
+                sourceKind: 'SIMULATED',
+                asOf: snapshot.asOf,
+              }),
+            ),
+          // Tracking advanced from the fresh snapshot, not the last periodic sync.
+          tracking: () =>
+            Promise.resolve(
+              prev && profile
+                ? observed(
+                    updateAccountTracking(prev, snapshot, {
+                      reset: profile.tradingDayReset,
+                      tradedToday: (this.activity(approval.accountId)?.tradesToday ?? 0) > 0,
+                      lateObservationThresholdMs:
+                        this.config.system.tracking.lateObservationThresholdMs,
+                    }),
+                    {
+                      source: 'astra-account-tracking',
+                      sourceKind: 'SIMULATED',
+                      asOf: snapshot.asOf,
+                    },
+                  )
+                : notObserved('UNAVAILABLE', 'account tracking not available', 'demo'),
+            ),
+          duplicates: (accountId, signalId, symbol) => {
+            const prior = this.decisions.find(
+              (d) =>
+                d.decision.accountId === accountId &&
+                d.decision.signalId === signalId &&
+                d.decision.status === 'APPROVED' &&
+                d.decision.decisionId !== approval.decisionId,
+            );
+            const working = [...this.store.orders.values()].some(
+              (o) => o.accountId === accountId && o.symbol === symbol && !isTerminal(o.status),
+            );
+            return Promise.resolve(
+              observed(
+                {
+                  priorApprovedDecisionId: prior?.decision.decisionId ?? null,
+                  workingOrderForSymbol: working,
+                },
+                { source: 'demo-store', sourceKind: 'LIVE', asOf: this.clock.now().toISOString() },
+              ),
+            );
+          },
+        },
+      },
+    });
+  }
+
+  private assembleOptions(ai?: Observed<AiAnalysis>): Omit<AssembleOptions, 'candidate'> {
     const { config } = this;
-    return assembleDecisionInputs({
-      candidate,
+    return {
       config: {
         configHash: config.hash,
         policy: config.system.decision,
@@ -1535,7 +1622,7 @@ export class DemoRuntime {
       },
       clock: this.clock,
       timeoutMs: config.system.assembler.providerTimeoutMs,
-    });
+    };
   }
 
   private async decideAndPublish(

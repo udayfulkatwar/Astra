@@ -128,6 +128,44 @@ export class AccountService {
     return observed(a, { source: 'astra-db', sourceKind: 'LIVE', asOf: now.toISOString() });
   }
 
+  /**
+   * Tracking advanced from a FRESH broker snapshot (pre-submit validation): peaks, day-start and
+   * drawdown inputs come from the same equity the order will be judged on, never from the last
+   * periodic sync. The result is persisted like a sync would. Any failure is a non-OK observation.
+   */
+  async freshTracking(
+    accountId: string,
+    snapshot: AccountSnapshot,
+    sourceKind: 'LIVE' | 'SIMULATED',
+  ): Promise<Observed<AccountTracking>> {
+    const { config, repo } = this.deps;
+    const account = config.accounts.get(accountId);
+    const profile = account && config.profiles.get(account.propFirmProfileId);
+    const entry = this.entries.get(accountId);
+    if (!account || !profile || !entry)
+      return notObserved('UNAVAILABLE', `unknown account ${accountId}`, 'account-tracking');
+    try {
+      const prev = entry.tracking ?? (await repo.getTracking(accountId));
+      if (!prev)
+        return notObserved('UNAVAILABLE', 'no stored account tracking', 'account-tracking');
+      const activity = await this.activity(accountId);
+      const tracking = updateAccountTracking(prev, snapshot, {
+        reset: profile.tradingDayReset,
+        tradedToday: activity.status === 'OK' && activity.value.tradesToday > 0,
+        lateObservationThresholdMs: config.system.tracking.lateObservationThresholdMs,
+      });
+      await repo.saveTracking(tracking);
+      entry.tracking = tracking;
+      return observed(tracking, {
+        source: 'astra-account-tracking',
+        sourceKind,
+        asOf: snapshot.asOf,
+      });
+    } catch (err) {
+      return notObserved('ERROR', errorMessage(err), 'account-tracking');
+    }
+  }
+
   view(accountId: string): AccountView | null {
     const account = this.deps.config.accounts.get(accountId);
     const e = this.entries.get(accountId);

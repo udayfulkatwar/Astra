@@ -12,7 +12,7 @@ import {
 } from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import type { ExecutionRepository, PaperBrokerStateRepository } from '@astra/db';
-import type { ExecutionReadiness } from '@astra/decision';
+import type { EntryRevalidation, ExecutionReadiness } from '@astra/decision';
 import {
   ExecutionGateway,
   PaperBrokerAdapter,
@@ -20,6 +20,7 @@ import {
   isWorking,
   type BrokerAdapter,
   type CancelResult,
+  type EntryRevalidationRequest,
   type ExecutionResult,
 } from '@astra/execution';
 import type { Logger } from 'pino';
@@ -46,6 +47,8 @@ export class ExecutionService {
       clock: Clock;
       log: Logger;
       liveTradingEnvironmentAuthorized: boolean;
+      /** Required deterministic pre-submit revalidation (see PreSubmitValidator). */
+      revalidate: (req: EntryRevalidationRequest) => Promise<EntryRevalidation>;
     },
   ) {
     const { config, clock } = deps;
@@ -74,6 +77,9 @@ export class ExecutionService {
           actor: { type: 'SYSTEM', id: 'execution-gateway' },
         });
       },
+      revalidate: (req) => deps.revalidate(req),
+      // Providers run in parallel under their own timeout; this bounds the whole revalidation.
+      revalidationTimeoutMs: config.system.assembler.providerTimeoutMs * 4,
       clock,
       confirmation: {
         timeoutMs: config.system.execution.confirmationTimeoutMs,
@@ -117,6 +123,22 @@ export class ExecutionService {
   private async reconcile(account: AccountDefinition): Promise<void> {
     const adapter = this.adapters.get(account.broker.adapterId);
     if (!adapter) return;
+    const at = () => this.deps.clock.now().toISOString();
+    // Orders that were reserved but never marked dispatched were provably never sent (the intent
+    // is written before the adapter is called, and a released order can no longer be dispatched):
+    // release them. Anything dispatched stays reserved and is polled below.
+    const exposure = await this.deps.store.accountExposure(account.id);
+    for (const r of exposure.reservations) {
+      if (r.dispatched || r.orderStatus !== 'PENDING_SUBMIT') continue;
+      const released = await this.deps.store.releaseUntransmitted(
+        r.clientOrderId,
+        'restart: the submit call was never dispatched',
+        at(),
+        { onlyIfUndispatched: true },
+      );
+      if (released)
+        this.deps.log.warn({ order: r.clientOrderId }, 'released never-dispatched order');
+    }
     const working = await this.deps.store.workingOrdersForAccount(account.id);
     let unresolved = 0;
     for (const o of working) {
@@ -151,6 +173,8 @@ export class ExecutionService {
       });
       return;
     }
+    // Exposure of ended orders is released only on closure linked to the same order.
+    await this.deps.store.reconcileReservations(account.id, at());
     this.reconciled.add(account.id);
   }
 
