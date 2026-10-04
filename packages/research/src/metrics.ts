@@ -33,6 +33,10 @@ const mean = (xs: readonly number[]) =>
   xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length;
 
 export function metrics(trades: readonly ResearchTrade[]): Metrics {
+  // An unreadable close time makes the order — and so every drawdown — meaningless.
+  for (const t of trades)
+    if (!Number.isFinite(Date.parse(t.closedAt)))
+      throw new Error(`trade ${t.id} has an invalid closedAt: ${JSON.stringify(t.closedAt)}`);
   const sorted = [...trades].sort((a, b) => Date.parse(a.closedAt) - Date.parse(b.closedAt));
   const rs = sorted.map((t) => t.r ?? 0);
   const wins = sorted.filter((t) => t.netPnl > 0);

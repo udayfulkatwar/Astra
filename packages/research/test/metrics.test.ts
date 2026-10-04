@@ -83,6 +83,51 @@ describe('§23 metrics', () => {
     expect(w.map((x) => x.metrics.trades)).toEqual([1, 0, 1, 1]);
   });
 
+  it('walk-forward windows are anchored to the start and never count trades after the end', () => {
+    // 31 Jan + 1 month must not drift to 3 Mar; the trade after `to` belongs to no window.
+    const ts = [
+      trade(1, '2024-02-29T23:00:00Z'),
+      trade(1, '2024-03-31T00:00:00Z'),
+      trade(5, '2024-05-20T00:00:00Z'),
+    ];
+    const w = walkForward(ts, '2024-01-31T00:00:00Z', '2024-04-15T00:00:00Z', 1);
+    expect(w.map((x) => [x.from, x.to, x.metrics.trades])).toEqual([
+      ['2024-01-31', '2024-02-29', 0],
+      ['2024-02-29', '2024-03-31', 1],
+      ['2024-03-31', '2024-04-15', 1],
+    ]);
+    expect(w.reduce((a, x) => a + x.metrics.totalR, 0)).toBe(2);
+  });
+
+  it('refuses invalid dates, windows and runs instead of returning empty or endless results', () => {
+    const ts = [trade(1, '2024-02-01T00:00:00Z')];
+    expect(() => walkForward(ts, '2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 0)).toThrow();
+    expect(() => walkForward(ts, '2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 1.5)).toThrow();
+    expect(() => walkForward(ts, 'nope', '2025-01-01T00:00:00Z', 6)).toThrow();
+    expect(() => walkForward(ts, '2025-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 6)).toThrow();
+    expect(() => split(ts, 'not a date')).toThrow();
+    expect(() => split([trade(1, 'bad')], '2024-01-01T00:00:00Z')).toThrow();
+    expect(() => metrics([trade(1, 'bad')])).toThrow();
+    expect(() => monteCarlo(ts, { runs: 0 })).toThrow();
+    expect(() => monteCarlo([trade(Number.NaN, '2024-01-01T00:00:00Z')])).toThrow();
+  });
+
+  it('split reports trades opened before the cut but closed after it', () => {
+    const t = { ...trade(1, '2024-01-02T00:00:00Z'), openedAt: '2023-12-31T00:00:00Z' };
+    const s = split([t, trade(1, '2024-03-01T00:00:00Z')], '2024-01-01T00:00:00Z');
+    expect(s.straddling).toBe(1);
+    expect(s.outOfSample.trades).toBe(2);
+  });
+
+  it('split refuses an unreadable openedAt or one after the close', () => {
+    const cut = '2024-01-01T00:00:00Z';
+    const t = trade(1, '2024-02-01T00:00:00Z');
+    expect(() => split([{ ...t, openedAt: 'bad' }], cut)).toThrow(/openedAt/);
+    expect(() => split([{ ...t, openedAt: '2024-03-01T00:00:00Z' }], cut)).toThrow(
+      /after it closed/,
+    );
+  });
+
   it('Monte Carlo is reproducible for a seed and bounded by the trades', () => {
     const ts = Array.from({ length: 50 }, (_, i) =>
       trade(i % 3 === 0 ? 2 : -1, `2024-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`),
