@@ -105,6 +105,14 @@ type Control =
     }
   | { readonly ok: false; readonly reasons: string[]; readonly expired: boolean };
 
+/** What a queued risk-reducing request was made against; pinned, never re-resolved. */
+interface Binding {
+  readonly adapterId: string;
+  readonly accountRef: string;
+  readonly adapter: BrokerAdapter;
+  readonly kind: BrokerAdapter['kind'];
+}
+
 const MAX_LEDGER_ATTEMPTS = 3;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -705,7 +713,7 @@ export class ExecutionGateway {
     }
     const detail =
       failed.length > 0
-        ? `${reason}; persistence incomplete: ${failed.join('; ')}; the reservation is kept and the account needs recovery`
+        ? `${reason}; persistence incomplete: ${failed.join('; ')}; the reservation state is whatever the store committed (not asserted) and the account needs recovery`
         : reason;
     return { outcome: 'UNKNOWN', reasons: [detail], order, brokerState: unknownState };
   }
@@ -772,10 +780,16 @@ export class ExecutionGateway {
           result,
         );
       }
-      const failed: string[] = [];
+      // Each durable step has its own honest outcome; none implies another.
       let contradiction: string | null = null;
+      let stateNote: string | null = null;
+      let eventNote: string | null = null;
       try {
         contradiction = (await store.updateOrder(req.clientOrderId, state)).contradiction;
+      } catch (err) {
+        stateNote = `the order-state evidence was NOT recorded (${errorMessage(err)}); whether it committed is not confirmed`;
+      }
+      try {
         await store.appendOrderEvent({
           clientOrderId: req.clientOrderId,
           at: clock.now().toISOString(),
@@ -783,16 +797,24 @@ export class ExecutionGateway {
           detail: { reason: req.reason, result: { ...state } },
         });
       } catch (err) {
-        failed.push(
-          `the broker answered ${state.status} but the evidence was NOT recorded (${errorMessage(err)})`,
-        );
+        eventNote = `the CANCEL_REQUESTED audit event was NOT appended (${errorMessage(err)})`;
       }
-      if (failed.length > 0 || contradiction) {
-        const why =
-          failed.length > 0
-            ? `cancel of ${req.clientOrderId}: ${failed.join('; ')}; the reservation is kept`
-            : `cancel of ${req.clientOrderId}: contradictory broker evidence (${contradiction})`;
-        return this.actionUnknown(req.accountId, req.clientOrderId, why, state, result);
+      if (stateNote || eventNote || contradiction) {
+        const parts = [
+          `the broker answered ${state.status}`,
+          stateNote ??
+            (contradiction
+              ? `contradictory broker evidence (${contradiction})`
+              : 'the order state was recorded (the reservation follows the recorded state; it is not asserted kept or released here)'),
+          eventNote ?? 'the audit event was appended',
+        ];
+        return this.actionUnknown(
+          req.accountId,
+          req.clientOrderId,
+          `cancel of ${req.clientOrderId}: ${parts.join('; ')}`,
+          state,
+          result,
+        );
       }
       if (state.status === 'CANCELLED') return result('CANCELLED', req.reason, state);
       if (state.status === 'FILLED') return result('FILLED', 'the order filled first', state);
@@ -815,13 +837,13 @@ export class ExecutionGateway {
    */
   private reductionControl(
     accountId: string,
-    queued: { adapterId: string; accountRef: string } | null,
+    queued: Binding | null,
   ):
     | {
         ok: true;
         adapter: BrokerAdapter;
         accountRef: string;
-        binding: { adapterId: string; accountRef: string };
+        binding: Binding;
       }
     | { ok: false; outcome: 'SKIPPED' | 'REJECTED'; reason: string } {
     const no = (outcome: 'SKIPPED' | 'REJECTED', reason: string) =>
@@ -839,14 +861,28 @@ export class ExecutionGateway {
         'SKIPPED',
         `EXECUTION kill switch active (${execution.map((s) => s.reason).join('; ')}) — manual action required`,
       );
-    const binding = { adapterId: account.broker.adapterId, accountRef: account.broker.accountRef };
+    const adapterId = account.broker.adapterId;
+    const adapter = this.deps.adapter(adapterId);
+    if (!adapter) return no('REJECTED', `adapter ${adapterId} not registered`);
+    // The binding is the adapter INSTANCE and its kind as well as the ids: a different object
+    // registered under the same id/ref while the request queued is a different broker connection.
+    const binding: Binding = {
+      adapterId,
+      accountRef: account.broker.accountRef,
+      adapter,
+      kind: adapter.kind,
+    };
     if (
       queued &&
-      (queued.adapterId !== binding.adapterId || queued.accountRef !== binding.accountRef)
+      (queued.adapterId !== binding.adapterId ||
+        queued.accountRef !== binding.accountRef ||
+        queued.adapter !== binding.adapter ||
+        queued.kind !== binding.kind)
     )
-      return no('REJECTED', "the account's broker binding changed since the request was queued");
-    const adapter = this.deps.adapter(binding.adapterId);
-    if (!adapter) return no('REJECTED', `adapter ${binding.adapterId} not registered`);
+      return no(
+        'REJECTED',
+        "the account's broker binding (adapter instance, kind or broker account) changed since the request was queued",
+      );
     const policy = modePolicy(mode);
     if (policy.brokerKind && adapter.kind !== policy.brokerKind)
       return no(
@@ -876,9 +912,10 @@ export class ExecutionGateway {
     state: BrokerOrderState | null,
     result: (outcome: 'UNKNOWN', reason: string, state: BrokerOrderState | null) => R,
   ): Promise<R> {
-    let detail = reason;
+    let detail: string;
     try {
       await this.deps.onExecutionUnknown(accountId, id, reason);
+      detail = `${reason}; execution halted (persisted)`;
     } catch (err) {
       detail = `${reason}; execution halt NOT persisted (${errorMessage(err)})`;
     }

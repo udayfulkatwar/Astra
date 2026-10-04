@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ExecutionGateway, clientOrderIdFor } from '../src/gateway';
 import { InMemoryExecutionStore } from '../src/memory-store';
-import type { OrderRecord } from '../src/types';
+import type { BrokerAdapter, OrderRecord } from '../src/types';
 import {
   accountDef,
   decide,
@@ -44,9 +44,30 @@ function rig() {
     acct: false,
   };
   const inst = instrument(w, paper);
-  const broker = new Proxy(inst, {
+  const brokerOf = new Proxy(inst, {
     get: (t, p, r) => (p === 'kind' ? cfg.kind : (Reflect.get(t, p, r) as unknown)),
   });
+  /** A DIFFERENT adapter object registered under the same id (same kind): must never be used. */
+  const swap: {
+    current: BrokerAdapter | null;
+    cancel: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+  } = {
+    current: null,
+    cancel: vi.fn(),
+    close: vi.fn(),
+  };
+  const replaceAdapter = () => {
+    swap.current = {
+      id: 'paper',
+      kind: 'PAPER',
+      supportedEntryTypes: ['MARKET', 'LIMIT'],
+      cancelOrder: swap.cancel,
+      closePosition: swap.close,
+      getOrder: vi.fn(),
+      getAccountSnapshot: vi.fn(),
+    } as unknown as BrokerAdapter;
+  };
   const unknownCalls: string[] = [];
   const hooks = {
     onUnknown: (_a: string, _c: string, r: string): Promise<void> => (
@@ -56,7 +77,7 @@ function rig() {
   };
   const gateway = new ExecutionGateway({
     store,
-    adapter: (id) => (id === cfg.adapterId ? broker : undefined),
+    adapter: (id) => (id === cfg.adapterId ? (swap.current ?? brokerOf) : undefined),
     account: (id) =>
       id === 'acct-a'
         ? ({
@@ -122,6 +143,8 @@ function rig() {
     reason: 'test',
   });
   return {
+    swap,
+    replaceAdapter,
     w,
     store,
     paper,
@@ -182,13 +205,13 @@ const CHANGES: {
     name: 'broker account binding changed',
     change: (s) => (s.cfg.accountRef = 'PAPER-B'),
     outcome: 'REJECTED',
-    why: /binding changed/,
+    why: /binding .*changed/,
   },
   {
     name: 'broker adapter binding changed',
     change: (s) => (s.cfg.adapterId = 'other'),
     outcome: 'REJECTED',
-    why: /binding changed/,
+    why: /binding .*changed/,
   },
   {
     name: 'LIVE authorization revoked',
@@ -205,10 +228,10 @@ const CHANGES: {
     why: /live trading not authorized/,
   },
   {
-    name: 'adapter kind no longer matches the mode',
+    name: 'adapter kind changes (same instance)',
     change: (s) => (s.cfg.kind = 'LIVE'),
     outcome: 'REJECTED',
-    why: /requires PAPER/,
+    why: /binding .*changed/,
   },
 ];
 
@@ -405,7 +428,8 @@ describe('queued cancel of a resting entry re-reads permission inside the lock',
     s.store.updateOrder = () => Promise.reject(new Error('orders write down'));
     const r = await s.gateway.cancelWorking(s.cancelReq(id));
     expect(r.outcome).toBe('UNKNOWN');
-    expect(r.reason).toMatch(/evidence was NOT recorded \(orders write down\)/);
+    expect(r.reason).toMatch(/order-state evidence was NOT recorded \(orders write down\)/);
+    expect(r.reason).not.toMatch(/reservation is kept/);
     expect(s.unknownCalls.join()).toMatch(/NOT recorded/);
     expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(1);
   });
@@ -429,5 +453,97 @@ describe('queued cancel of a resting entry re-reads permission inside the lock',
     expect(r.outcome).toBe('UNKNOWN');
     expect(s.unknownCalls.join()).toMatch(/outcome unknown: transport reset/);
     expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(1);
+  });
+});
+
+describe('the queued binding pins the adapter INSTANCE and kind', () => {
+  it('protective close: a same-id replacement adapter registered while queued is never called', async () => {
+    const s = rig();
+    const positionId = await s.withPosition();
+    const held = await s.holdLock();
+    const queued = s.gateway.protectiveClose(s.closeReq(positionId));
+    await Promise.resolve();
+    s.replaceAdapter();
+    held.release();
+    const r = await queued;
+    await held.entry.catch(() => undefined);
+    expect(r.outcome).toBe('REJECTED');
+    expect(r.reason).toMatch(/binding .*changed/);
+    expect(s.swap.close).not.toHaveBeenCalled();
+    expect(s.close).not.toHaveBeenCalled();
+  });
+
+  it('cancel: a same-id replacement adapter registered while queued is never called', async () => {
+    const s = rig();
+    const id = await s.withResting();
+    const held = await s.holdLock();
+    const queued = s.gateway.cancelWorking(s.cancelReq(id));
+    await Promise.resolve();
+    s.replaceAdapter();
+    held.release();
+    const r = await queued;
+    await held.entry.catch(() => undefined);
+    expect(r.outcome).toBe('REJECTED');
+    expect(r.reason).toMatch(/binding .*changed/);
+    expect(s.swap.cancel).not.toHaveBeenCalled();
+    expect(s.cancel).not.toHaveBeenCalled();
+  });
+
+  it('a replacement during the final asynchronous read (target lookup) is caught too', async () => {
+    const s = rig();
+    const id = await s.withResting();
+    const real = s.store.orderByClientId.bind(s.store);
+    let reached!: () => void;
+    const inside = new Promise<void>((r) => (reached = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    s.store.orderByClientId = async (cid: string) => {
+      reached();
+      await gate;
+      return real(cid);
+    };
+    const queued = s.gateway.cancelWorking(s.cancelReq(id));
+    await inside;
+    s.replaceAdapter();
+    release();
+    expect((await queued).outcome).toBe('REJECTED');
+    expect(s.swap.cancel).not.toHaveBeenCalled();
+    expect(s.cancel).not.toHaveBeenCalled();
+  });
+
+  it('a mode/kind mismatch from the start is refused before queueing; entry-only switches still permit reduction', async () => {
+    const s = rig();
+    const positionId = await s.withPosition();
+    s.cfg.kind = 'LIVE';
+    const r = await s.gateway.protectiveClose(s.closeReq(positionId));
+    expect(r.outcome).toBe('REJECTED');
+    expect(r.reason).toMatch(/requires PAPER/);
+    expect(s.close).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancel persistence outcomes are reported step by step', () => {
+  it('terminal update succeeds (reservation released), the audit append fails, the halt write fails: no false retention claim, every step honest', async () => {
+    const s = rig();
+    const id = await s.withResting();
+    s.store.appendOrderEvent = () => Promise.reject(new Error('events write down'));
+    s.hooks.onUnknown = () => Promise.reject(new Error('kill switch write down'));
+    const r = await s.gateway.cancelWorking(s.cancelReq(id));
+    expect(r.outcome).toBe('UNKNOWN');
+    expect(r.reason).toMatch(/the broker answered CANCELLED/);
+    expect(r.reason).toMatch(/order state was recorded/);
+    expect(r.reason).toMatch(/CANCEL_REQUESTED audit event was NOT appended \(events write down\)/);
+    expect(r.reason).toMatch(/execution halt NOT persisted \(kill switch write down\)/);
+    expect(r.reason).not.toMatch(/reservation is kept|reservation stays/);
+    // the actual ledger: the recorded terminal state released the reservation
+    expect((await s.store.accountExposure('acct-a')).reservations).toHaveLength(0);
+  });
+
+  it('a persisted halt is reported as persisted', async () => {
+    const s = rig();
+    const id = await s.withResting();
+    s.store.appendOrderEvent = () => Promise.reject(new Error('events write down'));
+    const r = await s.gateway.cancelWorking(s.cancelReq(id));
+    expect(r.reason).toMatch(/execution halted \(persisted\)/);
   });
 });

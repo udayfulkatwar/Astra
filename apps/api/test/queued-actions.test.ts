@@ -112,7 +112,7 @@ describe.skipIf(!available)('S002 — queued protective close on the composed ru
     const r = await queued;
     await s.holder;
     expect(r.outcome).toBe('REJECTED');
-    expect(r.reason).toMatch(/binding changed/);
+    expect(r.reason).toMatch(/binding .*changed/);
     expect(s.close).not.toHaveBeenCalled();
   });
 
@@ -152,5 +152,64 @@ describe.skipIf(!available)('S002 — queued protective close on the composed ru
     expect(r.outcome).toBe('UNKNOWN');
     expect(r.reason).toMatch(/outcome unknown: transport reset/);
     expect(r.reason).toMatch(/execution halt NOT persisted/);
+  });
+
+  it('cancel: the terminal update releases the reservation, the audit append fails and the halt write fails → honest explanation, admission blocked, clean stop refused, dirty restart blocks', async () => {
+    const x = (h = await createHarness());
+    await bringOnline(x);
+    const placed = json(
+      await x.app.inject({
+        method: 'POST',
+        url: '/api/v1/decisions/evaluate',
+        headers: H.automation,
+        payload: {
+          candidate: candidate(x, {
+            entryType: 'LIMIT',
+            entry: 19_995,
+            stop: 19_985,
+            target: 20_025,
+            expiresAt: new Date(x.clock.now().getTime() + 30 * 60_000).toISOString(),
+          }),
+          autoExecute: true,
+        },
+      }),
+    );
+    expect(placed.execution.outcome).toBe('CONFIRMED');
+    const clientOrderId = placed.execution.order.clientOrderId as string;
+    const repo = x.runtime.repos.execution as unknown as Record<string, (...a: any[]) => any>;
+    const realAppend = repo.appendOrderEvent!.bind(repo);
+    repo.appendOrderEvent = (e: { type: string }) =>
+      e.type === 'CANCEL_REQUESTED'
+        ? Promise.reject(new Error('events write down'))
+        : (realAppend(e) as Promise<void>);
+    x.runtime.repos.killSwitches.persist = () => Promise.reject(new Error('db outage'));
+    const c = await x.runtime.execution.cancel(clientOrderId, 'test');
+    expect(c.outcome).toBe('UNKNOWN');
+    expect(c.reason).toMatch(/the broker answered CANCELLED/);
+    expect(c.reason).toMatch(/order state was recorded/);
+    expect(c.reason).toMatch(/audit event was NOT appended \(events write down\)/);
+    expect(c.reason).toMatch(/execution halt NOT persisted/);
+    expect(c.reason).not.toMatch(/reservation is kept|reservation stays/);
+    // the real ledger: the recorded terminal state released the reservation
+    const exposure = await x.runtime.repos.execution.accountExposure(ACCOUNT);
+    expect(exposure.reservations).toHaveLength(0);
+    // local admission is blocked (the halt exists in memory only) …
+    const account = x.runtime.config.accounts.get(ACCOUNT)!;
+    expect(x.runtime.execution.readiness(account).reconciled).toBe(false);
+    await expect(
+      x.runtime.execution.paper().getAccountSnapshot(account.broker.accountRef, ACCOUNT),
+    ).rejects.toThrow(/not durable/);
+    // … a clean stop is refused and the session stays DIRTY …
+    await expect(x.runtime.stop()).rejects.toThrow(/not durable/);
+    const row = await x.db.sql<
+      { state: string }[]
+    >`select state from paper_owner where adapter_id = 'paper'`;
+    expect(row[0]?.state).toBe('DIRTY');
+    // … so a restart finds it unclean and blocks the account
+    const b = (h = await x.crash());
+    expect(b.runtime.execution.recoveryState()).toBe('UNCLEAN');
+    expect(
+      (await b.runtime.repos.execution.accountExposure(ACCOUNT)).quarantines.length,
+    ).toBeGreaterThan(0);
   });
 });

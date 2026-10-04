@@ -67,6 +67,8 @@ export class ExecutionService {
   private session: PaperOwnerSession | null = null;
   private keepalive: ReturnType<typeof setInterval> | undefined;
   private persistenceError: string | null = null;
+  /** An EXECUTION halt that is only in memory: admission stays blocked and CLEAN is refused. */
+  private unpersistedHalt: string | null = null;
   /** RUNNING → CLOSING (no new top-level work, quotes ignored) → SEALED (every paper call refused). */
   private phase: 'RUNNING' | 'CLOSING' | 'SEALED' = 'RUNNING';
   /** Marks async contexts started by an admitted activity: they may finish while CLOSING. */
@@ -123,8 +125,13 @@ export class ExecutionService {
           actor: { type: 'SYSTEM', id: 'execution-gateway' },
         });
         // The halt is already in force in this process; the caller must still learn it is not durable.
-        if (!halt.persisted)
+        if (!halt.persisted) {
+          // Durable preservation of the uncertainty: this session can never end CLEAN, so a restart
+          // finds it DIRTY and quarantines; until then local admission is blocked.
+          this.unpersistedHalt ??= `EXECUTION halt for ${accountId} (${clientOrderId}) is not durable`;
+          this.reconciled.clear();
           throw new Error('the EXECUTION halt is active in memory only and was NOT persisted');
+        }
       },
       revalidate: (req) => deps.revalidate(req),
       // Providers run in parallel under their own timeout; this bounds the whole revalidation.
@@ -254,6 +261,7 @@ export class ExecutionService {
     if (this.session.ownerLost) return this.session.ownerLost;
     if (this.persistenceError)
       return `paper state could not be persisted: ${this.persistenceError}`;
+    if (this.unpersistedHalt) return this.unpersistedHalt;
     if (this.phase === 'SEALED') return 'paper is sealed for shutdown';
     // While closing, ONLY work started inside an admitted activity (same async scope) may touch
     // paper; a new top-level reader/mutator is refused before it can run.
@@ -600,6 +608,8 @@ export class ExecutionService {
     await Promise.all(this.pendingSaves.values());
     if (this.persistenceError)
       throw new Error(`paper state is not durable: ${this.persistenceError}`);
+    if (this.unpersistedHalt)
+      throw new Error(`execution state is not durable: ${this.unpersistedHalt}`);
   }
 
   /**
