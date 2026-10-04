@@ -257,11 +257,13 @@ Task 002 calendar persistence (`babf911`), F001+F002 frontend (`0c0aff9`), R001 
 
 ## Stage 1 — execution safety (ADR-0027; accepted chain, integrated candidate under review)
 
-Accepted in order, each by independent review and CI (`docs/WORK_LEDGER.md`, `RELEASE_EVIDENCE.md`):
-S001 pre-submit validation and durable account-wide reservations → S001-R3 evidence-after-release
-quarantine (migration 0012) → **M001** conservative tombstone upgrade (0013, 0014) → **F003**
-synchronous final entry freshness guard → **R004** single-owner PAPER crash/restart safety (0015) →
-**S002** queued risk-reduction permissions re-read inside the lock. Together: an entry is
+The S001 and S001-R3 candidates FAILED safety review and were never accepted; their features
+(pre-submit validation, durable account-wide reservations, evidence-after-release quarantine,
+migrations 0010–0012) are inherited and were repaired by the subsequently ACCEPTED chain, each
+accepted by independent review and exact-head CI (`docs/WORK_LEDGER.md`, `RELEASE_EVIDENCE.md`):
+**M001** conservative tombstone upgrade (0013, 0014) → **F003** synchronous final entry freshness
+guard → **R004** single-owner PAPER crash/restart safety (0015) → **S002** queued risk-reduction
+permissions re-read inside the lock. Together: an entry is
 transmitted only after fresh deterministic revalidation, a committed DB reservation and a final
 synchronous guard; paper state has one owner and an unclean session blocks its accounts; queued
 cancels/protective closes re-prove permission and the pinned adapter binding at the broker call.

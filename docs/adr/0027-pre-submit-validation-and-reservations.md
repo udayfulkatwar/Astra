@@ -153,11 +153,15 @@ twice, and an in-process mutex cannot prevent that across processes.
   submit-REJECTED-then-poll-FILLED in one gateway call, a late fill committed while either
   validation waits, an intervening same-symbol reservation, restart, idempotent repeats and a lost
   acknowledgement after commit.
-- Residual (reduced by §9/§10): if the database write of contradictory evidence FAILS, the account
-  is halted by the process-local EXECUTION switch; since R004 the paper session stays DIRTY (an
-  unpersisted halt also refuses CLEAN), so the next start quarantines every paper account and
-  re-reads the evidence of ended orders from the restored broker. A periodic re-verification of
-  recently ended orders while running is still not built.
+- Residual (reduced by §9/§10, PAPER only): if the database write of contradictory evidence FAILS,
+  the account is halted by the process-local EXECUTION switch. Only when persisting that EXECUTION
+  halt itself FAILS does the session latch (`unpersistedHalt`): local paper admission stays blocked
+  and a clean stop is refused, so the session stays DIRTY and the next start quarantines every paper
+  account. A halt that WAS persisted is durable by itself, even if a clean stop later succeeds. A
+  failed evidence write with a persisted halt is therefore not by itself a DIRTY session. After an
+  unclean session the evidence of ended orders is re-read from the restored broker; that is a
+  consistency check against tombstones, NOT a reconstruction of lost mutations. A periodic
+  re-verification of recently ended orders while running is still not built.
 - Residual (not solved): the last ledger read precedes the adapter call by one bounded database
   round trip; since F003 the time/provider/control side of that window is closed by the
   synchronous final guard (§4a), but ledger evidence (e.g. a late fill) committed inside it is

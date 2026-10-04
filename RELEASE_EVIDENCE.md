@@ -284,6 +284,13 @@ API with held final ledger wait), R004 (`paper-owner`, `paper-recovery`, `paper-
 `paper-drain`), S002 (`queued-actions`, in-memory and composed), S001 pre-submit/late-evidence/
 reservation suites, plus the entire pre-existing suite.
 
+Documentation-only corrections after review (tested code unchanged, no test rerun): PROJECT_STATE
+and WORK_LEDGER now say S001/S001-R3 failed review and were repaired by the accepted M001/F003/R004/
+S002 chain, and I001 is marked historical-local / accepted software-only (no CI run recorded for
+I001); ADR-0027 states the DIRTY latch precisely (only a FAILED EXECUTION-halt persistence latches;
+a persisted halt is durable; restored ended-order evidence is a consistency check, not
+reconstruction of lost mutations).
+
 Unresolved (not weakened): no audited quarantine clearing path; unclean paper session blocks its
 accounts; recovery does not re-apply lost mutations; PAPER only (real-broker linkage blocks LIVE);
 no distributed takeover; an unpersisted halt blocks all paper admission until restart; a protective
