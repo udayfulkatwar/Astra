@@ -19,8 +19,10 @@ import {
   AstraError,
   effectiveImpact,
   errorMessage,
+  type CalendarWindow,
   type Clock,
   type HealthStatus,
+  type ObservedOk,
 } from '@astra/core';
 import type { AstraConfig } from '@astra/config';
 import {
@@ -28,6 +30,7 @@ import {
   AiRepository,
   AuditRepository,
   BacktestRepository,
+  CalendarRepository,
   ConfigVersionRepository,
   DecisionRepository,
   EventRepository,
@@ -117,6 +120,7 @@ export class AstraRuntime {
     marketBars: MarketBarRepository;
     journal: JournalRepository;
     backtests: BacktestRepository;
+    calendar: CalendarRepository;
     news: NewsRepository;
     ai: AiRepository;
     reports: ReportRepository;
@@ -163,6 +167,7 @@ export class AstraRuntime {
   private initTimer: NodeJS.Timeout | undefined;
   private cycleRunning = false;
   private calendarEvents: Promise<void> = Promise.resolve();
+  private calendarStored: Promise<void> = Promise.resolve();
   private newsRecorded: Promise<void> = Promise.resolve();
   private stopped = false;
   private feedHistory: Promise<void> = Promise.resolve();
@@ -188,6 +193,7 @@ export class AstraRuntime {
       marketBars: new MarketBarRepository(sql),
       journal: new JournalRepository(sql),
       backtests: new BacktestRepository(sql),
+      calendar: new CalendarRepository(sql),
       news: new NewsRepository(sql),
       ai: new AiRepository(sql),
       reports: new ReportRepository(sql),
@@ -237,6 +243,10 @@ export class AstraRuntime {
         maxFutureSkewMs: freshness.maxFutureSkewMs,
       },
       instruments: config.instruments,
+      // Every accepted window is persisted in order; restoration never re-enqueues itself.
+      onWindow: (window) => {
+        this.calendarStored = this.calendarStored.then(() => this.storeCalendarWindow(window));
+      },
       // Queued: change events are recorded in order, and pushes can wait for them.
       onChanges: (changes, source) => {
         this.calendarEvents = this.calendarEvents.then(() =>
@@ -485,6 +495,7 @@ export class AstraRuntime {
     await this.mode.load();
     await this.killSwitches.load();
     await this.ai.load();
+    await this.restoreCalendarSafely();
     await this.health.seedFromHeartbeats();
     await this.execution.restorePaperAccounts();
     await this.execution.reconcileAll();
@@ -504,6 +515,7 @@ export class AstraRuntime {
     await this.startMarketAdapters();
     if (this.calendarPoller) {
       await this.calendarPoller.poll();
+      await this.calendarStored;
       if (this.opts.startLoops) this.calendarPoller.start();
     }
     // Stored news restores the recent picture; the feed is fresh only after a new delivery.
@@ -526,14 +538,104 @@ export class AstraRuntime {
     }
   }
 
-  /** Resolves once every calendar change reported so far is recorded as a system event. */
-  calendarEventsRecorded(): Promise<void> {
-    return this.calendarEvents;
+  /** Resolves once calendar persistence and every change event reported so far are complete. */
+  async calendarEventsRecorded(): Promise<void> {
+    await Promise.all([this.calendarEvents, this.calendarStored]);
   }
 
   /** Resolves once every news item accepted so far is stored and announced. */
   newsItemsRecorded(): Promise<void> {
     return this.newsRecorded;
+  }
+
+  /** Restore failures leave the calendar UNAVAILABLE (fail-closed); they never abort startup. */
+  private async restoreCalendarSafely(): Promise<void> {
+    try {
+      await this.restoreCalendar();
+    } catch (err) {
+      const message = errorMessage(err);
+      this.log.error({ err: message }, 'calendar restore failed; calendar stays unavailable');
+      try {
+        await this.events.emit({
+          level: 'ERROR',
+          component: 'calendar',
+          type: 'CALENDAR_RESTORE_FAILED',
+          message: `stored calendar state could not be restored: ${message}`,
+        });
+      } catch (eventErr) {
+        this.log.error(
+          { err: errorMessage(eventErr) },
+          'calendar restore failure could not be recorded as a system event',
+        );
+      }
+    }
+  }
+
+  /** Restore only the configured calendar horizon, preserving the original observation time. */
+  private async restoreCalendar(): Promise<void> {
+    const cal = this.config.system.calendar;
+    const now = this.clock.now().getTime();
+    const desiredFromMs = now - (cal?.lookbackHours ?? 24) * 3_600_000;
+    const desiredToMs = now + (cal?.lookaheadHours ?? 168) * 3_600_000;
+    const saved = await this.repos.calendar.latestOverlapping(
+      new Date(desiredFromMs).toISOString(),
+      new Date(desiredToMs).toISOString(),
+      (reason) => this.log.error({ reason }, 'skipping malformed stored calendar window'),
+    );
+    if (!saved) return;
+
+    const fromMs = Math.max(Date.parse(saved.value.from), desiredFromMs);
+    const toMs = Math.min(Date.parse(saved.value.to), desiredToMs);
+    if (toMs <= fromMs) return;
+    const restored: ObservedOk<CalendarWindow> = {
+      ...saved,
+      value: {
+        ...saved.value,
+        from: new Date(fromMs).toISOString(),
+        to: new Date(toMs).toISOString(),
+        events: saved.value.events.filter((event) => {
+          const at = Date.parse(event.scheduledAt);
+          return at >= fromMs && at <= toMs;
+        }),
+      },
+    };
+    this.calendar.restore(restored);
+    this.log.info(
+      {
+        source: restored.source,
+        sourceKind: restored.sourceKind,
+        asOf: restored.asOf,
+        events: restored.value.events.length,
+      },
+      'economic calendar restored from the database',
+    );
+  }
+
+  /** Store an accepted calendar observation. Failures are visible but never fabricate freshness. */
+  private async storeCalendarWindow(window: ObservedOk<CalendarWindow>): Promise<void> {
+    try {
+      await this.repos.calendar.record(window);
+    } catch (err) {
+      const message = errorMessage(err);
+      this.log.error(
+        { err: message, source: window.source },
+        'calendar window could not be stored',
+      );
+      try {
+        await this.events.emit({
+          level: 'ERROR',
+          component: 'calendar',
+          type: 'CALENDAR_STORE_FAILED',
+          message: `calendar window from ${window.source} could not be stored: ${message}`,
+          data: { source: window.source, sourceKind: window.sourceKind, asOf: window.asOf },
+        });
+      } catch (eventErr) {
+        this.log.error(
+          { err: errorMessage(eventErr) },
+          'calendar storage failure could not be recorded as a system event',
+        );
+      }
+    }
   }
 
   /**
@@ -673,6 +775,7 @@ export class AstraRuntime {
         this.log.error({ adapter: adapter.id, err: errorMessage(err) }, 'adapter stop failed');
       }
     }
+    await this.calendarStored;
     await this.barPersister.flush();
     await this.execution.flush();
   }

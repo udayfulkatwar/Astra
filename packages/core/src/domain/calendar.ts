@@ -31,6 +31,22 @@ export const CalendarWindowSchema = z
   .refine((w) => Date.parse(w.to) > Date.parse(w.from), { message: 'to must be after from' });
 export type CalendarWindow = z.infer<typeof CalendarWindowSchema>;
 
+/**
+ * The first event id that appears more than once, or `undefined` when every id is unique. Event
+ * ids must be unique within a window: duplicates make change detection and blackout assessment
+ * ambiguous, so both ingest and restore reject a window that repeats one (fail-safe).
+ */
+export function firstDuplicateEventId(
+  events: readonly Pick<EconomicEvent, 'id'>[],
+): string | undefined {
+  const seen = new Set<string>();
+  for (const e of events) {
+    if (seen.has(e.id)) return e.id;
+    seen.add(e.id);
+  }
+  return undefined;
+}
+
 /** Unknown impact is treated as HIGH (fail-safe). */
 export function effectiveImpact(impact: EventImpact): EventImpact {
   return impact === 'UNKNOWN' ? 'HIGH' : impact;
