@@ -169,6 +169,48 @@ twice, and an in-process mutex cannot prevent that across processes.
 - Reservation counts the entry/stop exposure through the existing engines; costs are exactly those
   the existing sizing and rules already include. Nothing here relaxes any limit.
 
+## 9. Single-owner PAPER sessions, revisioned snapshots, crash recovery (R004)
+
+Paper state lives in one process's memory and is persisted by snapshots, so a crash can lose a
+mutation that the ledger, orders or evidence never saw (a quote-driven fill whose save failed, an
+UNKNOWN/kill-switch write lost in an outage) while every order looks terminal or released.
+
+- **Exclusive owner, DIRTY first (migration 0015).** `paper_owner` has one row per paper adapter.
+  A process owns paper only while it holds a session advisory lock on its own dedicated
+  connection AND has COMMITTED a DIRTY session row (the ACK) — before it restores, mutates or
+  reads any paper state or interacts with the broker. A competitor refuses while the lock is
+  held. The row stays DIRTY for the whole session.
+- **Unclean prior session ⇒ durable block.** A new session that finds anything but a CLEAN row
+  with checkpoints equal to the stored snapshot revisions quarantines EVERY paper account in the
+  same transaction that installs its own DIRTY row (an active quarantine blocks entries in the
+  gateway and in the database `reserveAndConsume`/`markDispatching`, with no kill switch needed).
+  A stale snapshot cannot prove no mutation was lost; this is deliberately conservative and has
+  no automatic clearing. Losing the lock alone never admits a takeover without that quarantine.
+  After an unclean session reconciliation also reads the evidence of ENDED (terminal/released)
+  orders from the restored broker and judges it against the tombstones: late evidence quarantines,
+  an order the restored broker no longer knows is recorded as `RECOVERY_EVIDENCE_MISSING`;
+  nothing is released, re-opened or resent.
+- **Ownership is rechecked, not just at startup.** A synchronous owner flag feeds the gateway's
+  control check (so the final synchronous entry check sees it), readiness and the paper broker
+  (quotes ignored, every interaction rejects). It is refreshed by a keepalive, by `verify()` before
+  the durable reserve/dispatch steps and every operation, and by failed fenced writes.
+- **Revisioned, immutable snapshots with real ACKs.** Each change captures a deep-copied snapshot
+  with a strictly increasing revision; `paper_broker_state.save` accepts it only from the DIRTY
+  owner session and only if newer. A failed save is never absorbed: it halts readiness, no later
+  revision is ACKed, and `flush()` rejects.
+- **Clean stop.** Stop quote/action producers and new actions, drain operations and saves, persist
+  a final checkpoint per account, and only after those ACKs mark CLEAN in a transaction that
+  re-verifies every checkpoint revision. Any failure leaves DIRTY. A CLEAN commit whose
+  acknowledgement is lost may be persisted: the error says so, and the next start verifies the
+  matching checkpoints instead of assuming either outcome. No DB/broker atomicity or client ACK
+  receipt is claimed.
+- `unknown()` reports the real persistence outcome of the UNKNOWN state, evidence and halt writes.
+
+Not solved: distributed takeover, an audited quarantine clearing path, recovery that proves and
+re-applies lost mutations (every unclean paper session blocks the account until one exists), a
+real broker (this covers the PAPER adapter only), and the DB ownership check inside
+`reserveAndConsume` itself (ownership is verified by the caller just before it).
+
 ## Consequences
 
 Migration `0010` adds the ledger and reservations (and back-fills in-flight orders); `0011`

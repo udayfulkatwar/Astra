@@ -2,16 +2,15 @@
 
 Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL. Updated 4 October 2026.
 
-| Item              | Value                                                                                                                                                                                                                                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                                                                        |
-| Accepted baseline | M001 (migration 0014 conservative tombstone upgrade) PASS at `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28`: independent source review + CI 37194795717 / job 111414315319, PostgreSQL 16.15, 89 files, 820 tests, 0 skips                                                                         |
-| Active task       | F003 PASS (accepted code `2e75b104d57b3ac7adfcac9d7c1053f506502534`, CI 37230464693 / job 111518851649, PostgreSQL 16.15, 92 files, 857 tests, 0 skips); branch `claude/f003-final-freshness`; doc commits after `2e75b104` are documentation only. Awaiting CEO exact-diff review of the docs |
-| F003 history      | `f0b2c283` rejected (CI 37229648831 typecheck; guard ignored current OK calendar/news/quote). `9fc9b048` source review PASS, CI 37230123250 FAIL (API test typing). Tested code head `2e75b104`: PASS                                                                                          |
-| Next              | After F003 docs review: R004 durable failure/restart ownership → S002 queued risk-reduction permissions → integrated cleanup + fresh combined evidence (all NOT_STARTED)                                                                                                                       |
+| Item              | Value                                                                                                                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                                   |
+| Accepted baseline | F003 PASS: code `2e75b104d57b3ac7adfcac9d7c1053f506502534` (CI 37230464693 / job 111518851649, PostgreSQL 16.15, 92 files, 857 tests, 0 skips); docs-only `aa75c01e421007ba1e2a1291a4c73bb2b3cf67c6` (CEO exact-diff PASS). Under it M001 PASS `3cd84145` |
+| Active task       | R004 — single-owner PAPER crash/restart safety, branch `claude/r004-paper-recovery` from `aa75c01e…`; IN_PROGRESS, candidate published for read-only CEO review (evidence in `RELEASE_EVIDENCE.md`)                                                       |
+| Next              | After R004 acceptance: S002 queued risk-reduction permissions (NOT_STARTED) → integrated cleanup + fresh combined evidence                                                                                                                                |
 
-Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ, reused for F003
-corrections and, after acceptance, the next mission; old chats are historical.
+Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ, reused for R004;
+S002 follows only after R004 acceptance; old chats are historical.
 
 Technical decisions (architecture, safety design, tests, migrations) are made by engineering and
 recorded in ADRs; they are not owner-managed.
@@ -33,11 +32,10 @@ silent re-open or a time-based expiry); conservative refusal over invented headr
 
 ## Next priorities (in order)
 
-1. F003 docs exact-diff review (code accepted at `2e75b104`).
-2. R004 — durable failure/restart ownership.
-3. S002 — queued cancel / protective-close permission re-checks.
-4. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
-5. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
+1. R004 acceptance (independent review + CI on the exact final head).
+2. S002 — queued cancel / protective-close permission re-checks.
+3. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
+4. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
 
 ## Founder-only decisions
 

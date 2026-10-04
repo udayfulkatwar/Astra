@@ -40,6 +40,15 @@ Reuse the current session unless a concrete context, access or model reason warr
 handoff always pins the accepted baseSHA and the reviewed evidence. Old chats are historical, not
 simultaneous workers.
 
+## R004 design (summary; detail in ADR-0027 §9)
+
+One PAPER owner at a time: advisory lock plus a DIRTY session row ACKed before any paper state is
+restored, mutated or read; the row stays DIRTY until a clean stop ACKs a final checkpoint whose
+revisions the next start verifies. Any other previous session quarantines every paper account
+(gateway AND DB reserve/dispatch refuse, no kill switch needed); lock loss halts local admission.
+Snapshots are immutable and revisioned, failed saves are never absorbed. Conservative by design:
+no automatic clearing, no recovery that re-applies lost mutations.
+
 ## F003 design (summary; detail in ADR-0027 §4a)
 
 Every successful revalidation carries a REQUIRED synchronous final guard that keeps the assembled
