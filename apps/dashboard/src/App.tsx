@@ -1,24 +1,38 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { lazy, useEffect, useState, type ComponentType } from 'react';
 import { createBrowserRouter, createMemoryRouter, RouterProvider } from 'react-router';
 import { ApiError, DEMO, getToken } from './api/client';
 import { Layout } from './components/Layout';
-import { AccountDetailPage, Accounts } from './pages/Accounts';
-import { Approvals, DecisionDetailPage } from './pages/Approvals';
-import { Backtesting } from './pages/Backtesting';
-import { AiMonitor } from './pages/AiMonitor';
-import { CalendarPage } from './pages/Intelligence';
-import { NewsPage } from './pages/News';
-import { MarketScanner } from './pages/MarketScanner';
-import { Charts } from './pages/Charts';
-import { Journal } from './pages/Journal';
-import { Learning } from './pages/Learning';
 import { Login } from './pages/Login';
-import { Activity, Audit, Automation, Health } from './pages/Operations';
 import { Overview } from './pages/Overview';
-import { Positions } from './pages/Positions';
-import { RiskControls } from './pages/RiskControls';
-import { Configuration, Paper, Rules, Strategies } from './pages/Trading';
+
+// Every page but the landing Overview is fetched on first visit, so heavy routes (charts,
+// backtesting) are not in the entry bundle. Layout shows the loading and load-error states.
+const lazyPage = <M extends Record<string, ComponentType>>(load: () => Promise<M>, name: keyof M) =>
+  lazy(async () => ({ default: (await load())[name] as ComponentType }));
+
+const AccountDetailPage = lazyPage(() => import('./pages/Accounts'), 'AccountDetailPage');
+const Accounts = lazyPage(() => import('./pages/Accounts'), 'Accounts');
+const Approvals = lazyPage(() => import('./pages/Approvals'), 'Approvals');
+const DecisionDetailPage = lazyPage(() => import('./pages/Approvals'), 'DecisionDetailPage');
+const Backtesting = lazyPage(() => import('./pages/Backtesting'), 'Backtesting');
+const AiMonitor = lazyPage(() => import('./pages/AiMonitor'), 'AiMonitor');
+const CalendarPage = lazyPage(() => import('./pages/Intelligence'), 'CalendarPage');
+const NewsPage = lazyPage(() => import('./pages/News'), 'NewsPage');
+const MarketScanner = lazyPage(() => import('./pages/MarketScanner'), 'MarketScanner');
+const Charts = lazyPage(() => import('./pages/Charts'), 'Charts');
+const Journal = lazyPage(() => import('./pages/Journal'), 'Journal');
+const Learning = lazyPage(() => import('./pages/Learning'), 'Learning');
+const Activity = lazyPage(() => import('./pages/Operations'), 'Activity');
+const Audit = lazyPage(() => import('./pages/Operations'), 'Audit');
+const Automation = lazyPage(() => import('./pages/Operations'), 'Automation');
+const Health = lazyPage(() => import('./pages/Operations'), 'Health');
+const Positions = lazyPage(() => import('./pages/Positions'), 'Positions');
+const RiskControls = lazyPage(() => import('./pages/RiskControls'), 'RiskControls');
+const Configuration = lazyPage(() => import('./pages/Trading'), 'Configuration');
+const Paper = lazyPage(() => import('./pages/Trading'), 'Paper');
+const Rules = lazyPage(() => import('./pages/Trading'), 'Rules');
+const Strategies = lazyPage(() => import('./pages/Trading'), 'Strategies');
 
 const queryClient = new QueryClient({
   defaultOptions: {

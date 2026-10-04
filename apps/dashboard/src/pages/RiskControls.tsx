@@ -61,7 +61,7 @@ function EmergencyStop() {
           })
         }
       />
-      {action.error && <ErrorBox error={action.error} />}
+      {action.error && <ErrorBox title="Kill-switch request failed" error={action.error} />}
     </Card>
   );
 }
@@ -136,7 +136,7 @@ function ModeControl() {
               verified configuration and per-account authorization.
             </div>
           )}
-          {setMode.error && <ErrorBox error={setMode.error} />}
+          {setMode.error && <ErrorBox title="Mode change failed" error={setMode.error} />}
         </>
       )}
     </Card>
@@ -160,13 +160,16 @@ function KillSwitchForm() {
           : [];
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    action.mutate({
-      action: 'activate',
-      scope,
-      target: NEEDS_TARGET.has(scope) || (OPTIONAL_TARGET.has(scope) && target) ? target : null,
-      reason,
-    });
-    setReason('');
+    action.mutate(
+      {
+        action: 'activate',
+        scope,
+        target: NEEDS_TARGET.has(scope) || (OPTIONAL_TARGET.has(scope) && target) ? target : null,
+        reason,
+      },
+      // Reset only once the server accepted it: a reset after a failure reads as success.
+      { onSuccess: () => setReason('') },
+    );
   };
   return (
     <Card title="Activate a kill switch">
@@ -207,7 +210,7 @@ function KillSwitchForm() {
           Activate
         </button>
       </form>
-      {action.error && <ErrorBox error={action.error} />}
+      {action.error && <ErrorBox title="Kill-switch request failed" error={action.error} />}
     </Card>
   );
 }
@@ -264,13 +267,16 @@ function KillSwitchList() {
                   {s.active && (
                     <ClearSwitch
                       disabled={action.isPending}
-                      onClear={(reason) =>
-                        action.mutate({
-                          action: 'deactivate',
-                          scope: s.scope,
-                          target: s.target,
-                          reason,
-                        })
+                      onClear={(reason, done) =>
+                        action.mutate(
+                          {
+                            action: 'deactivate',
+                            scope: s.scope,
+                            target: s.target,
+                            reason,
+                          },
+                          { onSuccess: done },
+                        )
                       }
                     />
                   )}
@@ -280,18 +286,21 @@ function KillSwitchList() {
           </tbody>
         </table>
       )}
-      {action.error && <ErrorBox error={action.error} />}
+      {action.error && <ErrorBox title="Kill-switch request failed" error={action.error} />}
     </Card>
   );
 }
 
-/** Clearing a kill switch requires a written reason (audited). */
+/**
+ * Clearing a kill switch requires a written reason (audited). The form closes only once the
+ * server accepted the clear (`done`); after a failure it stays open with the reason kept.
+ */
 function ClearSwitch({
   disabled,
   onClear,
 }: {
   disabled: boolean;
-  onClear: (reason: string) => void;
+  onClear: (reason: string, done: () => void) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -307,9 +316,10 @@ function ClearSwitch({
       className="inline-form compact"
       onSubmit={(e) => {
         e.preventDefault();
-        onClear(reason.trim());
-        setOpen(false);
-        setReason('');
+        onClear(reason.trim(), () => {
+          setOpen(false);
+          setReason('');
+        });
       }}
     >
       <input

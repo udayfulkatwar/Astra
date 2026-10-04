@@ -38,9 +38,13 @@
     "@astra/risk": "workspace:*",
     "@astra/safety": "workspace:*",
     "@astra/strategy-lsfvg": "workspace:*",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^28.1.0",
     "vite": "^8.3.1"
   }
 }
