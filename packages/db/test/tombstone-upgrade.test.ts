@@ -17,8 +17,13 @@ import { TEST_DB_URL, dbAvailable } from './helpers';
 const available = await dbAvailable();
 const AT = '2026-09-28T14:00:05.000Z';
 type Db = ReturnType<typeof createDb>;
-type From = '0010' | '0011' | '0012';
-const LIMIT: Record<From, string> = { '0010': '0011', '0011': '0012', '0012': '0013' };
+type From = '0010' | '0011' | '0012' | '0013';
+const LIMIT: Record<From, string> = {
+  '0010': '0011',
+  '0011': '0012',
+  '0012': '0013',
+  '0013': '0014',
+};
 
 async function upgradeFrom(applied: From, seed: (sql: Db) => Promise<void>) {
   const schema = `mig13_${applied}_${Math.random().toString(36).slice(2, 8)}`;
@@ -329,13 +334,13 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
     });
   }
 
-  for (const from of ['0010', '0011', '0012'] as const) {
-    it(`upgrade from ${from}: a 0012 reinstatement that erased a stronger tombstone (3 -> 1, closed 0) is quarantined as unproven`, async () => {
+  for (const from of ['0010', '0011', '0012', '0013'] as const) {
+    it(`upgrade from ${from}: a 0012 reinstatement that erased a stronger tombstone (3 -> 1; 4 of 3 -> 1 then closed = ordered) is quarantined as unproven`, async () => {
       let ids: Record<string, string> = {};
       const h = await upgradeFrom(from, async (sql) => {
         // From 0012 the damage is already done: active FILLED/1 plus the reinstatement event that
         // recorded only the order's fill. From 0010/0011 the real 0012 performs the reinstatement.
-        const post = from === '0012';
+        const post = from === '0012' || from === '0013';
         const row = (filled: number) =>
           post
             ? { released: null, status: 'FILLED', filled, reserved: filled }
@@ -358,7 +363,7 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
             filled: 0,
             tomb: { released: null, status: 'ACCEPTED', filled: 0, reserved: 1 },
           }),
-          // fully covered by closures of the ORDERED quantity: provably nothing is missing
+          // closures = ordered quantity: a covered NON-reinstated row is a control; a reinstated one is unproven
           covered: await legacy(sql, {
             account: 'acct-r2',
             symbol: 'YM',
@@ -368,9 +373,22 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
             closed: [1, 2],
             tomb: row(1),
           }),
+          // Legacy code allowed a fill ABOVE the ordered quantity: tombstone FILLED 4 of 3, erased to 1,
+          // later closures 1 + 2 = ordered 3 leave 1 of the real 4 open. Closures = ordered proves nothing.
+          overfill: await legacy(sql, {
+            account: 'acct-r3',
+            symbol: 'GC',
+            status: 'FILLED',
+            qty: 3,
+            filled: 1,
+            closed: [1, 2],
+            tomb: post
+              ? { released: null, status: 'FILLED', filled: 1, reserved: 1 }
+              : { released: PREMATURE, status: 'FILLED', filled: 4 },
+          }),
         };
         if (post)
-          for (const k of ['erased', 'covered'])
+          for (const k of ['erased', 'covered', 'overfill'])
             await sql`insert into order_events (client_order_id, at, type, detail)
                       values (${ids[k]!}, now(), 'RESERVATION_REINSTATED',
                               ${sql.json({ migration: '0012', filled: 1, closed: 0 })})`;
@@ -379,7 +397,9 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
         await migrate(h.sql);
         const e = await h.store.accountExposure('acct-r1');
         expect(e.quarantines.map((x) => x.clientOrderId)).toEqual([ids.erased]);
-        expect(e.quarantines[0]!.reason).toMatch(/tombstone UNKNOWN filled UNKNOWN/);
+        expect(e.quarantines[0]!.reason).toMatch(
+          /tombstone UNKNOWN filled UNKNOWN|original fill is UNKNOWN/,
+        );
         // The reinstated reservation and the newer commitment are untouched.
         expect(e.reservations.map((r) => r.clientOrderId).sort()).toEqual(
           [ids.erased!, ids.newer!].sort(),
@@ -396,14 +416,46 @@ describe.skipIf(!available)('migration 0013: stronger tombstone evidence quarant
           ok: false,
           code: 'ACCOUNT_QUARANTINED',
         });
-        // Control: closures cover the whole ordered quantity, so the fill cannot have been larger.
-        expect((await h.store.accountExposure('acct-r2')).quarantines).toHaveLength(0);
+        // Control: without a 0012 reinstatement the consistent full closure stays closed and admitted.
+        // With one, the original fill is unknown, so closures of the ordered quantity prove nothing.
+        const post = from === '0012' || from === '0013';
+        expect((await h.store.accountExposure('acct-r2')).quarantines).toHaveLength(post ? 1 : 0);
+        expect(await newEntry(h.sql, h.store, 'acct-r2', 'RTY')).toMatchObject(
+          post ? { ok: false, code: 'ACCOUNT_QUARANTINED' } : { ok: true },
+        );
+        // Overfill regression: quarantined on every path, and refused by reserveAndConsume.
+        expect(
+          (await h.store.accountExposure('acct-r3')).quarantines.map((x) => x.clientOrderId),
+        ).toEqual([ids.overfill]);
+        expect(await newEntry(h.sql, h.store, 'acct-r3', 'RTY')).toMatchObject({
+          ok: false,
+          code: 'ACCOUNT_QUARANTINED',
+        });
+        // Evidence kept: orders and existing quarantine rows are never rewritten by a repeat.
+        const orders =
+          await h.sql`select client_order_id, status, filled_quantity from orders order by id`;
+        const quarantines =
+          await h.sql`select id, reason, evidence from exposure_quarantines order by id`;
         // Idempotent.
         const n = async () =>
           (await h.sql`select count(*)::int as n from exposure_quarantines`)[0]!.n as number;
         const before = await n();
         expect((await migrate(h.sql)).applied).toEqual([]);
         expect(await n()).toBe(before);
+        await h.sql.begin(async (tx) => {
+          for (const f of [
+            '0013_tombstone_conservative_quarantine',
+            '0014_unproven_reinstatement_quarantine',
+          ])
+            await tx.unsafe(readFileSync(join(DEFAULT_MIGRATIONS_DIR, `${f}.sql`), 'utf8'));
+        });
+        expect(await n()).toBe(before);
+        expect(
+          await h.sql`select client_order_id, status, filled_quantity from orders order by id`,
+        ).toEqual(orders);
+        expect(
+          await h.sql`select id, reason, evidence from exposure_quarantines order by id`,
+        ).toEqual(quarantines);
       } finally {
         await h.done();
       }
