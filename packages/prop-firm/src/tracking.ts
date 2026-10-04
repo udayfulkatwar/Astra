@@ -172,7 +172,8 @@ export function updateAccountTracking(
  * Merges two tracking states of the SAME account (the persisted one and a newly computed one,
  * possibly produced by another process from older data). The later observation provides the
  * state; every peak/counter that can only grow is the larger of both, so a stale writer can never
- * lower a peak or the drawdown/daily-loss references derived from it. The stored state wins ties.
+ * lower a peak or the drawdown/daily-loss references derived from it. On an equal timestamp the
+ * incoming (newer write) state wins; peaks are the max regardless.
  */
 export function mergeAccountTracking(
   stored: AccountTracking,
@@ -184,7 +185,7 @@ export function mergeAccountTracking(
       incoming: incoming.accountId,
     });
   }
-  const base = Date.parse(incoming.updatedAt) > Date.parse(stored.updatedAt) ? incoming : stored;
+  const base = Date.parse(incoming.updatedAt) >= Date.parse(stored.updatedAt) ? incoming : stored;
   return AccountTrackingSchema.parse({
     ...base,
     equityPeak: Math.max(stored.equityPeak, incoming.equityPeak),
