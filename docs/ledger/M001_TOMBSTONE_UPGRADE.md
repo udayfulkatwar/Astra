@@ -1,7 +1,7 @@
 # M001 — conservative legacy fill upgrade repair (migration 0013)
 
-Status: PASS (implementation) — awaiting CEO review. Live trading DISABLED. No production-readiness or trading-edge claim.
-Base: `ceo/s001-r3-review-checkpoint` @ `733bf5e8`. Branch: `claude/m001-tombstone-upgrade`. Tested code SHA: `b3b7fe94b55eed28e4f676a71805304ae9e269c5` (a docs-only commit follows).
+Status: PASS (implementation, second repair) — awaiting CEO review. Live trading DISABLED. No production-readiness or trading-edge claim.
+Base: `ceo/s001-r3-review-checkpoint` @ `733bf5e8`. Branch: `claude/m001-tombstone-upgrade`. Tested code SHA (final): `12e5d8b850f7cd2a3123b8cc1e7c5f057cafdbe2` (earlier: `b3b7fe94`) (a docs-only commit follows).
 
 ## Defect (0012, immutable)
 
@@ -31,3 +31,10 @@ Rows with an active quarantine are skipped, so re-running changes nothing (no le
 ## Evidence
 
 Unchanged base (0013 removed), real PostgreSQL 16.14: `packages/db/test/tombstone-upgrade.test.ts` fails 6/6 (cases cancelled0, filled1, collided tombstone, UNKNOWN tombstone, reinstated-erased, from 0010/0011/0012); with 0013 it passes. Full gate on the tested SHA: install/format/lint/typecheck/test/build all exit 0; 89 files, 819 tests, 0 skipped (PG 16.14 local; CI uses 16.15).
+
+## Review follow-up: migration 0014 (supersedes 0013 trigger e's exception)
+
+CEO review rejected 0013's exception "closures cover the ORDERED quantity prove coverage": legacy `applyOrderState` had no upper fill bound and 0010 only checks `fill >= 0`, so a tombstone could record FILLED 4 of ordered 3, be erased to 1 by the 0012 reinstatement, and later closures 1 + 2 = 3 = ordered while 4 is open. The assumption in the Assumptions section above ("tombstone fill never exceeds the ordered quantity") is therefore WITHDRAWN.
+`0013` is preserved unchanged (it may already be applied). Immutable `packages/db/migrations/0014_unproven_reinstatement_quarantine.sql` quarantines EVERY order reinstated by 0012 (event `RESERVATION_REINSTATED`, migration 0012) that has no active quarantine, whatever closures exist, recording prior tombstone fill UNKNOWN and an `REINSTATEMENT_EVIDENCE_UNPROVEN` event. No independent authoritative evidence of the original fill exists in this schema, so none is accepted. Orders, tombstones, reservations (incl. newer commitments) and existing quarantines are untouched; no automatic clearing; re-running is a no-op.
+Overblocking: a correctly reinstated order is also quarantined until an audited reconciliation exists. Non-reinstated consistent full closures stay closed and admitted (control tests pass). The old covered-reinstatement test expectation was changed accordingly.
+Tests: `tombstone-upgrade.test.ts` now upgrades from 0010, 0011, 0012 and 0013-applied databases, includes the overfill (4 of 3 -> 1, closures 1+2) regression, real `reserveAndConsume` refusal, and idempotence by repeat migration and by re-executing 0013 and 0014 SQL. Old head (0013 only) failed the overfill and reinstated-covered expectations on the 0012- and 0013-applied paths (a harness ENOENT for the then-missing 0014 file also failed the 0010/0011 runs, so those failures are less specific).
