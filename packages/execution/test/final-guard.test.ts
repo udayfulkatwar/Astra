@@ -57,10 +57,10 @@ function setup(w: World = makeWorld()) {
       return Promise.resolve();
     },
   });
-  submit.mockImplementation(((...a: unknown[]) => {
+  submit.mockImplementation((...a: unknown[]) => {
     events.push('submit');
     return (Object.getPrototypeOf(paper) as BrokerAdapter).submitOrder.apply(paper, a as never);
-  }) as never);
+  });
   const add = (o: Parameters<typeof decide>[1]) => {
     const d = decide(w, o);
     store.addApproval(d.approval);
@@ -237,7 +237,7 @@ describe('a missing, throwing, asynchronous or malformed guard never transmits',
 
   it('a guard refusal whose reservation cannot be released keeps the reservation for reconciliation', async () => {
     const s = setup();
-    s.hooks.guard = (() => () => ({ ok: false, reasons: ['stale'] })) as never;
+    s.hooks.guard = () => () => ({ ok: false, reasons: ['stale'] });
     s.add({ approvalId: 'a1', signalId: 's1' });
     s.store.releaseUntransmitted = () => Promise.reject(new Error('db down'));
     const r = await s.gateway.execute('a1');

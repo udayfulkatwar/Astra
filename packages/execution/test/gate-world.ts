@@ -235,7 +235,13 @@ export function realRevalidator(
             meta('astra-account-tracking'),
           ),
         ),
-      activity: () => Promise.resolve(base.activity),
+      // Read fresh on every revalidation, like production (never a fixed timestamp).
+      activity: () =>
+        Promise.resolve(
+          base.activity.status === 'OK'
+            ? observed(base.activity.value, meta('astra-db'))
+            : base.activity,
+        ),
       calendar: () =>
         Promise.resolve(
           observed(

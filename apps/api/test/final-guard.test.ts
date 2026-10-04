@@ -75,6 +75,38 @@ describe.skipIf(!available)('API — final synchronous freshness guard (F003)', 
     expect(e.reservations).toHaveLength(0);
   });
 
+  it('the clock crosses into an event blackout during the final ledger wait (other inputs valid): nothing is sent', async () => {
+    h = await createHarness();
+    await bringOnline(h);
+    // HIGH event 15m03s ahead: the 15 min blackout begins 3s from now, so validation passes today.
+    const at = new Date(h.clock.now().getTime() + 15 * 60_000 + 3_000).toISOString();
+    await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/calendar/window',
+      headers: H.automation,
+      payload: {
+        source: 'test',
+        window: {
+          from: new Date(h.clock.now().getTime() - 3_600_000).toISOString(),
+          to: new Date(h.clock.now().getTime() + 86_400_000).toISOString(),
+          events: [
+            { id: 'cpi', title: 'US CPI', currency: 'USD', impact: 'HIGH', scheduledAt: at },
+          ],
+        },
+      },
+    });
+    const submit = vi.spyOn(h.runtime.execution.paper(), 'submitOrder');
+    const d = await approve(h);
+    holdFinalLedgerRead(h, () => h.clock.advance(4_000)); // quote 4s old (<5s limit), TTL 30s
+    const r = await execute(h, d.approval.approvalId);
+    expect(r.outcome).toBe('REJECTED');
+    expect(r.reasons.join()).toMatch(/\[final-guard\].*(US CPI|blackout)/i);
+    expect(submit).not.toHaveBeenCalled();
+    expect(
+      (await h.runtime.repos.execution.accountExposure('paper-demo')).reservations,
+    ).toHaveLength(0);
+  });
+
   it('positive path: a wait that keeps every input valid submits exactly once', async () => {
     h = await createHarness();
     await bringOnline(h);

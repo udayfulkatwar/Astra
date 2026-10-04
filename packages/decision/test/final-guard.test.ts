@@ -4,7 +4,11 @@
  */
 import { ManualClock, notObserved, observed, type Observed, type Quote } from '@astra/core';
 import { describe, expect, it } from 'vitest';
-import { assembleWithProvenance, type DecisionDataPorts } from '../src/assembler';
+import {
+  assembleWithProvenance,
+  type AssembleOptions,
+  type DecisionDataPorts,
+} from '../src/assembler';
 import { DecisionEngine } from '../src/engine';
 import {
   revalidateApprovedEntry,
@@ -73,7 +77,14 @@ function rig(over: Partial<Rig> = {}): Rig {
   };
 }
 
-function options(r: Rig) {
+function options(r: Rig): {
+  engine: DecisionEngine;
+  candidate: typeof base.candidate;
+  plan: typeof plan;
+  originalConfigHash: string;
+  current: CurrentEvidencePorts;
+  assemble: Omit<AssembleOptions, 'candidate' | 'decisionId'>;
+} {
   const instruments = r.withFx ? ['NQ', 'USDJPY', 'DAX'] : ['NQ'];
   const specs = { NQ, USDJPY, DAX } as Record<string, typeof NQ>;
   const data: DecisionDataPorts = {
@@ -91,7 +102,7 @@ function options(r: Rig) {
     quote: (symbol) =>
       r.revoked.quote || (r.revoked.fx && symbol !== 'NQ')
         ? notObserved('ERROR', `${symbol} provider down`, 'q')
-        : (base.quote as Observed<Quote>),
+        : base.quote,
     calendar: () =>
       r.revoked.calendar ? notObserved('ERROR', 'calendar down', 'cal') : base.calendar,
     newsRisk: () => (r.revoked.news ? notObserved('ERROR', 'news down', 'news') : base.newsRisk),
