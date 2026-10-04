@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ExecutionGateway, clientOrderIdFor } from '../src/gateway';
 import { InMemoryExecutionStore } from '../src/memory-store';
-import type { BrokerAdapter, OrderRecord } from '../src/types';
+import type { OrderRecord } from '../src/types';
 import {
   accountDef,
   decide,
