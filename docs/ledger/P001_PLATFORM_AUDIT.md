@@ -1,5 +1,10 @@
 # P001 — Stage 2 firm / platform compatibility and data-readiness audit
 
+**Status: PASS (audit scope only).** Initial head `206c9461` was superseded after CEO review; accepted head
+`04091354e0354d417c8a472750d718627a06e487` (Markdown only; format and consistency checks only). This is an
+evidence/inventory audit — NOT a verified firm profile, a selected account or API route, proven
+compliance, real-adapter readiness or Stage 2 completion.
+
 Branch `claude/p001-platform-readiness` (from accepted Stage 1 head `b9c3b890`). Documentation only: no
 adapter, strategy, data purchase, credential, paid call, account or provider was created or activated,
 and no safety gate or schema was changed. Live trading stays DISABLED; no strategy is promoted; **no
@@ -153,6 +158,11 @@ subset, per rule.** Specific gaps found in the source (`packages/prop-firm/src/p
   semantics for the monthly 100% option's 1% trade-idea "striking" or reward-split-dependent minimum
   days; the news window needs speech/END-time handling and the ≥5-hour-before-event exception, which a
   fixed before/after news window does not establish; Master-vs-evaluation holding differences.
+- **Source-mapping note (FundingPips maximum loss):** the published rule tests BOTH balance and equity
+  against the floor, but `profile.maxDrawdown.measure` selects ONE (`EQUITY` or `BALANCE`). A profile
+  using a single measure cannot be VERIFIED; the full conjunction needs proof/coverage (or a documented
+  conservative refusal, which is never to be called complete compliance). The same holds for the
+  speech/END-time exceptions and the payout-triggered or reward-option-specific rules above.
 - Nothing here implements or relaxes a schema or gate.
 
 Owner-specific unknowns: which program/size/phase/reward option/DLL/add-ons are actually owned, the
