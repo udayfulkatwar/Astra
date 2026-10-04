@@ -92,7 +92,25 @@ function notRequested<T>(what: string): Observed<T> {
   return notObserved('UNAVAILABLE', `${what} not requested (not required)`, 'assembler');
 }
 
+/** One observed currency-pair quote the money math depends on, kept with its own provenance. */
+export interface FxDependency {
+  readonly pair: string;
+  readonly observed: Observed<Quote>;
+}
+
+/** What the assembled inputs were derived from, beyond the frozen inputs themselves. */
+export interface AssemblyProvenance {
+  /** Every FX quote consulted (asOf/source intact), in fetch order. */
+  readonly fx: readonly FxDependency[];
+}
+
 export async function assembleDecisionInputs(opts: AssembleOptions): Promise<DecisionInputs> {
+  return (await assembleWithProvenance(opts)).inputs;
+}
+
+export async function assembleWithProvenance(
+  opts: AssembleOptions,
+): Promise<{ readonly inputs: DecisionInputs; readonly provenance: AssemblyProvenance }> {
   const { candidate, config, data, state, clock, timeoutMs } = opts;
   const signal = candidate.signal;
   const account = config.account(candidate.accountId) ?? null;
@@ -146,25 +164,34 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
 
   // Money is computed in the account currency: specs quoted in another currency are converted
   // with a fresh quote of a configured pair (the rate is frozen into the decision record).
-  const valued = await valueSpecs({
+  const fx = await fetchFxQuotes({
     specs: rawInstruments,
     accountCurrency: account?.currency ?? null,
     symbols: config.instrumentSymbols?.() ?? Object.keys(rawInstruments),
     candidateQuote: { symbol: signal.symbol, quote },
     fetch: (symbol) => obs('market-data', (s) => data.quote(symbol, s)),
+  });
+  // ONE decision time, taken after the last awaited fetch: every FX rate (including the first,
+  // which may have aged while later ones were fetched) is judged at the same instant as the rest.
+  const decidedAt = clock.now();
+  const valued = valueSpecs({
+    specs: rawInstruments,
+    accountCurrency: account?.currency ?? null,
+    symbols: config.instrumentSymbols?.() ?? Object.keys(rawInstruments),
+    fx,
     freshness: {
       maxAgeMs: config.policy.freshness.quoteMaxAgeMs,
       maxFutureSkewMs: config.policy.freshness.maxFutureSkewMs,
     },
-    now: clock.now(),
+    now: decidedAt,
   });
   const instrument = rawInstrument ? (valued[signal.symbol] ?? rawInstrument) : null;
   const instruments = valued;
 
-  return {
+  const inputs: DecisionInputs = {
     decisionId: opts.decisionId ?? newId('decision'),
     // Decision time is taken AFTER gathering so freshness is judged at the moment of decision.
-    now: clock.now().toISOString(),
+    now: decidedAt.toISOString(),
     ...(opts.environment ? { environment: opts.environment } : {}),
     mode: state.mode(),
     configHash: config.configHash,
@@ -195,33 +222,52 @@ export async function assembleDecisionInputs(opts: AssembleOptions): Promise<Dec
     execution: state.execution(account),
     liveTradingEnvironmentAuthorized: state.liveTradingEnvironmentAuthorized(),
   };
+  return { inputs, provenance: { fx } };
 }
 
-async function valueSpecs(o: {
+/** The configured conversion pairs the specs need (money in another currency), fetched once each. */
+async function fetchFxQuotes(o: {
   specs: Record<string, InstrumentSpec>;
   accountCurrency: string | null;
   symbols: readonly string[];
   candidateQuote: { symbol: string; quote: Observed<Quote> };
   fetch: (symbol: string) => Promise<Observed<Quote>>;
-  freshness: { maxAgeMs: number; maxFutureSkewMs: number };
-  now: Date;
-}): Promise<Record<string, InstrumentSpec>> {
+}): Promise<FxDependency[]> {
   const ccy = o.accountCurrency;
-  if (!ccy) return o.specs;
+  if (!ccy) return [];
   const foreign = new Set<string>();
   for (const s of Object.values(o.specs)) {
     for (const c of [s.quoteCurrency, commissionCurrency(s)]) if (c !== ccy) foreign.add(c);
   }
-  if (foreign.size === 0) return o.specs;
   const all = new Set([...o.symbols, ...Object.keys(o.specs)]);
-  const quotes = new Map<string, { bid: number; ask: number }>();
+  const out: FxDependency[] = [];
   for (const from of foreign) {
     const pair = conversionPair(from, ccy, all);
-    if (!pair || quotes.has(pair.symbol)) continue;
+    if (!pair || out.some((d) => d.pair === pair.symbol)) continue;
     const raw =
       pair.symbol === o.candidateQuote.symbol ? o.candidateQuote.quote : await o.fetch(pair.symbol);
-    const q = applyFreshness(raw, o.now, o.freshness);
-    if (q.status === 'OK') quotes.set(pair.symbol, q.value);
+    out.push({ pair: pair.symbol, observed: raw });
+  }
+  return out;
+}
+
+function valueSpecs(o: {
+  specs: Record<string, InstrumentSpec>;
+  accountCurrency: string | null;
+  symbols: readonly string[];
+  fx: readonly FxDependency[];
+  freshness: { maxAgeMs: number; maxFutureSkewMs: number };
+  now: Date;
+}): Record<string, InstrumentSpec> {
+  const ccy = o.accountCurrency;
+  if (!ccy) return o.specs;
+  if (o.fx.length === 0 && !Object.values(o.specs).some((s) => needsConversion(s, ccy)))
+    return o.specs;
+  const all = new Set([...o.symbols, ...Object.keys(o.specs)]);
+  const quotes = new Map<string, { bid: number; ask: number }>();
+  for (const dep of o.fx) {
+    const q = applyFreshness(dep.observed, o.now, o.freshness);
+    if (q.status === 'OK') quotes.set(dep.pair, q.value);
   }
   const out: Record<string, InstrumentSpec> = {};
   for (const [sym, spec] of Object.entries(o.specs)) {
@@ -231,3 +277,6 @@ async function valueSpecs(o: {
   }
   return out;
 }
+
+const needsConversion = (s: InstrumentSpec, ccy: string): boolean =>
+  [s.quoteCurrency, commissionCurrency(s)].some((c) => c !== ccy);

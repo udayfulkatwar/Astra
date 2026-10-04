@@ -100,6 +100,12 @@ export class PreSubmitValidator {
         candidate,
         plan: approval.orderPlan,
         originalConfigHash: detail.configHash,
+        // Current provider state, read synchronously by the final guard (never re-stamped data).
+        current: {
+          quote: (symbol) => this.deps.market.latest(symbol),
+          calendar: () => this.deps.calendar.current(),
+          newsRisk: (symbol) => this.deps.news.risk(symbol),
+        },
         assemble: {
           config: decisionConfigView(config),
           data,

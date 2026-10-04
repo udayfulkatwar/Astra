@@ -271,6 +271,13 @@ after a released reservation durably quarantines the account (ADR-0027 §8); cor
 quarantined; tracking never lowers a same-day reference and fails closed on unresolvable
 completed-day conflicts. No clearing path for a quarantine exists yet. Stage 1 is NOT accepted.
 
+**F003 (candidate `claude/f003-final-freshness`, review pending):** the entry gate's last durable
+wait (shared-ledger read after revalidation) can no longer carry aged or revoked evidence to the
+broker: every revalidation returns a required synchronous final guard (ADR-0027 §4a) run with no
+`await` before `submitOrder`, plus an adapter/accountRef binding check. Remaining Stage 1 gaps:
+durable failure/restart ownership, S002 queued cancel / protective-close permission re-checks,
+quarantine clearing path, real-broker position linkage. Live DISABLED.
+
 ## Remaining (by phase)
 
 | Phase | Scope                                                                                                                                                     |

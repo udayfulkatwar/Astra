@@ -93,7 +93,13 @@ function setup(
     onExecutionUnknown: onUnknown,
     // Gate behaviour is covered in pre-submit.test.ts; here the verdict is a fixed fake.
     revalidate: () =>
-      Promise.resolve({ ok: true, permittedQuantity: 1_000, entry: 20_000, checks: 1 }),
+      Promise.resolve({
+        ok: true,
+        permittedQuantity: 1_000,
+        entry: 20_000,
+        checks: 1,
+        finalGuard: () => ({ ok: true }),
+      }),
     revalidationTimeoutMs: 1_000,
     clock,
     confirmation: { timeoutMs: 2_000, pollIntervalMs: 250 },

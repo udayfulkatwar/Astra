@@ -33,6 +33,17 @@ Index only; architecture lives in `docs/ARCHITECTURE.md` and the ADRs in `docs/a
 | 0026 | Free chart feed                                      | Accepted |
 | 0027 | Pre-submit validation + durable exposure reservation | Accepted |
 
+## F003 design (summary; detail in ADR-0027 §4a)
+
+Every successful revalidation carries a REQUIRED synchronous final guard that keeps the assembled
+evidence with its provenance (own timestamps, every FX quote). After the last awaited step, with no
+`await` before `submitOrder`, the gateway re-checks control, the adapter/accountRef binding and
+runs the guard: invalid or backward clock, trading-day rollover, aged account/FX/quote/calendar/
+news evidence, provider revocation, and a re-run of the real engine on the captured inputs at the
+current clock and state. Missing, throwing or asynchronous guards refuse. Rejected assumption (M001
+lesson): a TTL check, a mocked boolean callback or the engine alone on captured inputs does not
+prove freshness; the guard must be exercised through the real assembler/engine/API.
+
 ## S001 design (summary; detail in ADR-0027)
 
 Re-check the control plane after every await and right before submit; revalidate the original

@@ -142,7 +142,13 @@ describe('re-checks after relevant awaited work and right before submit', () => 
     const gw = makeGateway(s.w, s.store, liveBroker, {
       revalidate: () => {
         s.w.accountLiveAuth = false;
-        return Promise.resolve({ ok: true, permittedQuantity: 99, entry: 20_000, checks: 1 });
+        return Promise.resolve({
+          ok: true,
+          permittedQuantity: 99,
+          entry: 20_000,
+          checks: 1,
+          finalGuard: () => ({ ok: true }),
+        });
       },
     });
     const r = await gw.execute('a1');
@@ -296,7 +302,13 @@ describe('entry revalidation on fresh data (real assembler + Decision Engine)', 
     const d = s.add({ approvalId: 'a1', signalId: 's1' });
     const gw = makeGateway(s.w, s.store, s.broker, {
       revalidate: () =>
-        Promise.resolve({ ok: true, permittedQuantity: 50, entry: 20_000, checks: 1 }),
+        Promise.resolve({
+          ok: true,
+          permittedQuantity: 50,
+          entry: 20_000,
+          checks: 1,
+          finalGuard: () => ({ ok: true }),
+        }),
     });
     await gw.execute('a1');
     expect(s.submit.mock.calls[0]![0].quantity).toBe(d.approval.orderPlan.quantity);

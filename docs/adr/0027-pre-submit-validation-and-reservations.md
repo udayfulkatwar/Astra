@@ -48,6 +48,29 @@ twice, and an in-process mutex cannot prevent that across processes.
    and only then does the synchronous control-plane check precede `submitOrder` with no await in
    between. An expired quote, a new blackout, a changed limit or a lower equity during any wait
    therefore refuses, releases the (provably untransmitted) reservation and sends nothing.
+   **4a. Final synchronous guard (F003).** The final gate still ends with one more durable wait (the
+   shared-ledger read after revalidation), during which quotes/account inputs age, blackout,
+   session or trading-day boundaries cross and providers/health/control can change. Every
+   successful `revalidateApprovedEntry` therefore carries a REQUIRED synchronous `finalGuard`
+   (`EntryRevalidation.finalGuard`) that keeps the assembled evidence WITH its provenance (each
+   observation's own `asOf`/source; every FX quote consulted, kept in `AssemblyProvenance`). After
+   ALL awaited work, with no `await` before `adapter.submitOrder`, the gateway runs `control()`,
+   verifies the bound adapter identity, `accountRef` and account id are the ones the snapshot and
+   reservation were made for, then invokes the guard. The guard (a) refuses an invalid or
+   backward clock; (b) requires the same `configHash`; (c) refuses when the profile's trading day
+   (`tradingDayWindow(now, profile.tradingDayReset)`) is no longer the captured tracking's day
+   (reassemble, never reuse yesterday's reference); (d) re-ages the captured tracking, activity
+   and duplicate observations with the account-snapshot limit (existing policy, no new knob) and
+   every FX quote with the quote limit, each at its own timestamp; (e) requires the CURRENT
+   provider state (`CurrentEvidencePorts`: quote, FX pairs, calendar, news) to still be OK, so a
+   provider ERROR/revocation voids captured evidence even with a fresh timestamp; (f) re-runs the
+   real `DecisionEngine` on the captured inputs with the CURRENT clock, mode, kill switches,
+   component health, execution readiness and live authorization; (g) repeats the original
+   plan/quantity matching. Captured data is only re-judged, never re-stamped as newly observed.
+   A missing, throwing, asynchronous (thenable) or malformed guard refuses before transmission and
+   the reservation is released, or kept for reconciliation if the release itself fails. The
+   assembler takes ONE decision time after its last awaited fetch, so a slow later FX fetch cannot
+   make an earlier rate look fresh.
    Tracking is advanced from the fresh snapshot and persisted MONOTONICALLY (`saveTracking`
    merges under a row lock; peaks and counters never decrease, an older observation never replaces
    a newer one), so a stale cache in another instance cannot lower a drawdown/daily-loss reference. The merge is
@@ -133,9 +156,11 @@ twice, and an in-process mutex cannot prevent that across processes.
   the risk engines count from the snapshot. A periodic re-verification of recently ended orders
   is not built.
 - Residual (not solved): the last ledger read precedes the adapter call by one bounded database
-  round trip and a synchronous control-plane check; evidence committed inside that window is
-  applied after the submit (the quarantine then blocks every later entry). No transaction is held
-  across broker I/O by design.
+  round trip; since F003 the time/provider/control side of that window is closed by the
+  synchronous final guard (§4a), but ledger evidence (e.g. a late fill) committed inside it is
+  still applied after the submit (the quarantine then blocks every later entry). No transaction
+  is held across broker I/O by design. The stored AI analysis has no provider to re-read: only
+  its age is re-judged. The activity/tracking age limit reuses the account-snapshot limit.
 - Residual (not solved): a quarantine and an `UNRESOLVED` completed-day conflict have no audited
   clearing path; they keep the account blocked until one is built.
 - Reservation counts the entry/stop exposure through the existing engines; costs are exactly those

@@ -419,6 +419,8 @@ export class ExecutionGateway {
         return no(`pre-submit revalidation failed: ${errorMessage(err)}`);
       }
       if (!verdict.ok) return no(...verdict.reasons);
+      if (typeof verdict.finalGuard !== 'function')
+        return no('revalidation carried no final guard; refusing to transmit');
       if (!(verdict.permittedQuantity >= plan.quantity)) {
         return no(
           `permitted size ${verdict.permittedQuantity} is below the approved ${plan.quantity}`,
@@ -456,6 +458,35 @@ export class ExecutionGateway {
    * synchronously right before the submit call; only a failure BEFORE the adapter is called may
    * release the reservation (the gateway knows it never transmitted).
    */
+  /**
+   * Invokes the revalidation's synchronous final guard. Anything but a plain `{ ok: true }` result
+   * (missing guard, throw, thenable, malformed) refuses: there is no permissive default.
+   */
+  private runFinalGuard(guard: unknown): { ok: true } | { ok: false; reasons: string[] } {
+    const no = (why: string) => ({ ok: false as const, reasons: [`[final-guard] ${why}`] });
+    if (typeof guard !== 'function') return no('missing; refusing to transmit');
+    try {
+      const r: unknown = (guard as () => unknown)();
+      if (r !== null && (typeof r === 'object' || typeof r === 'function')) {
+        if (typeof (r as { then?: unknown }).then === 'function')
+          return no('returned a thenable (it must be synchronous); refusing to transmit');
+        const v = r as { ok?: unknown; reasons?: unknown };
+        if (v.ok === true) return { ok: true };
+        if (v.ok === false)
+          return {
+            ok: false,
+            reasons:
+              Array.isArray(v.reasons) && v.reasons.length > 0
+                ? v.reasons.map(String)
+                : ['[final-guard] refused without a reason'],
+          };
+      }
+      return no('returned a malformed result; refusing to transmit');
+    } catch (err) {
+      return no(`threw: ${errorMessage(err)}`);
+    }
+  }
+
   private async transmit(
     approval: ApprovalRecord,
     ctx: Extract<Control, { ok: true }>,
@@ -494,16 +525,33 @@ export class ExecutionGateway {
     // Everything below the last durable wait: the same fresh-data gate again (our own reservation
     // excluded), then the control plane with no await before the adapter call. A ledger that moved
     // during the validation re-runs the gate (bounded); a quarantine refuses outright.
+    let finalGuard: unknown;
     for (let attempt = 1; ; attempt++) {
       const finalGate = await this.gate(approval, ctx, adapter, order.clientOrderId, () =>
         Promise.resolve(((c) => (c.ok ? null : c.reasons))(this.control(approval))),
       );
-      if (finalGate.ok) break;
+      if (finalGate.ok) {
+        finalGuard = finalGate.verdict.finalGuard;
+        break;
+      }
       if (finalGate.ledgerMoved && attempt < MAX_LEDGER_ATTEMPTS) continue;
       return notSent(...finalGate.reasons);
     }
+    // ---- NO await from here to the adapter call (ADR-0027 §3a) ----
     const last = this.control(approval);
     if (!last.ok) return notSent(...last.reasons);
+    // The control result must describe the SAME binding the snapshot, the reservation and the
+    // order were made for: a fresh control result must never authorize an obsolete adapter/account.
+    if (
+      last.adapter !== adapter ||
+      last.adapter?.id !== order.adapterId ||
+      last.account.id !== account.id ||
+      last.account.broker.accountRef !== account.broker.accountRef ||
+      last.account.broker.adapterId !== account.broker.adapterId
+    )
+      return notSent('the adapter or broker account binding changed since the snapshot');
+    const guard = this.runFinalGuard(finalGuard);
+    if (!guard.ok) return notSent(...guard.reasons);
     let submitted: BrokerOrderState | null = null;
     let submitError: string | null = null;
     let recordError: string | null = null;

@@ -1,6 +1,6 @@
 # Latest CEO acceptance — 4 October 2026
 
-Stage 1 IN_PROGRESS. S001-R3 acceptance FAIL despite independent 813-test CI PASS. Cloud Claude handoff BLOCKED: environment offline. See docs/ledger/S001_R3_CEO_REVIEW.md for exact findings, evidence and prepared bounded task. No accepted operating release; live DISABLED. Next priorities: conservative tombstone upgrade repair; final synchronous freshness check; durable failure/restart ownership, then S002 queued risk-reduction permissions. Prior content below is historical candidate state.
+Stage 1 IN_PROGRESS. M001 (conservative tombstone upgrade, migration 0014) ACCEPTED PASS at `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28` after independent source review and CI 37194795717 / job 111414315319 (PostgreSQL 16.15, 89 files, 820 tests, 0 skips; frozen install/format/lint/typecheck/test/build succeeded). I001 integration is included; F002 contains F001. Active task: F003 — final synchronous entry freshness guard, branch `claude/f003-final-freshness` (from M001 `3cd84145`), implemented, independent CEO review pending (evidence in `RELEASE_EVIDENCE.md`). Next: durable failure/restart ownership, then S002 queued risk-reduction permissions (cancel / protective-close; not started). Live trading DISABLED; no verified edge; no real broker adapter. Lower content is historical candidate state.
 
 # CEO_STATE
 
@@ -9,8 +9,8 @@ Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL.
 | Item              | Value                                                                                                                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted                                                                                           |
-| Current candidate | `claude/s001-r3-risk-repair` (from reviewed `claude/s001-execution-safety` `ba8c487`; head and tested SHA in `RELEASE_EVIDENCE.md`)              |
-| Active task       | S001-R3 — bounded critical account-risk repair (third review escalation): implementation done, independent CEO review pending                    |
+| Current candidate | `claude/f003-final-freshness` (from accepted M001 `3cd84145`; head and tested SHA in `RELEASE_EVIDENCE.md`)                                      |
+| Active task       | F003 — final synchronous entry freshness guard: implemented, independent CEO review pending                                                      |
 | Prior reviews     | S001 candidate `c765554`/`6caeb71`: FAIL. S001 round 2 `ce12040`/`ba8c487`: FAIL (released-row bypass, migration 0011 gaps, tracking weakenings) |
 | Not started       | Any next task (none until the independent review of S001-R3)                                                                                     |
 

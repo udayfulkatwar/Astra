@@ -4,6 +4,7 @@
  */
 import {
   ManualClock,
+  notObserved,
   observed,
   type AccountSnapshot,
   type EconomicEvent,
@@ -65,6 +66,8 @@ export interface World {
   onRevalidate: (() => Promise<void> | void) | null;
   /** Extra async delay inside the broker snapshot call. */
   onSnapshot: (() => Promise<void> | void) | null;
+  /** Providers whose CURRENT state is ERROR (read synchronously by the final guard). */
+  revoked: { quote: boolean; calendar: boolean; news: boolean };
 }
 
 export function makeWorld(): World {
@@ -89,6 +92,7 @@ export function makeWorld(): World {
     accountLiveAuth: false,
     onRevalidate: null,
     onSnapshot: null,
+    revoked: { quote: false, calendar: false, news: false },
   };
 }
 
@@ -211,14 +215,13 @@ export function realRevalidator(
       asOf: new Date(now.getTime() - ageMs).toISOString(),
     });
     const base = makeInputs();
+    const quoteNow = (symbol: string): Observed<Quote> =>
+      observed(
+        { symbol, ...w.quotes[symbol]!, asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
+        { ...meta('q', w.quoteAgeMs), asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
+      );
     const data: DecisionDataPorts = {
-      quote: (symbol): Promise<Observed<Quote>> =>
-        Promise.resolve(
-          observed(
-            { symbol, ...w.quotes[symbol]!, asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
-            { ...meta('q', w.quoteAgeMs), asOf: w.quoteAsOf ?? meta('q', w.quoteAgeMs).asOf },
-          ),
-        ),
+      quote: (symbol): Promise<Observed<Quote>> => Promise.resolve(quoteNow(symbol)),
       accountSnapshot: () => Promise.resolve(observed(req.snapshot, meta('broker'))),
       // Tracking is advanced from the FRESH broker snapshot, like production (not a cached copy).
       tracking: () =>
@@ -269,6 +272,23 @@ export function realRevalidator(
         candidate: w.candidates.get(req.approval.approvalId)!,
         plan: req.approval.orderPlan,
         originalConfigHash: CONFIG_HASH,
+        current: {
+          quote: (symbol) =>
+            w.revoked.quote ? notObserved('ERROR', 'quote provider down', 'q') : quoteNow(symbol),
+          calendar: () =>
+            w.revoked.calendar
+              ? notObserved('ERROR', 'calendar provider down', 'calendar')
+              : observed(
+                  {
+                    from: new Date(now.getTime() - 3_600_000).toISOString(),
+                    to: new Date(now.getTime() + 86_400_000).toISOString(),
+                    events: w.calendarEvents,
+                  },
+                  meta('calendar'),
+                ),
+          newsRisk: () =>
+            w.revoked.news ? notObserved('ERROR', 'news provider down', 'news') : base.newsRisk,
+        },
         assemble: {
           config: {
             configHash: w.configHash,

@@ -1481,6 +1481,11 @@ export class DemoRuntime {
       candidate: record.inputs.candidate,
       plan: approval.orderPlan,
       originalConfigHash: record.decision.configHash,
+      current: {
+        quote: (symbol) => this.latestQuote(symbol),
+        calendar: () => this.calendar(),
+        newsRisk: (symbol) => this.news.risk(symbol),
+      },
       assemble: {
         ...base,
         data: {
