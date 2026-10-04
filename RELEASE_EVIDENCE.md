@@ -4,14 +4,15 @@ Accepted (independent review + exact-head CI, PostgreSQL 16.x, 0 skips) vs rejec
 below are chronological per-task records; their "remaining risks" paragraphs are snapshots at that
 task, and the standing limitations are in `CEO_STATE.md` / `docs/PROJECT_STATE.md`.
 
-| Task | Accepted code (docs head)                               | CI run / job               | Files / tests | Rejected before acceptance                                |
-| ---- | ------------------------------------------------------- | -------------------------- | ------------- | --------------------------------------------------------- |
-| M001 | `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28`              | 37194795717 / 111414315319 | 89 / 820      | S001-R3 `c1ba5318` (CI 813 PASS, safety FAIL)             |
-| F003 | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (`aa75c01e`) | 37230464693 / 111518851649 | 92 / 857      | `f0b2c283`, `9fc9b048` (CI typecheck)                     |
-| R004 | `8c57e6be5b7f9757bb381be26985a405804ab2c5` (`05fc2ef0`) | 37236216419 / 111535726577 | 97 / 897      | `484c9a5c` (CI PASS 37232550276, safety FAIL), `230478e8` |
-| S002 | `cee9b7a13f23ce374c189067953468a5fed45e76` (`728ac6d7`) | 37239168847 / 111544207158 | 99 / 938      | `0dd69ca2` / `11ffee72`                                   |
+| Task               | Accepted code (docs head)                               | CI run / job               | Files / tests | Rejected before acceptance                                |
+| ------------------ | ------------------------------------------------------- | -------------------------- | ------------- | --------------------------------------------------------- |
+| M001               | `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28`              | 37194795717 / 111414315319 | 89 / 820      | S001-R3 `c1ba5318` (CI 813 PASS, safety FAIL)             |
+| F003               | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (`aa75c01e`) | 37230464693 / 111518851649 | 92 / 857      | `f0b2c283`, `9fc9b048` (CI typecheck)                     |
+| R004               | `8c57e6be5b7f9757bb381be26985a405804ab2c5` (`05fc2ef0`) | 37236216419 / 111535726577 | 97 / 897      | `484c9a5c` (CI PASS 37232550276, safety FAIL), `230478e8` |
+| S002               | `cee9b7a13f23ce374c189067953468a5fed45e76` (`728ac6d7`) | 37239168847 / 111544207158 | 99 / 938      | `0dd69ca2` / `11ffee72`                                   |
+| Stage 1 integrated | `dcb4f692882137d4b8081c45b393cfe24952b223` (`b9c3b890`) | 37240369181 / 111547727471 | 100 / 945     | —                                                         |
 
-The integrated Stage 1 candidate's evidence is the last section of this file.
+The Stage 1 integrated candidate's section and its CEO acceptance record follow below.
 
 # RELEASE_EVIDENCE
 
@@ -295,3 +296,21 @@ Unresolved (not weakened): no audited quarantine clearing path; unclean paper se
 accounts; recovery does not re-apply lost mutations; PAPER only (real-broker linkage blocks LIVE);
 no distributed takeover; an unpersisted halt blocks all paper admission until restart; a protective
 close waits behind a long entry validation. LIVE needs the owner (ADR-0008).
+
+## Stage 1 integrated gate — CEO acceptance (current status)
+
+The "IN_PROGRESS" wording in the section above is historical. The CEO accepted the Stage 1
+integrated software gate (PAPER execution-safety scope only) at review/CI head
+`b9c3b890f35c4e0529502d76a032dad6a7b67ec6`, tested code `dcb4f692882137d4b8081c45b393cfe24952b223`:
+exact-head CI run 37240369181 / job 111547727471 SUCCESS (frozen install, format, lint, typecheck,
+full tests, build; PostgreSQL 16.15; 100 files / 945 tests; 0 skips; independently decoded logs).
+No application behavior changed after the tested code. Standing limitations are unchanged (see
+`CEO_STATE.md`); this is not live readiness, deployment or profitability.
+
+## P001 Stage 2 platform-readiness audit (documentation only)
+
+Branch `claude/p001-platform-readiness` from `b9c3b890`; deliverable `docs/ledger/P001_PLATFORM_AUDIT.md`.
+Markdown-only validation: `prettier --check` and a consistency/source review (no code or tests
+changed, so the full suite was not rerun). Source access: official domains blocked by the egress
+proxy; facts are official-domain URLs surfaced by search (O-S), none read verbatim; conflicts and
+unknowns are listed, no profile is VERIFIED, no spend is proposed.

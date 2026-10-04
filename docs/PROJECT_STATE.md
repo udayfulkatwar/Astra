@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-10-04 (Stage 1 integrated release candidate) · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-04 (Stage 1 accepted; Stage 2 P001 audit) · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -268,11 +268,21 @@ transmitted only after fresh deterministic revalidation, a committed DB reservat
 synchronous guard; paper state has one owner and an unclean session blocks its accounts; queued
 cancels/protective closes re-prove permission and the pinned adapter binding at the broker call.
 
-**Stage 1 is IN_PROGRESS, not accepted** (this integrated candidate awaits the CEO's exact-head
-review). Standing limitations: no audited clearing path for quarantines or unresolved
+**Stage 1 integrated software gate PASSED for the PAPER execution-safety scope** (accepted head
+`b9c3b890`, tested code `dcb4f692`, CI 37240369181 / job 111547727471, 100 files / 945 tests, 0 skips;
+not live readiness). Standing limitations: no audited clearing path for quarantines or unresolved
 completed-day conflicts; unclean paper sessions block accounts and recovery does not re-apply lost
 mutations; PAPER only — a real broker adapter must supply position↔order linkage (blocks LIVE);
 no distributed takeover. **Live trading is DISABLED; no strategy has a verified edge.**
+
+## Stage 2 — firm/platform selection (IN_PROGRESS; P001 audit done)
+
+`docs/ledger/P001_PLATFORM_AUDIT.md` (2026-10-04): official firm/platform domains could not be
+fetched directly; sourced leads show Lucid (CME futures) permits automation with an unresolved API
+route and cloud-hosting rule, and FundingPips 2 Step Flex pages report VPN/VPS prohibition,
+third-party-EA limits and weekend closure. The founder's named programs are targets, not confirmed
+accounts; no profile is VERIFIED; no strategy is promoted. The minimum founder inputs are listed in
+§9 of the audit.
 
 ## Remaining (by phase)
 

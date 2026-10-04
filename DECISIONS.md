@@ -40,6 +40,15 @@ Reuse the current session unless a concrete context, access or model reason warr
 handoff always pins the accepted baseSHA and the reviewed evidence. Old chats are historical, not
 simultaneous workers.
 
+## P001 (Stage 2) — sourcing rule
+
+Firm/platform facts count only when sourced to the official domain with URL and access date; a
+paraphrase from a search tool is marked O-S (unread verbatim) and third-party pages are never facts.
+The founder's named programs are intended targets, not purchased accounts. No profile is VERIFIED
+without the evidence and owner confirmation; futures contracts and broker CFD symbols are never
+mapped by assumption; no adapter, data purchase or provider activation before the founder's inputs.
+Detail: `docs/ledger/P001_PLATFORM_AUDIT.md`.
+
 ## Stage 1 integration
 
 Accepted tasks are integrated by fast-forward from the last accepted head; the integrated candidate
