@@ -44,3 +44,5 @@ All times UTC; local zones only via Luxon for rule evaluation.
 - Read the ledger before restarting work; never infer working code or passing tests from a chat claim.
 - Report the exact tested SHA, test count and DB skips; retain regression tests for reproduced bugs.
 - AI may veto only; never relax a safety rule to obtain a pass.
+- A green CI is not a safety acceptance; prove ownership/permission at the real boundary (inside the lock, immediately before the call). Reproduce old-base bugs in an isolated worktree, never by replacing source in a dirty tree.
+- PAPER state has ONE owner (ADR-0027 §9): DB tests that start runtimes need real PostgreSQL advisory locks (no pooler in transaction mode).

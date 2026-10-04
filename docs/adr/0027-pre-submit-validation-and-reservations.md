@@ -139,9 +139,10 @@ twice, and an in-process mutex cannot prevent that across processes.
 - **Loser behaviour:** a concurrent validator that loses the version race re-validates against the
   winner's reservation, or refuses while the winner's order is still unconfirmed. Spurious refusals
   are accepted; spurious approvals are not.
-- **Not solved:** PAPER broker state is in-memory per API process (persisted fire-and-forget), so
-  two API processes would hold two different paper brokers; the ledger protects ASTRA's own
-  commitments, not a broker it cannot see. Run ONE execution process per paper account.
+- **Superseded by §9 (R004):** PAPER broker state is in-memory per API process, so exactly ONE
+  process may own paper at a time — now enforced (advisory lock + DIRTY session ACKed first, a
+  competitor refuses, an unclean prior session quarantines every paper account). The ledger still
+  protects ASTRA's own commitments, not a broker it cannot see.
 - **Not solved (blocks LIVE readiness):** a real broker adapter must expose position ↔ order
   linkage or closed-trade records keyed by `clientOrderId`; without it a filled order's
   reservation stays until an operator-audited release exists (not built). Only the paper adapter
@@ -152,12 +153,11 @@ twice, and an in-process mutex cannot prevent that across processes.
   submit-REJECTED-then-poll-FILLED in one gateway call, a late fill committed while either
   validation waits, an intervening same-symbol reservation, restart, idempotent repeats and a lost
   acknowledgement after commit.
-- Residual (not solved): if the database write of contradictory evidence FAILS (nothing committed)
-  the account is halted only by the process-local EXECUTION kill switch, and the released order is
-  terminal in ASTRA's records, so after a restart nothing re-polls it; the evidence quarantines the
-  account only when it is applied again. The fill then still appears as a broker position, which
-  the risk engines count from the snapshot. A periodic re-verification of recently ended orders
-  is not built.
+- Residual (reduced by §9/§10): if the database write of contradictory evidence FAILS, the account
+  is halted by the process-local EXECUTION switch; since R004 the paper session stays DIRTY (an
+  unpersisted halt also refuses CLEAN), so the next start quarantines every paper account and
+  re-reads the evidence of ended orders from the restored broker. A periodic re-verification of
+  recently ended orders while running is still not built.
 - Residual (not solved): the last ledger read precedes the adapter call by one bounded database
   round trip; since F003 the time/provider/control side of that window is closed by the
   synchronous final guard (§4a), but ledger evidence (e.g. a late fill) committed inside it is

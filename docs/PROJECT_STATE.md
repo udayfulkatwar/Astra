@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-10-04 (S001-R3 risk repair) · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-04 (Stage 1 integrated release candidate) · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -255,28 +255,22 @@ Combined reviewed heads onto the default branch in one integration branch (no co
 Task 002 calendar persistence (`babf911`), F001+F002 frontend (`0c0aff9`), R001 validation
 (`d39129a`). Tracking: `docs/WORK_LEDGER.md`.
 
-## S001 — pre-submit validation and durable reservations (ADR-0027, implemented, review pending)
+## Stage 1 — execution safety (ADR-0027; accepted chain, integrated candidate under review)
 
-The execution gateway re-checks mode, kill switches, authorizations, account, adapter and expiry
-after the account lock, after each awaited step and immediately before submit; revalidates the
-original candidate on fresh data through the real assembler and Decision Engine; and commits
-approval consumption, order, intent and an account-wide exposure reservation in one DB
-transaction guarded by a per-account ledger version. Release needs authoritative evidence.
-Evidence: `RELEASE_EVIDENCE.md`. Gaps: real-broker position↔order linkage (blocks LIVE),
-per-process paper broker, operator release of orphaned reservations (not built).
+Accepted in order, each by independent review and CI (`docs/WORK_LEDGER.md`, `RELEASE_EVIDENCE.md`):
+S001 pre-submit validation and durable account-wide reservations → S001-R3 evidence-after-release
+quarantine (migration 0012) → **M001** conservative tombstone upgrade (0013, 0014) → **F003**
+synchronous final entry freshness guard → **R004** single-owner PAPER crash/restart safety (0015) →
+**S002** queued risk-reduction permissions re-read inside the lock. Together: an entry is
+transmitted only after fresh deterministic revalidation, a committed DB reservation and a final
+synchronous guard; paper state has one owner and an unclean session blocks its accounts; queued
+cancels/protective closes re-prove permission and the pinned adapter binding at the broker call.
 
-**S001-R3 (review round 3, candidate `claude/s001-r3-risk-repair`, review pending):** evidence
-after a released reservation durably quarantines the account (ADR-0027 §8); corrective migration
-`0012` repairs prematurely released, uncovered rows and makes legacy unknown fills UNKNOWN +
-quarantined; tracking never lowers a same-day reference and fails closed on unresolvable
-completed-day conflicts. No clearing path for a quarantine exists yet. Stage 1 is NOT accepted.
-
-**F003 (candidate `claude/f003-final-freshness`, review pending):** the entry gate's last durable
-wait (shared-ledger read after revalidation) can no longer carry aged or revoked evidence to the
-broker: every revalidation returns a required synchronous final guard (ADR-0027 §4a) run with no
-`await` before `submitOrder`, plus an adapter/accountRef binding check. Remaining Stage 1 gaps:
-durable failure/restart ownership, S002 queued cancel / protective-close permission re-checks,
-quarantine clearing path, real-broker position linkage. Live DISABLED.
+**Stage 1 is IN_PROGRESS, not accepted** (this integrated candidate awaits the CEO's exact-head
+review). Standing limitations: no audited clearing path for quarantines or unresolved
+completed-day conflicts; unclean paper sessions block accounts and recovery does not re-apply lost
+mutations; PAPER only — a real broker adapter must supply position↔order linkage (blocks LIVE);
+no distributed takeover. **Live trading is DISABLED; no strategy has a verified edge.**
 
 ## Remaining (by phase)
 

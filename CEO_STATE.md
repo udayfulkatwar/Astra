@@ -2,16 +2,15 @@
 
 Status vocabulary: NOT_STARTED / IN_PROGRESS / BLOCKED / PASS / FAIL. Updated 4 October 2026.
 
-| Item              | Value                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Stage             | Stage 1 (execution safety): IN_PROGRESS — NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                                                                                                                                                        |
-| Accepted baseline | R004 PASS (PAPER crash/restart scope only): code `8c57e6be5b7f9757bb381be26985a405804ab2c5`, docs head `05fc2ef0589b4fa81c784818921de41e02910d88` (Markdown-only after code), independent review PASS, CI 37236216419 / job 111535726577 SUCCESS (97 files, 897 tests, 0 skips; install/format/lint/typecheck/test/build). Under it F003 PASS `2e75b104`, M001 PASS `3cd84145` |
-| Active task       | S002 — queued risk-reduction permissions, branch `claude/s002-queued-safety-actions` from `05fc2ef0…`; IN_PROGRESS; `0dd69ca2`/`11ffee72` rejected by review (cancel persistence overclaim, adapter instance not pinned); corrected candidate published for review (evidence in `RELEASE_EVIDENCE.md`)                                                                         |
-| R004 history      | `484c9a5c` (CI 37232550276 / job 111525132255 PASS, 95 files / 874 tests) and `230478e8` (local 97 / 894) were rejected by safety review before acceptance. R004 limitations stand: unclean paper sessions block accounts with no clearing path, recovery does not re-apply lost mutations, PAPER only, no real broker or distributed takeover                                 |
-| Next              | After S002 acceptance: integrated cleanup + fresh combined evidence (NOT_STARTED)                                                                                                                                                                                                                                                                                              |
+| Item             | Value                                                                                                                                                                                                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage            | Stage 1 (execution safety): IN_PROGRESS — integrated candidate published for CEO exact-head review; NOT accepted. Live trading DISABLED; no verified edge; no real broker adapter                                                                                                                               |
+| Accepted chain   | M001 PASS `3cd84145` (CI 37194795717, 820 tests) → F003 PASS code `2e75b104` (CI 37230464693, 857) → R004 PASS code `8c57e6be` (CI 37236216419, 897; PAPER scope) → S002 PASS code `cee9b7a1`, docs `728ac6d7` (CI 37239168847 / job 111544207158, 99 files / 938 tests, 0 skips). All PostgreSQL 16.x, 0 skips |
+| Active task      | Stage 1 integrated cleanup and fresh combined release evidence, branch `claude/stage1-integrated-release` from `728ac6d7`; head, tested SHA and CI in `RELEASE_EVIDENCE.md`                                                                                                                                     |
+| Rejected history | S001 `c765554`/`6caeb71`, round 2 `ba8c487`, S001-R3 `c1ba5318` (CI 813 PASS, safety FAIL); F003 `f0b2c283`, `9fc9b048`; R004 `484c9a5c` (CI PASS, safety FAIL), `230478e8`; S002 `0dd69ca2`/`11ffee72`                                                                                                         |
+| Next             | After CEO review of the integrated candidate: Stage 2 (firm/platform selection → verifiable data → registered research). Not started                                                                                                                                                                            |
 
-Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ, reused for S002;
-integrated cleanup follows only after S002 acceptance; old chats are historical.
+Session: one active writer in https://claude.ai/code/session_01JscBgwrjg845F2kNfVWFYZ; old chats are historical.
 
 Technical decisions (architecture, safety design, tests, migrations) are made by engineering and
 recorded in ADRs; they are not owner-managed.
@@ -33,9 +32,8 @@ silent re-open or a time-based expiry); conservative refusal over invented headr
 
 ## Next priorities (in order)
 
-1. S002 acceptance (independent review + CI on the exact final head).
-2. Integrated release cleanup and combined evidence (one candidate, one CI run, one evidence record).
-3. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
+1. CEO exact-head review of the Stage 1 integrated candidate (one candidate, one CI run, one evidence record).
+2. Then the roadmap: Stage 2 — firm/platform selection followed by verifiable data, then registered research (`RESEARCH_REGISTRY.md`).
 
 ## Founder-only decisions
 
@@ -58,8 +56,8 @@ Scripted restorations must verify the resulting diff.
 
 ## Historical reviews (provenance only, not current work)
 
-I001 integration PASS (software-only). S001 candidate `c765554`/`6caeb71`: FAIL. S001 round 2
-`ce12040`/`ba8c487`: FAIL. S001-R3 `c1ba5318`: FAIL despite 813-test CI PASS
-(`docs/ledger/S001_R3_CEO_REVIEW.md`). M001 repaired only its tombstone-upgrade findings and F003
-only the final entry-freshness finding; crash/restart ownership (R004) and queued safety actions
-(S002) remain open, so S001-R3 and Stage 1 are NOT accepted.
+I001 integration PASS (software-only). S001 `c765554`/`6caeb71` and round 2 `ce12040`/`ba8c487`:
+FAIL. S001-R3 `c1ba5318`: CI PASS (813 tests) but safety FAIL (`docs/ledger/S001_R3_CEO_REVIEW.md`);
+its findings were resolved by M001 (tombstone upgrade), F003 (final freshness), R004 (PAPER
+crash/restart ownership) and S002 (queued risk-reduction permissions), each accepted separately.
+Standing limitations of the accepted chain are listed in `docs/PROJECT_STATE.md` (Stage 1).

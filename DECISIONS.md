@@ -40,6 +40,13 @@ Reuse the current session unless a concrete context, access or model reason warr
 handoff always pins the accepted baseSHA and the reviewed evidence. Old chats are historical, not
 simultaneous workers.
 
+## Stage 1 integration
+
+Accepted tasks are integrated by fast-forward from the last accepted head; the integrated candidate
+changes only status documents, stale ADR statements and added evidence tests (migration immutability
+and the 0014→0015 upgrade). The CI workflow stays as is; the two Claude workflows are retained
+(operator tooling, not part of the product gate) pending an owner decision.
+
 ## S002 design (summary; detail in ADR-0027 §10)
 
 Queued cancel / protective close judge permission INSIDE the account lock from current state
