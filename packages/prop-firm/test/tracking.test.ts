@@ -138,8 +138,7 @@ describe('mergeAccountTracking (a stale writer can never lower a peak)', () => {
     });
   });
   const D1 = '2026-09-28';
-  const sameDay = (o: Record<string, unknown>) =>
-    ({ ...base, tradingDayKey: D1, ...o }) as typeof base;
+  const sameDay = (o: Record<string, unknown>) => ({ ...base, tradingDayKey: D1, ...o });
 
   it('same day: a stale writer with a NEWER timestamp and a lower reference cannot loosen the day-start', () => {
     const stored = sameDay({
