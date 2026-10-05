@@ -60,8 +60,12 @@ describe.skipIf(!available)('upgrade 0014 → 0015 over pre-R004 paper state', (
       // a paper snapshot written by a pre-R004 process (no revision, no owner)
       await sql`insert into paper_broker_state (adapter_id, account_ref, state, updated_at)
                 values ('paper', 'PAPER-A', ${sql.json({ balance: 50000, currency: 'USD', positions: [], orders: [], closed: [] })}, now())`;
-      const upgraded = await migrate(sql); // the real directory: only 0015 is new
-      expect(upgraded.applied).toEqual(['0015_paper_single_owner.sql']);
+      const upgraded = await migrate(sql); // the real directory: 0015 and any LATER migrations are new
+      const expected = readdirSync(DEFAULT_MIGRATIONS_DIR)
+        .filter((f) => f >= '0015' && f.endsWith('.sql'))
+        .sort();
+      expect(expected[0]).toBe('0015_paper_single_owner.sql');
+      expect(upgraded.applied).toEqual(expected);
       const legacy = await sql<{ revision: string; session_id: string | null }[]>`
         select revision, session_id from paper_broker_state where adapter_id = 'paper'`;
       expect(legacy[0]).toMatchObject({ revision: '0', session_id: null });
