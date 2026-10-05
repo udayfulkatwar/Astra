@@ -80,6 +80,15 @@ async function permitted(runtime: BridgeRuntime): Promise<boolean> {
   }
 }
 
+/** Synchronous fresh-clock gate for an ENTRY: valid clock, issuedAt not in the future, not expired. */
+function clockReason(command: BridgeCommand, runtime: BridgeRuntime): string | null {
+  const now = validNow(runtime);
+  if (now === null) return 'invalid clock';
+  if (Date.parse(command.issuedAt) > now.getTime()) return 'issuedAt is in the future';
+  if (now.getTime() >= Date.parse(command.expiresAt)) return 'entry command expired';
+  return null;
+}
+
 export class OfflineBridge {
   constructor(
     private readonly journal: BridgeJournal,
@@ -110,34 +119,49 @@ export class OfflineBridge {
     return { check: () => this.checkBoundary(command, runtime) };
   }
 
+  /**
+   * Final write-boundary verdict. Order matters: the ONLY async gate (entry permission, ENTRY only)
+   * is awaited FIRST; then the authoritative owner/fence/reconcile state is read; and the clock is
+   * read LAST, synchronously, with no await between it and the verdict. A slow permission supplier
+   * therefore cannot let the clock pass expiry, or ownership/reconcile change, unnoticed. Protective
+   * commands never consult entry permission but keep the current owner/fence/reconcile safety.
+   * MODEL LIMIT: this narrows, and in the single-threaded fake closes, the check→effect gap; a real
+   * terminal's race between the verdict and the broker applying the order is NOT solved here.
+   */
   private async checkBoundary(
     command: BridgeCommand,
     runtime: BridgeRuntime,
   ): Promise<BoundaryVerdict> {
+    const isEntry = commandClass(command) === 'ENTRY';
+    const allowed = isEntry ? await permitted(runtime) : true;
     const owner = await this.journal.ownerState(command.accountRef);
     if (owner === null) return { ok: false, reason: 'no owner' };
-    if (owner.ownerId !== this.fence.ownerId || owner.epoch !== this.fence.epoch) {
+    if (
+      this.fence.accountRef !== command.accountRef ||
+      owner.ownerId !== this.fence.ownerId ||
+      owner.epoch !== this.fence.epoch
+    ) {
       return { ok: false, reason: 'stale owner fence' };
     }
-    if (commandClass(command) === 'ENTRY') {
-      const reason = await this.entryReason(command, runtime, owner.reconcileRequired);
+    if (owner.reconcileRequired) return { ok: false, reason: 'reconciliation required' };
+    if (isEntry) {
+      if (!allowed) return { ok: false, reason: 'entry not permitted' };
+      const reason = clockReason(command, runtime); // synchronous, last, no await after
       if (reason !== null) return { ok: false, reason };
     }
     return { ok: true };
   }
 
+  /** ENTRY pre-marker gate: permission first (the only await), then owner, then the clock last. */
   private async entryReason(
     command: BridgeCommand,
     runtime: BridgeRuntime,
-    reconcileRequired: boolean,
   ): Promise<string | null> {
-    const now = validNow(runtime);
-    if (now === null) return 'invalid clock';
-    if (Date.parse(command.issuedAt) > now.getTime()) return 'issuedAt is in the future';
-    if (now.getTime() >= Date.parse(command.expiresAt)) return 'entry command expired';
-    if (reconcileRequired) return 'reconciliation required';
-    if (!(await permitted(runtime))) return 'entry not permitted';
-    return null;
+    const allowed = await permitted(runtime);
+    const owner = await this.journal.ownerState(command.accountRef);
+    if (owner === null || owner.reconcileRequired) return 'reconciliation required';
+    if (!allowed) return 'entry not permitted';
+    return clockReason(command, runtime);
   }
 
   private async proceed(rec: JournalRecord, runtime: BridgeRuntime): Promise<BridgeOutcome> {
@@ -160,13 +184,15 @@ export class OfflineBridge {
       case 'INTENT':
         break;
     }
-    const owner = await this.journal.ownerState(rec.accountRef);
     if (commandClass(rec.command) === 'ENTRY') {
-      const reason = await this.entryReason(rec.command, runtime, owner?.reconcileRequired ?? true);
+      const reason = await this.entryReason(rec.command, runtime);
       if (reason !== null) return this.refuse(rec, reason);
-    } else if (owner?.reconcileRequired ?? true) {
-      // Protective intent stays durably pending until ownership/reconciliation is safe.
-      return { kind: 'PENDING', reason: 'reconciliation required' };
+    } else {
+      const owner = await this.journal.ownerState(rec.accountRef);
+      if (owner?.reconcileRequired ?? true) {
+        // Protective intent stays durably pending until ownership/reconciliation is safe.
+        return { kind: 'PENDING', reason: 'reconciliation required' };
+      }
     }
     return this.dispatch(rec, runtime);
   }

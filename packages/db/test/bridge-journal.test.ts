@@ -689,5 +689,90 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
       expect(reply).toEqual({ status: 'FENCED' });
       expect(terminal.effects).toHaveLength(0);
     });
+
+    describe('final write boundary: slow permission supplier cannot launder stale state', () => {
+      /** Permission is true immediately for the pre-marker gate, then PENDING at the final boundary. */
+      const slowAtBoundary = () => {
+        let calls = 0;
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((r) => (release = r));
+        return {
+          supplier: (): boolean | Promise<boolean> =>
+            ++calls === 1 ? true : gate.then(() => true),
+          release: () => release(),
+          calls: () => calls,
+        };
+      };
+      const until = async (cond: () => boolean) => {
+        for (let i = 0; i < 200 && !cond(); i++) await sleep(10);
+        expect(cond()).toBe(true);
+      };
+
+      it('the clock passes expiry while the permission supplier is pending: it returns true, yet the fake applies nothing', async () => {
+        let t = new Date('2026-10-05T10:00:10.000Z');
+        const g = slowAtBoundary();
+        const p = new OfflineBridge(journal, terminal, fence).execute(wire(), {
+          clock: () => t,
+          entryPermitted: g.supplier,
+        });
+        await until(() => g.calls() >= 2); // the final boundary is now awaiting permission
+        t = new Date('2026-10-05T11:00:00.000Z'); // expiry passes DURING the wait
+        g.release();
+        expect((await p).kind).toBe('UNKNOWN');
+        expect(terminal.effects).toHaveLength(0);
+        expect(await stateOf('c1')).toBe('UNKNOWN');
+      });
+
+      it('ownership changes while permission is pending: the old writer applies nothing before any new writer invokes', async () => {
+        const g = slowAtBoundary();
+        const p = new OfflineBridge(journal, terminal, fence).execute(wire(), rt(NOW, g.supplier));
+        await until(() => g.calls() >= 2);
+        await journal.takeover(ACCOUNT, 'bridge-B', { oldWriterCannotAct: true, note: 'evidence' });
+        g.release();
+        expect((await p).kind).toBe('UNKNOWN');
+        expect(terminal.effects).toHaveLength(0);
+      });
+
+      it('reconcile-required flips while permission is pending: an ENTRY applies nothing', async () => {
+        const g = slowAtBoundary();
+        const p = new OfflineBridge(journal, terminal, fence).execute(wire(), rt(NOW, g.supplier));
+        await until(() => g.calls() >= 2);
+        await db.sql`update bridge_owner set reconcile_required = true`;
+        g.release();
+        expect((await p).kind).toBe('UNKNOWN');
+        expect(terminal.effects).toHaveLength(0);
+      });
+
+      it('a protective close never consults entry permission but is refused at the boundary when reconcile flips just before the final owner read', async () => {
+        let permissionCalls = 0;
+        const racing: BridgeJournal = Object.create(journal) as BridgeJournal;
+        const realOwner = journal.ownerState.bind(journal);
+        let ownerReads = 0;
+        racing.ownerState = async (a) => {
+          if (++ownerReads === 2) await db.sql`update bridge_owner set reconcile_required = true`;
+          return realOwner(a);
+        };
+        const out = await new OfflineBridge(racing, terminal, fence).execute(
+          close('p1'),
+          rt(NOW, () => {
+            permissionCalls++;
+            return false;
+          }),
+        );
+        expect(permissionCalls).toBe(0);
+        expect(out.kind).toBe('UNKNOWN');
+        expect(terminal.effects).toHaveLength(0);
+        expect(await stateOf('p1')).toBe('UNKNOWN'); // marker committed: conservative, never resent
+      });
+
+      it('with permission denied a protective close still runs when ownership is current', async () => {
+        const out = await bridge.execute(
+          close('p1'),
+          rt(NOW, () => false),
+        );
+        expect(out.kind).toBe('RESOLVED');
+        expect(terminal.effects).toEqual(['p1']);
+      });
+    });
   });
 });
