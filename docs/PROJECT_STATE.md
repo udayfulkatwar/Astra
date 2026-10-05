@@ -294,7 +294,7 @@ account). P002 preparation (Markdown only; CEO-reviewed/accepted for requirement
 **Founder decision 2026-10-05 (later):** FundingPips platform MetaTrader 5, phase EVALUATION; Lucid platform
 TradeSea is secondary context only. Exact FundingPips program remains unspecified. MT5 route feasibility,
 design and offline conformance plan (design only, candidate for CEO review, MetaQuotes primary pages not
-yet read): `docs/ledger/P002_MT5_ROUTE.md`. Durable protective queue and real-route ownership are gaps.
+yet read by Claude; nine CEO primary reads recorded as P in §2A, revised after CEO review): `docs/ledger/P002_MT5_ROUTE.md`. Durable protective queue and real-route ownership are gaps.
 Earlier gates: the platform unblocks protocol-specific design and fake-server contract selection; the exact
 program/size/step/terms block rule-profile mapping; written firm/API entitlement blocks any real
 connection. Reward/DLL/add-ons are recorded as unknown/if-applicable, not assumed. No profile is
