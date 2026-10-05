@@ -51,6 +51,16 @@ never mapped by assumption; schema/engine mapping of a firm rule is a gap until 
 PAPER-only; no adapter, data purchase or provider activation before the founder's input. Detail:
 `docs/ledger/P001_PLATFORM_AUDIT.md`.
 
+## P002 (Stage 2) — founder decision addendum, 2026-10-05
+
+Founder confirmed the first account's firm (FundingPips) and phase (EVALUATION). Platform is not
+specified and must never be assumed or inferred (no MT5/cTrader/Match-Trader/protocol guess, no fake
+route); program, size, step, feed and options are unconfirmed, and "FundingPips + evaluation" does not
+yield a verified rule profile. P002 proceeds only with platform-independent requirements/intake
+(`docs/ledger/P002_REQUIREMENTS.md`); platform-specific contract, adapter and conformance work is BLOCKED
+until the platform is known. This addendum supersedes nothing: the P001 audit facts and their evidence
+tiers are preserved as dated.
+
 ## Stage 1 integration
 
 Accepted tasks are integrated by fast-forward from the last accepted head; the integrated candidate

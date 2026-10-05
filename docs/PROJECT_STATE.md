@@ -1,6 +1,6 @@
 # ASTRA — Project State
 
-_Last updated: 2026-10-04 (Stage 1 accepted; Stage 2 P001 audit) · maintained at every milestone (master instructions §34)._
+_Last updated: 2026-10-05 (Stage 1 accepted; Stage 2 P001 audit; P002 preparation) · maintained at every milestone (master instructions §34)._
 
 ## Current phase
 
@@ -286,6 +286,14 @@ optional DLL, automation permitted with the API/cloud route unresolved; CME MYM/
 The founder's named programs are targets, not confirmed accounts; no profile is VERIFIED, no
 strategy is promoted, and rule mapping to the profile schema is a gap needing proof. R004 fences are
 PAPER-only. The minimum founder unknown is the exact current account (or none) with its options.
+
+**Founder decision 2026-10-05 (addendum; P001 facts above unchanged):** first account firm FundingPips,
+phase EVALUATION. The platform is NOT specified and must not be assumed; program, size, evaluation
+step, feed and options are unconfirmed (the earlier 10K 2-Step Flex is a historical intention, not an
+account). P002 preparation (Markdown only, candidate for CEO review): `docs/ledger/P002_REQUIREMENTS.md`.
+Platform-specific API contract/adapter/fake-server conformance stays BLOCKED until the platform is
+known; phase rules cannot be applied until the exact program/step/terms are known. No profile is
+VERIFIED.
 
 ## Remaining (by phase)
 
