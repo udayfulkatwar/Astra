@@ -317,15 +317,16 @@ Claude leads (unverified) and third-party pages (never facts). My direct fetches
 domains were blocked by this environment's egress proxy; I did not fetch the pages the CEO read. No
 profile is VERIFIED and no spend, account, route or contract is selected.
 
-## D001 strict research import calendar timestamps (candidate, pending CEO review)
+## D001 strict research import calendar timestamps (ACCEPTED, timestamp-import scope)
 
-| Field      | Value                                                                                                                                                                                          |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Branch     | `claude/d001-import-timestamps` from `aac79c0eb0b0ef5f10a5d93b625b110392b9b630` (P001 docs head; Stage 1 PASS evidence unchanged)                                                              |
-| Tested SHA | code `a432fe860a9cdc9f0d6ebaa04127213c4108993a` (clean committed tree); earlier code heads `a2ca62f2` (rejected by incremental review: ISO 24:00 treated as invalid) not the candidate         |
-| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL`; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before each push), tests 0, build 0                                                        |
-| Tests      | 101 files, 1026 passed, 0 failed, 0 skipped (Stage 1 baseline 100 / 945; +81 tests in `packages/research/test/import-timestamps.test.ts`); self-reported until independent CI                  |
-| Scope      | `packages/research/src/data.ts`, `packages/research/kit/lsfvg_kit.py`, one new test file; no application code, migrations, `docs/research` archives, engine, strategy, sizing or costs changed |
+| Field      | Value                                                                                                                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branch     | `claude/d001-import-timestamps` from `aac79c0eb0b0ef5f10a5d93b625b110392b9b630` (P001 docs head; Stage 1 PASS evidence unchanged)                                                                                                      |
+| Tested SHA | accepted code `a432fe860a9cdc9f0d6ebaa04127213c4108993a`; docs head `994c09b2b1c289963b6da8c4905ebde1108af983` changed only 3 Markdown files after the tested code; `a2ca62f2` superseded, not accepted (ISO 24:00 treated as invalid) |
+| CI         | independent exact-code run 37243166602 / job 111555751622 SUCCESS: frozen install, format, lint, typecheck, full tests, build; PostgreSQL 16.15, 101 files / 1026 tests / 0 skips                                                      |
+| Local run  | PostgreSQL 16.14, `TEST_DATABASE_URL`; exits: frozen install 0, format 0, lint 0, typecheck 0 (also before each push), tests 0, build 0                                                                                                |
+| Tests      | 101 files, 1026 passed, 0 failed, 0 skipped (Stage 1 baseline 100 / 945; +81 tests in `packages/research/test/import-timestamps.test.ts`); local run, independently confirmed by CI above                                              |
+| Scope      | `packages/research/src/data.ts`, `packages/research/kit/lsfvg_kit.py`, one new test file; no application code, migrations, `docs/research` archives, engine, strategy, sizing or costs changed                                         |
 
 **Observed defect (reproduced on `aac79c0e` in an isolated worktree with synthetic fixtures).**
 `parseBars` used `Date.UTC` for HistData and fixed-offset MT5 and `Date.parse` for generic times, so
@@ -349,20 +350,24 @@ already-validated date (also with a zone; Dec 31 and Feb 29 roll correctly); `24
 `24:00:00.5`, hour 25, `Feb 30 T24:00` and a non-leap `Feb 29 T24:00` are invalid. HistData and MT5
 clocks keep hour 24 invalid (not part of those formats). Epoch seconds/ms are unchanged. The Python
 kit now counts impossible HistData/MT5 fields invalid (no abort), uses the same strict MT5 shapes
-(`re.ASCII`) and implements the same narrow ISO `24:00` rule; `KIT_VERSION` stays `1.0.0` because
-valid-input results and archived outputs are unaffected (previously impossible rows crashed the kit or
-were shifted by the TypeScript loader; the only newly accepted input is generic ISO `24:00`).
+(`re.ASCII`) and implements the same narrow ISO `24:00` rule; `KIT_VERSION` stays `1.0.0`, but it **no longer uniquely
+identifies parser bytes** (the kit's parsing changed without a version bump). Future research provenance must
+record the exact code SHA or kit file hash, not `KIT_VERSION` alone. Archived historical provenance is preserved
+as written; no version or code change is made in this docs-only handoff.
 
 **Valid-input compatibility.** HistData fixed UTC−5, MT5 explicit fixed offset and `NY+7` (winter and
 summer), spread values, ordering, de-duplication and the absent-server-offset behaviour are covered by
-positive cases and unchanged; the existing 100 research tests pass. Old real backtests and archived
-no-edge results are byte-identical (`docs/research` untouched; no engine change).
+positive cases and are asserted unchanged **for those documented formats and tests only**; this is not a claim of
+global TypeScript/Python equivalence or parity for all inputs. Verified totals: new file 81 tests; full suite
+101 files / 1026 tests (Stage 1 baseline 100 / 945). `docs/research` archives are untouched and no engine code
+changed.
 
 **Tests.** 81 tests in the new file: 77 table cases run through the production `parseBars` (impossible vs valid leap /
 month-end / century boundaries per format, ISO 24:00 positive and negative), a mixed-file ordering/
 duplicate test, `utcMs` boundaries, and a TypeScript-vs-Python-kit parity test over every case (same
 parsed/invalid counts and the same UTC instant). On the base (`aac79c0e`) the first 66-test version of the file failed
-31 tests (every impossible-date case and the Python abort); the valid-input cases passed.
+31 tests (the failing impossible-date cases plus the Python abort; `NY+7` already rejected impossible dates);
+the valid-input cases passed.
 
 **Out-of-scope concerns recorded, not fixed:** (1) `NY+7` uses Luxon in TypeScript but the kit's built-in
 New York rules start in 2007 — pre-2007 `NY+7` rows are now counted invalid in the kit while TypeScript
@@ -371,3 +376,9 @@ converts them; nonexistent local times in a DST gap are shifted by Luxon (data-q
 (3) non-ISO generic shapes (e.g. `2024/02/05 12:00`) are now unreadable in TypeScript (previously a
 V8 fallback), matching the documented "ISO-8601 or epoch" and the kit; (4) no spread/overlap/resampling
 or data-quality change. No real data was downloaded; no strategy run; no untouched-data or edge claim.
+
+**CEO acceptance (D001, timestamp-import scope only).** Accepted on code `a432fe86` with CI 37243166602 / job 111555751622. This is NOT global TypeScript/Python equivalence, verified data, an edge, or Stage 2 completion.
+Stage 1 PASS (PAPER execution-safety scope; accepted `b9c3b890`, tested code `dcb4f692`, CI 37240369181 / job
+111547727471, 100 / 945, 0 skips) is intact: P001 changed documentation only; D001 changed only the research
+loader and kit, and the Stage 1 application is unchanged. Stage 2 remains IN_PROGRESS; P001 PASS; P002
+route-specific work stays BLOCKED on the founder's exact first account-or-none, platform and phase/options.
