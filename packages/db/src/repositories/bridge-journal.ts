@@ -6,6 +6,7 @@ import type {
   Fence,
   JournalRecord,
   JournalState,
+  MarkerGuard,
   OwnerState,
   StoredResult,
   TakeoverEvidence,
@@ -55,7 +56,7 @@ export class PgBridgeJournal implements BridgeJournal {
       returning epoch`;
     if (!rows[0])
       throw new BridgeOwnerError('BUSY', 'account already has an owner (no handoff by expiry)');
-    return { ownerId, epoch: String(rows[0].epoch) };
+    return { accountRef, ownerId, epoch: String(rows[0].epoch) };
   }
 
   async takeover(
@@ -76,7 +77,7 @@ export class PgBridgeJournal implements BridgeJournal {
        where account_ref = ${accountRef}
       returning epoch`;
     if (!rows[0]) throw new BridgeOwnerError('NO_OWNER', 'no owner to take over from');
-    return { ownerId: newOwnerId, epoch: String(rows[0].epoch) };
+    return { accountRef, ownerId: newOwnerId, epoch: String(rows[0].epoch) };
   }
 
   async completeReconcile(accountRef: string, fence: Fence): Promise<void> {
@@ -124,14 +125,24 @@ export class PgBridgeJournal implements BridgeJournal {
     fence: Fence,
     accountRef: string,
     commandId: string,
-  ): Promise<boolean> {
+    guard: MarkerGuard,
+  ): Promise<'WON' | 'LOST_RACE' | 'ENTRY_BLOCKED'> {
     return this.sql.begin(async (tx) => {
-      await this.checkFence(tx, accountRef, fence, 'share');
+      const owner = await this.checkFence(tx, accountRef, fence, 'share');
+      // ENTRY commands are additionally guarded INSIDE the atomic step: current reconcile state and
+      // expiry at the caller's fresh instant. Protective commands are never blocked by these.
       const rows = await tx<{ command_id: string }[]>`
         update bridge_command set state = 'SEND_MAY_HAVE_STARTED', updated_at = now()
          where account_ref = ${accountRef} and command_id = ${commandId} and state = 'INTENT'
+           and not (cls = 'ENTRY' and (${owner.reconcile_required}
+                    or (command->>'expiresAt')::timestamptz <= ${guard.nowIso}::timestamptz))
         returning command_id`;
-      return rows.length === 1;
+      if (rows.length === 1) return 'WON' as const;
+      const cur = await tx<{ state: string; cls: string }[]>`
+        select state, cls from bridge_command where account_ref = ${accountRef} and command_id = ${commandId}`;
+      return cur[0]?.state === 'INTENT' && cur[0].cls === 'ENTRY'
+        ? ('ENTRY_BLOCKED' as const)
+        : ('LOST_RACE' as const);
     });
   }
 
@@ -184,17 +195,23 @@ export class PgBridgeJournal implements BridgeJournal {
     accountRef: string,
     fence: Fence,
     lock: 'update' | 'share',
-  ): Promise<void> {
+  ): Promise<{ reconcile_required: boolean }> {
+    // The fence names ONE account: the same owner id/epoch number never authorises another.
+    if (fence.accountRef !== accountRef)
+      throw new BridgeOwnerError('LOST', 'fence is bound to another account');
     const rows =
       lock === 'update'
-        ? await tx<{ owner_id: string; epoch: string }[]>`
-            select owner_id, epoch from bridge_owner where account_ref = ${accountRef} for update`
-        : await tx<{ owner_id: string; epoch: string }[]>`
-            select owner_id, epoch from bridge_owner where account_ref = ${accountRef} for share`;
+        ? await tx<{ owner_id: string; epoch: string; reconcile_required: boolean }[]>`
+            select owner_id, epoch, reconcile_required from bridge_owner
+             where account_ref = ${accountRef} for update`
+        : await tx<{ owner_id: string; epoch: string; reconcile_required: boolean }[]>`
+            select owner_id, epoch, reconcile_required from bridge_owner
+             where account_ref = ${accountRef} for share`;
     const r = rows[0];
     if (!r) throw new BridgeOwnerError('NO_OWNER', 'no owner for this account');
     if (r.owner_id !== fence.ownerId || String(r.epoch) !== fence.epoch) {
       throw new BridgeOwnerError('LOST', 'stale owner fence');
     }
+    return r;
   }
 }

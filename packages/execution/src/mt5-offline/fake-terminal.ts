@@ -1,11 +1,12 @@
 /**
  * FAKE terminal for offline conformance. It models nothing about MT5 beyond what the tests script:
- * abstract statuses, throws, and a write-boundary fence. A passing fence test proves the BRIDGE
- * LOGIC against this model, never a real terminal.
+ * abstract statuses, throws, lost replies and a write boundary that re-reads the authoritative
+ * clock/gate/owner state before applying an effect. A passing test proves the BRIDGE LOGIC against
+ * this model, never a real terminal.
  */
 import { D } from '@astra/core';
 import type { BridgeCommand } from './contract';
-import type { BridgeTransport, Fence, TransportResult } from './transport';
+import type { BridgeTransport, Fence, TransportResult, WriteBoundary } from './transport';
 
 export type FakeBehavior =
   | { readonly kind: 'DONE'; readonly ref?: string; readonly remainingLots?: string }
@@ -14,14 +15,13 @@ export type FakeBehavior =
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'THROW_BEFORE_EFFECT' }
   | { readonly kind: 'THROW_AFTER_EFFECT' }
-  | { readonly kind: 'MALFORMED' };
+  | { readonly kind: 'RAW'; readonly reply: unknown };
 
 export class FakeTerminal implements BridgeTransport {
   readonly invocations: { command: BridgeCommand; fence: Fence }[] = [];
   /** Commands whose effect the fake "applied" (even when the reply was lost). */
   readonly effects: string[] = [];
   private readonly scripted = new Map<string, FakeBehavior>();
-  private readonly highestEpoch = new Map<string, bigint>();
 
   constructor(private readonly defaultBehavior: FakeBehavior = { kind: 'DONE' }) {}
 
@@ -29,43 +29,39 @@ export class FakeTerminal implements BridgeTransport {
     this.scripted.set(commandId, behavior);
   }
 
-  invoke(command: BridgeCommand, fence: Fence): Promise<unknown> {
+  async invoke(command: BridgeCommand, fence: Fence, boundary: WriteBoundary): Promise<unknown> {
     this.invocations.push({ command, fence });
-    // Write-boundary fence (fake only): an older epoch than one already seen is refused.
-    const seen = this.highestEpoch.get(command.accountRef) ?? 0n;
-    const epoch = BigInt(fence.epoch);
-    if (epoch < seen) return Promise.resolve({ status: 'FENCED' } satisfies TransportResult);
-    this.highestEpoch.set(command.accountRef, epoch);
-
+    // The fence names ONE account; it never authorises another.
+    if (fence.accountRef !== command.accountRef)
+      return { status: 'FENCED' } satisfies TransportResult;
     const b = this.scripted.get(command.commandId) ?? this.defaultBehavior;
+    if (b.kind === 'THROW_BEFORE_EFFECT') throw new Error('fake transport failed before effect');
+    // Authoritative re-read at the (modelled) write boundary, AFTER any wait the caller incurred.
+    const verdict = await boundary.check();
+    if (!verdict.ok)
+      return { status: 'BOUNDARY_REFUSED', reason: verdict.reason } satisfies TransportResult;
     switch (b.kind) {
-      case 'THROW_BEFORE_EFFECT':
-        return Promise.reject(new Error('fake transport failed before effect'));
       case 'THROW_AFTER_EFFECT':
         this.effects.push(command.commandId);
-        return Promise.reject(new Error('fake transport lost the reply'));
-      case 'MALFORMED':
+        throw new Error('fake transport lost the reply');
+      case 'RAW':
         this.effects.push(command.commandId);
-        return Promise.resolve({ status: 'WAT', extra: 1 });
+        return b.reply;
       case 'REJECT':
-        return Promise.resolve({ status: 'REJECTED', reason: b.reason });
+        return { status: 'REJECTED', reason: b.reason } satisfies TransportResult;
       case 'NOT_FOUND':
-        return Promise.resolve({ status: 'NOT_FOUND' });
+        return { status: 'NOT_FOUND' } satisfies TransportResult;
       case 'PARTIAL':
         this.effects.push(command.commandId);
-        return Promise.resolve({
-          status: 'PARTIAL',
-          doneLots: b.doneLots,
-          remainingLots: b.remainingLots,
-        });
+        return { status: 'PARTIAL', doneLots: b.doneLots, remainingLots: b.remainingLots };
       case 'DONE': {
         this.effects.push(command.commandId);
         const remaining = b.remainingLots ?? (command.op === 'CLOSE' ? '0' : null);
-        return Promise.resolve({
+        return {
           status: 'DONE',
           ref: b.ref ?? '1',
           remainingLots: remaining === null ? null : new D(remaining).toString(),
-        });
+        };
       }
     }
   }

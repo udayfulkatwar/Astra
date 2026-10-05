@@ -17,7 +17,11 @@ const env = (k: string): string => {
 
 const sql = createDb({ url: env('CHILD_DB_URL'), schema: env('CHILD_SCHEMA'), maxConnections: 2 });
 const journal = new PgBridgeJournal(sql);
-const fence = { ownerId: env('CHILD_OWNER'), epoch: env('CHILD_EPOCH') };
+const fence = {
+  accountRef: env('CHILD_ACCOUNT'),
+  ownerId: env('CHILD_OWNER'),
+  epoch: env('CHILD_EPOCH'),
+};
 const parsed = parseCommand(JSON.parse(env('CHILD_COMMAND')));
 if (!parsed.ok) throw new Error('child command invalid');
 const command = parsed.command;
@@ -28,14 +32,16 @@ if (mode === 'crash-after-begin') {
   process.kill(process.pid, 'SIGKILL');
 } else if (mode === 'crash-after-marker') {
   await journal.begin(fence, command);
-  await journal.markSendMayHaveStarted(fence, command.accountRef, command.commandId);
+  await journal.markSendMayHaveStarted(fence, command.accountRef, command.commandId, {
+    nowIso: '2026-10-05T10:00:10.000Z',
+  });
   process.kill(process.pid, 'SIGKILL');
 } else {
   const terminal = new FakeTerminal();
   const bridge = new OfflineBridge(journal, terminal, fence);
   const outcome = await bridge.execute(command, {
-    now: new Date('2026-10-05T10:00:10.000Z'),
-    entryPermitted: true,
+    clock: () => new Date('2026-10-05T10:00:10.000Z'),
+    entryPermitted: () => true,
   });
   process.stdout.write(
     JSON.stringify({ kind: outcome.kind, invocations: terminal.invocations.length }) + '\n',

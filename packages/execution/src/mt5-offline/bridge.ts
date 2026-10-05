@@ -1,20 +1,30 @@
 /**
  * Offline bridge runner: validate → journal intent → (gates) → durable SEND_MAY_HAVE_STARTED →
- * fake transport → record. It decides nothing about trading; ASTRA's gateway does. Rules:
+ * fake transport (re-reading the gates at its write boundary) → record. It decides nothing about
+ * trading; ASTRA's gateway does. Rules:
  *
- *  - Invalid input fails before any write.
+ *  - Invalid input fails before any write; the command is dispatched from the detached, persisted
+ *    snapshot, never from caller-owned memory.
  *  - The irreversible marker is COMMITTED before the transport is called; a failed persist means
  *    the transport is NOT invoked.
  *  - Same id + same payload replays; same id + different payload is refused; an intent that
  *    reached SEND_MAY_HAVE_STARTED is never resent (UNKNOWN is preserved).
- *  - Entry gates (expiry, reconcile-required, permission) apply to ENTRIES only. A protective
- *    command stays a durable pending INTENT when it cannot run now and is retried by
- *    drainProtective; it is never discarded because of an entry gate or an expired entry command.
+ *  - The clock and the entry gate are INJECTED suppliers read fresh at each decision point and
+ *    again at the write boundary. Entry gates (invalid clock, issuedAt in the future, expiry,
+ *    reconcile-required, permission !== true) apply to ENTRIES only. A protective command stays a
+ *    durable pending INTENT when it cannot run now and is retried by drainProtective.
+ *  - A result that cannot be persisted is reported UNKNOWN, never RESOLVED.
  */
 import { D } from '@astra/core';
-import { commandClass, parseCommand, payloadHash, type BridgeCommand } from './contract';
+import { commandClass, parseCommand, type BridgeCommand } from './contract';
 import type { BridgeJournal, CloseStatus, JournalRecord, StoredResult } from './journal';
-import type { BridgeTransport, Fence, TransportResult } from './transport';
+import type {
+  BoundaryVerdict,
+  BridgeTransport,
+  Fence,
+  TransportResult,
+  WriteBoundary,
+} from './transport';
 import { validateTransportResult } from './transport';
 
 export type BridgeOutcome =
@@ -27,10 +37,11 @@ export type BridgeOutcome =
   | { readonly kind: 'UNKNOWN'; readonly result: StoredResult | null }
   | { readonly kind: 'NOT_SENT'; readonly reason: string };
 
-export interface BridgeContext {
-  readonly now: Date;
-  /** ENTRY permission (trade-allowed, fresh quotes, …) decided by the caller; never affects protective. */
-  readonly entryPermitted: boolean;
+/** Injected suppliers, read fresh every time (never a value captured before an await). */
+export interface BridgeRuntime {
+  readonly clock: () => Date;
+  /** ENTRY permission only (trade-allowed, fresh quotes, …). Anything but `true` denies. */
+  readonly entryPermitted: () => boolean | Promise<boolean>;
 }
 
 export function classifyClose(r: TransportResult | null): CloseStatus | null {
@@ -42,11 +53,30 @@ export function classifyClose(r: TransportResult | null): CloseStatus | null {
       return new D(r.remainingLots).isZero() ? 'CLOSED' : 'PARTIAL';
     case 'PARTIAL':
       return 'PARTIAL';
-    case 'NOT_FOUND':
-      return 'NOT_FOUND';
     case 'REJECTED':
-    case 'FENCED':
       return 'REJECTED';
+    case 'NOT_FOUND': // absence is not closure proof in this model
+    case 'FENCED':
+    case 'BOUNDARY_REFUSED':
+      return null;
+  }
+}
+
+function validNow(runtime: BridgeRuntime): Date | null {
+  let t: unknown;
+  try {
+    t = runtime.clock();
+  } catch {
+    return null;
+  }
+  return t instanceof Date && Number.isFinite(t.getTime()) ? t : null;
+}
+
+async function permitted(runtime: BridgeRuntime): Promise<boolean> {
+  try {
+    return (await runtime.entryPermitted()) === true;
+  } catch {
+    return false;
   }
 }
 
@@ -57,113 +87,167 @@ export class OfflineBridge {
     private readonly fence: Fence,
   ) {}
 
-  async execute(raw: unknown, ctx: BridgeContext): Promise<BridgeOutcome> {
+  async execute(raw: unknown, runtime: BridgeRuntime): Promise<BridgeOutcome> {
     const parsed = parseCommand(raw);
     if (!parsed.ok) return { kind: 'INVALID', errors: parsed.errors };
-    const command = parsed.command;
-    const begun = await this.journal.begin(this.fence, command);
+    // From here on only the detached snapshot exists; `raw` is never read again.
+    const begun = await this.journal.begin(this.fence, parsed.command);
     if (begun.kind === 'CONFLICT') return { kind: 'CONFLICT' };
-    return this.proceed(begun.record, ctx);
+    return this.proceed(begun.record, runtime);
   }
 
   /** Retries durable pending protective intents (e.g. after a restart or a lifted block). */
-  async drainProtective(accountRef: string, ctx: BridgeContext): Promise<BridgeOutcome[]> {
+  async drainProtective(accountRef: string, runtime: BridgeRuntime): Promise<BridgeOutcome[]> {
     const out: BridgeOutcome[] = [];
     for (const rec of await this.journal.pendingProtective(accountRef)) {
-      out.push(await this.proceed(rec, ctx));
+      out.push(await this.proceed(rec, runtime));
     }
     return out;
   }
 
-  private async proceed(rec: JournalRecord, ctx: BridgeContext): Promise<BridgeOutcome> {
+  /** The write-boundary re-read the fake performs just before applying an effect. */
+  boundaryFor(command: BridgeCommand, runtime: BridgeRuntime): WriteBoundary {
+    return { check: () => this.checkBoundary(command, runtime) };
+  }
+
+  private async checkBoundary(
+    command: BridgeCommand,
+    runtime: BridgeRuntime,
+  ): Promise<BoundaryVerdict> {
+    const owner = await this.journal.ownerState(command.accountRef);
+    if (owner === null) return { ok: false, reason: 'no owner' };
+    if (owner.ownerId !== this.fence.ownerId || owner.epoch !== this.fence.epoch) {
+      return { ok: false, reason: 'stale owner fence' };
+    }
+    if (commandClass(command) === 'ENTRY') {
+      const reason = await this.entryReason(command, runtime, owner.reconcileRequired);
+      if (reason !== null) return { ok: false, reason };
+    }
+    return { ok: true };
+  }
+
+  private async entryReason(
+    command: BridgeCommand,
+    runtime: BridgeRuntime,
+    reconcileRequired: boolean,
+  ): Promise<string | null> {
+    const now = validNow(runtime);
+    if (now === null) return 'invalid clock';
+    if (Date.parse(command.issuedAt) > now.getTime()) return 'issuedAt is in the future';
+    if (now.getTime() >= Date.parse(command.expiresAt)) return 'entry command expired';
+    if (reconcileRequired) return 'reconciliation required';
+    if (!(await permitted(runtime))) return 'entry not permitted';
+    return null;
+  }
+
+  private async proceed(rec: JournalRecord, runtime: BridgeRuntime): Promise<BridgeOutcome> {
     switch (rec.state) {
       case 'RESOLVED':
-        return { kind: 'RESOLVED', result: rec.result ?? { transport: null } };
+        // A RESOLVED row without a result is corrupt evidence: never fabricate one.
+        return rec.result === null
+          ? {
+              kind: 'UNKNOWN',
+              result: { transport: null, note: 'corrupt: resolved without a result' },
+            }
+          : { kind: 'RESOLVED', result: rec.result };
       case 'REFUSED':
         return { kind: 'REFUSED', reason: rec.result?.note ?? 'refused' };
       case 'SEND_MAY_HAVE_STARTED':
-        // Dispatched, no recorded result: never resend. Recorded UNKNOWN for the caller.
+        // Dispatched, no recorded result: never resend.
         return { kind: 'UNKNOWN', result: rec.result };
       case 'UNKNOWN':
         return { kind: 'UNKNOWN', result: rec.result };
       case 'INTENT':
         break;
     }
-    const cls = commandClass(rec.command);
     const owner = await this.journal.ownerState(rec.accountRef);
-    if (cls === 'ENTRY') {
-      const expired = ctx.now.getTime() >= Date.parse(rec.command.expiresAt);
-      const reason = expired
-        ? 'entry command expired'
-        : owner?.reconcileRequired
-          ? 'reconciliation required'
-          : !ctx.entryPermitted
-            ? 'entry not permitted'
-            : null;
-      if (reason !== null) {
-        await this.journal.refuse(this.fence, rec.accountRef, rec.commandId, reason);
-        return { kind: 'REFUSED', reason };
-      }
-    } else if (owner?.reconcileRequired) {
+    if (commandClass(rec.command) === 'ENTRY') {
+      const reason = await this.entryReason(rec.command, runtime, owner?.reconcileRequired ?? true);
+      if (reason !== null) return this.refuse(rec, reason);
+    } else if (owner?.reconcileRequired ?? true) {
       // Protective intent stays durably pending until ownership/reconciliation is safe.
       return { kind: 'PENDING', reason: 'reconciliation required' };
     }
-    return this.dispatch(rec);
+    return this.dispatch(rec, runtime);
   }
 
-  private async dispatch(rec: JournalRecord): Promise<BridgeOutcome> {
-    let won: boolean;
+  private async refuse(rec: JournalRecord, reason: string): Promise<BridgeOutcome> {
     try {
-      won = await this.journal.markSendMayHaveStarted(this.fence, rec.accountRef, rec.commandId);
+      await this.journal.refuse(this.fence, rec.accountRef, rec.commandId, reason);
+    } catch (err) {
+      return { kind: 'NOT_SENT', reason: err instanceof Error ? err.message : 'refuse failed' };
+    }
+    return { kind: 'REFUSED', reason };
+  }
+
+  private async dispatch(rec: JournalRecord, runtime: BridgeRuntime): Promise<BridgeOutcome> {
+    const cmd = rec.command;
+    const nowForMarker = validNow(runtime);
+    if (commandClass(cmd) === 'ENTRY' && nowForMarker === null)
+      return this.refuse(rec, 'invalid clock');
+    let marked: 'WON' | 'LOST_RACE' | 'ENTRY_BLOCKED';
+    try {
+      marked = await this.journal.markSendMayHaveStarted(
+        this.fence,
+        rec.accountRef,
+        rec.commandId,
+        {
+          nowIso: (nowForMarker ?? new Date(0)).toISOString(),
+        },
+      );
     } catch (err) {
       // The marker is not durable: the terminal is NOT invoked.
       return { kind: 'NOT_SENT', reason: err instanceof Error ? err.message : 'persist failed' };
     }
-    if (!won) return { kind: 'IN_FLIGHT' };
+    if (marked === 'LOST_RACE') return { kind: 'IN_FLIGHT' };
+    if (marked === 'ENTRY_BLOCKED') return this.refuse(rec, 'entry blocked at the marker');
 
     let reply: unknown;
     try {
-      reply = await this.transport.invoke(rec.command, this.fence);
+      reply = await this.transport.invoke(cmd, this.fence, this.boundaryFor(cmd, runtime));
     } catch {
-      const result: StoredResult = { transport: null, note: 'transport error' };
-      await this.recordSafely(rec, 'UNKNOWN', result);
-      return { kind: 'UNKNOWN', result };
+      return this.settle(rec, 'UNKNOWN', { transport: null, note: 'transport error' });
     }
-    const validated = validateTransportResult(reply);
+    const validated = validateTransportResult(reply, cmd);
     if (validated === null) {
-      const result: StoredResult = { transport: null, note: 'malformed reply' };
-      await this.recordSafely(rec, 'UNKNOWN', result);
-      return { kind: 'UNKNOWN', result };
+      return this.settle(rec, 'UNKNOWN', {
+        transport: null,
+        note: 'malformed or incoherent reply',
+      });
+    }
+    if (validated.status === 'FENCED' || validated.status === 'BOUNDARY_REFUSED') {
+      // The marker is committed, so the row stays conservative (UNKNOWN) and is never resent.
+      const note = validated.status === 'FENCED' ? 'fenced at the boundary' : validated.reason;
+      return this.settle(rec, 'UNKNOWN', { transport: validated, note });
     }
     if (rec.op === 'CLOSE') {
       const closeStatus = classifyClose(validated);
       if (closeStatus === null) {
-        const result: StoredResult = { transport: validated, note: 'close remainder unproven' };
-        await this.recordSafely(rec, 'UNKNOWN', result);
-        return { kind: 'UNKNOWN', result };
+        return this.settle(rec, 'UNKNOWN', {
+          transport: validated,
+          note: 'close outcome unproven',
+        });
       }
-      const result: StoredResult = { transport: validated, closeStatus };
-      await this.recordSafely(rec, 'RESOLVED', result);
-      return { kind: 'RESOLVED', result };
+      return this.settle(rec, 'RESOLVED', { transport: validated, closeStatus });
     }
-    const result: StoredResult = { transport: validated };
-    await this.recordSafely(rec, 'RESOLVED', result);
-    return { kind: 'RESOLVED', result };
+    return this.settle(rec, 'RESOLVED', { transport: validated });
   }
 
-  /** A failed result write leaves SEND_MAY_HAVE_STARTED in place (still never resent). */
-  private async recordSafely(
+  /** The outcome is reported only if it was durably recorded; otherwise it is UNKNOWN. */
+  private async settle(
     rec: JournalRecord,
     state: 'RESOLVED' | 'UNKNOWN',
     result: StoredResult,
-  ): Promise<void> {
+  ): Promise<BridgeOutcome> {
     try {
       await this.journal.recordResult(this.fence, rec.accountRef, rec.commandId, state, result);
     } catch {
-      /* state stays SEND_MAY_HAVE_STARTED: dispatched, never resent */
+      // The row stays SEND_MAY_HAVE_STARTED (dispatched, never resent); the caller learns UNKNOWN.
+      return {
+        kind: 'UNKNOWN',
+        result: { transport: null, note: 'result could not be persisted' },
+      };
     }
+    return state === 'RESOLVED' ? { kind: 'RESOLVED', result } : { kind: 'UNKNOWN', result };
   }
 }
-
-export { payloadHash };
-export type { BridgeCommand };

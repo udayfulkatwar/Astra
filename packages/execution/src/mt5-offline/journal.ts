@@ -35,6 +35,12 @@ export type BeginOutcome =
   | { readonly kind: 'REPLAY'; readonly record: JournalRecord }
   | { readonly kind: 'CONFLICT' };
 
+/** Evaluated inside the atomic marker step; only ENTRY commands are subject to it. */
+export interface MarkerGuard {
+  /** A fresh, valid UTC instant (ISO) read immediately before the call. */
+  readonly nowIso: string;
+}
+
 export interface OwnerState {
   readonly ownerId: string;
   readonly epoch: string;
@@ -59,7 +65,7 @@ export interface TakeoverEvidence {
 }
 
 export interface BridgeJournal {
-  /** First owner only. An existing owner row ⇒ BUSY, however old it is (no handoff by expiry). */
+  /** First owner only. An existing owner row ⇒ BUSY, however old it is (no handoff by expiry). The fence is bound to `accountRef`. */
   acquireOwner(accountRef: string, ownerId: string): Promise<Fence>;
   /** Explicit evidence-based handoff: bumps the epoch and requires reconciliation before entries. */
   takeover(accountRef: string, newOwnerId: string, evidence: TakeoverEvidence): Promise<Fence>;
@@ -70,9 +76,16 @@ export interface BridgeJournal {
   begin(fence: Fence, command: BridgeCommand): Promise<BeginOutcome>;
   /**
    * Compare-and-swap INTENT → SEND_MAY_HAVE_STARTED, committed before the transport is called.
-   * Returns false when another caller already moved it (the loser must not invoke).
+   * LOST_RACE: another caller already moved it (the loser must not invoke). ENTRY_BLOCKED: for an
+   * ENTRY the guard failed INSIDE the atomic step (reconciliation required, or expired at `nowIso`);
+   * the row stays an unsent INTENT.
    */
-  markSendMayHaveStarted(fence: Fence, accountRef: string, commandId: string): Promise<boolean>;
+  markSendMayHaveStarted(
+    fence: Fence,
+    accountRef: string,
+    commandId: string,
+    guard: MarkerGuard,
+  ): Promise<'WON' | 'LOST_RACE' | 'ENTRY_BLOCKED'>;
   recordResult(
     fence: Fence,
     accountRef: string,

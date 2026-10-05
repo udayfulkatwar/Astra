@@ -13,6 +13,7 @@ import {
   OfflineBridge,
   encodeAccountRef,
   parseCommand,
+  payloadHash,
   type BridgeCommand,
   type BridgeJournal,
   type BridgeTransport,
@@ -25,7 +26,13 @@ import { TEST_DB_URL, createTestDb, dbAvailable, type TestDb } from './helpers';
 const available = await dbAvailable();
 const ACCOUNT = encodeAccountRef('Demo-Server', '9007199254740993');
 const NOW = new Date('2026-10-05T10:00:10.000Z');
-const CTX = { now: NOW, entryPermitted: true };
+const GUARD = { nowIso: '2026-10-05T10:00:10.000Z' };
+const rt = (now: Date = NOW, permitted: () => boolean | Promise<boolean> = () => true) => ({
+  clock: () => now,
+  entryPermitted: permitted,
+});
+const CTX = rt();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const wire = (over: Record<string, unknown> = {}) => ({
   v: 1,
@@ -125,9 +132,12 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
     it('the marker is a compare-and-swap: of 20 concurrent callers exactly one wins and may invoke', async () => {
       await journal.begin(fence, cmd(wire()));
       const wins = await Promise.all(
-        Array.from({ length: 20 }, () => journal.markSendMayHaveStarted(fence, ACCOUNT, 'c1')),
+        Array.from({ length: 20 }, () =>
+          journal.markSendMayHaveStarted(fence, ACCOUNT, 'c1', GUARD),
+        ),
       );
-      expect(wins.filter(Boolean)).toHaveLength(1);
+      expect(wins.filter((w) => w === 'WON')).toHaveLength(1);
+      expect(wins.filter((w) => w === 'LOST_RACE')).toHaveLength(19);
     });
 
     it('two bridges sharing one fence racing the same command invoke the terminal at most once', async () => {
@@ -145,11 +155,11 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
       try {
         let seen: string | undefined;
         const spy: BridgeTransport = {
-          async invoke(command, f) {
+          async invoke(command, f, boundary) {
             const rows = await observer<{ state: string }[]>`
               select state from bridge_command where command_id = ${command.commandId}`;
             seen = rows[0]?.state;
-            return terminal.invoke(command, f);
+            return terminal.invoke(command, f, boundary);
           },
         };
         await new OfflineBridge(journal, spy, fence).execute(wire(), CTX);
@@ -187,7 +197,9 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
     it.each([
       ['a thrown error before any effect', { kind: 'THROW_BEFORE_EFFECT' } as const],
       ['a lost reply after the effect', { kind: 'THROW_AFTER_EFFECT' } as const],
-      ['a malformed reply', { kind: 'MALFORMED' } as const],
+      ['a malformed reply', { kind: 'RAW', reply: { status: 'WAT' } } as const],
+      ['a reply with an extra key', { kind: 'RAW', reply: { status: 'NOT_FOUND', x: 1 } } as const],
+      ['a wrong-operation reply (NOT_FOUND for a SUBMIT)', { kind: 'NOT_FOUND' } as const],
     ])('%s is UNKNOWN, replays as UNKNOWN and is never resent', async (_n, behavior) => {
       terminal.script('c1', behavior);
       const first = await bridge.execute(wire(), CTX);
@@ -250,6 +262,7 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
             CHILD_MODE: mode,
             CHILD_DB_URL: TEST_DB_URL,
             CHILD_SCHEMA: db.schema,
+            CHILD_ACCOUNT: f.accountRef,
             CHILD_OWNER: f.ownerId,
             CHILD_EPOCH: f.epoch,
             CHILD_COMMAND: JSON.stringify(command),
@@ -352,7 +365,9 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
     it('a stale fence is also refused at the marker and result writes (ownership change mid-command)', async () => {
       await journal.begin(fence, cmd(wire()));
       await journal.takeover(ACCOUNT, 'bridge-B', { oldWriterCannotAct: true, note: 'evidence' });
-      await expect(journal.markSendMayHaveStarted(fence, ACCOUNT, 'c1')).rejects.toMatchObject({
+      await expect(
+        journal.markSendMayHaveStarted(fence, ACCOUNT, 'c1', GUARD),
+      ).rejects.toMatchObject({
         code: 'LOST',
       });
       expect(await stateOf('c1')).toBe('INTENT');
@@ -365,15 +380,16 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
       });
       await journal.completeReconcile(ACCOUNT, next);
       await new OfflineBridge(journal, terminal, next).execute(wire({ commandId: 'n1' }), CTX);
-      const reply = await terminal.invoke(cmd(wire({ commandId: 'old' })), fence);
-      expect(reply).toEqual({ status: 'FENCED' });
+      const oldBoundary = bridge.boundaryFor(cmd(wire({ commandId: 'old' })), CTX);
+      const reply = await terminal.invoke(cmd(wire({ commandId: 'old' })), fence, oldBoundary);
+      expect(reply).toMatchObject({ status: 'BOUNDARY_REFUSED', reason: 'stale owner fence' });
       expect(terminal.effects).not.toContain('old');
     });
   });
 
   describe('entry gates apply to entries only; protective intents stay durable', () => {
     it('an expired entry is REFUSED (persisted, never sent) while an expired protective close still runs', async () => {
-      const late = { now: new Date('2026-10-05T11:00:00.000Z'), entryPermitted: true };
+      const late = rt(new Date('2026-10-05T11:00:00.000Z'));
       expect(await bridge.execute(wire({ commandId: 'e1' }), late)).toEqual({
         kind: 'REFUSED',
         reason: 'entry command expired',
@@ -385,7 +401,7 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
     });
 
     it('entry permission denied refuses entries but never blocks a protective cancel or close', async () => {
-      const denied = { now: NOW, entryPermitted: false };
+      const denied = rt(NOW, () => false);
       expect((await bridge.execute(wire({ commandId: 'e1' }), denied)).kind).toBe('REFUSED');
       expect((await bridge.execute(close('p1'), denied)).kind).toBe('RESOLVED');
       const cancel = wire({ op: 'CANCEL', commandId: 'p2', payload: { orderId: '77' } });
@@ -457,10 +473,221 @@ describe.skipIf(!available)('P002 offline bridge journal (PostgreSQL, fake trans
       );
     });
 
-    it('NOT_FOUND is recorded as the fake model status only, never as proven closure', async () => {
+    it('NOT_FOUND for a close is unsupported in the model: UNKNOWN, never proven closure', async () => {
       terminal.script('p1', { kind: 'NOT_FOUND' });
       const out = await bridge.execute(close('p1'), CTX);
-      expect(out).toMatchObject({ kind: 'RESOLVED', result: { closeStatus: 'NOT_FOUND' } });
+      expect(out).toMatchObject({ kind: 'UNKNOWN', result: { note: 'close outcome unproven' } });
+    });
+
+    it('incoherent quantities are not outcomes: partial against a request that names other lots, DONE above the asked remainder', async () => {
+      terminal.script('p1', { kind: 'PARTIAL', doneLots: '0.04', remainingLots: '0.07' });
+      expect(
+        (
+          await bridge.execute(
+            close('p1', { payload: { positionIdentifier: '5', lots: '0.10' } }),
+            CTX,
+          )
+        ).kind,
+      ).toBe('UNKNOWN');
+      terminal.script('p2', { kind: 'DONE', remainingLots: '0.50' });
+      expect(
+        (
+          await bridge.execute(
+            close('p2', { payload: { positionIdentifier: '5', lots: '0.10' } }),
+            CTX,
+          )
+        ).kind,
+      ).toBe('UNKNOWN');
+      terminal.script('s1', { kind: 'PARTIAL', doneLots: '0.04', remainingLots: '0.06' });
+      expect(await bridge.execute(wire({ commandId: 's1' }), CTX)).toMatchObject({
+        kind: 'RESOLVED',
+        result: { transport: { status: 'PARTIAL' } },
+      });
+    });
+  });
+
+  describe('CEO review repairs: detached snapshot, clock/gate, persistence, boundary, account-bound fence', () => {
+    it('a caller mutating the raw command during the begin await changes neither what is sent nor what is hashed', async () => {
+      const slow: BridgeJournal = Object.create(journal) as BridgeJournal;
+      slow.begin = async (f, c) => {
+        await sleep(60);
+        return journal.begin(f, c);
+      };
+      const raw = wire();
+      const p = new OfflineBridge(slow, terminal, fence).execute(raw, CTX);
+      (raw.payload as Record<string, string>).lots = '99';
+      raw.accountRef = encodeAccountRef('Other', '7');
+      raw.expiresAt = '2030-01-01T00:00:00.000Z';
+      expect((await p).kind).toBe('RESOLVED');
+      const sent = terminal.invocations[0]?.command;
+      expect(sent && 'lots' in sent.payload && sent.payload.lots).toBe('0.10');
+      const rec = await journal.get(ACCOUNT, 'c1');
+      expect(rec && payloadHash(rec.command)).toBe(rec?.payloadHash);
+      expect(rec?.command.expiresAt).toBe('2026-10-05T10:00:30.000Z');
+    });
+
+    it('impossible calendar dates and invalid times are rejected before any write', async () => {
+      for (const t of [
+        '2026-02-30T10:00:00.000Z',
+        '2025-02-29T10:00:00.000Z',
+        '2026-04-31T10:00:00.000Z',
+        '2026-13-01T10:00:00.000Z',
+        '2026-01-01T24:00:00.000Z',
+        '2026-01-01T10:60:00.000Z',
+        '2026-01-01T10:00:60.000Z',
+        '0000-01-01T10:00:00.000Z',
+      ])
+        expect(
+          (await bridge.execute(wire({ issuedAt: t, expiresAt: '2030-01-01T00:00:00.000Z' }), CTX))
+            .kind,
+        ).toBe('INVALID');
+      expect(
+        (
+          await bridge.execute(
+            wire({ issuedAt: '2024-02-29T10:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z' }),
+            rt(new Date('2026-10-05T10:00:10Z')),
+          )
+        ).kind,
+      ).toBe('RESOLVED');
+      expect(await count('bridge_command')).toBe(1);
+    });
+
+    it('oversized or non-plain inputs are bounded before heavy parsing', async () => {
+      const big = 'x'.repeat(200_000);
+      for (const bad of [
+        wire({ accountRef: 'mt5:' + big }),
+        wire({ payload: { orderId: '9'.repeat(50_000) }, op: 'CANCEL' }),
+        wire({ commandId: big }),
+        Object.assign(Object.create({ inherited: 1 }) as object, wire()),
+      ])
+        expect((await bridge.execute(bad, CTX)).kind).toBe('INVALID');
+      expect(await count('bridge_command')).toBe(0);
+    });
+
+    it.each([
+      ['an invalid (NaN) clock', () => rt(new Date(NaN))],
+      ['entryPermitted undefined', () => rt(NOW, (() => undefined) as unknown as () => boolean)],
+      ['entryPermitted truthy but not true', () => rt(NOW, (() => 1) as unknown as () => boolean)],
+      [
+        'entryPermitted throwing',
+        () =>
+          rt(NOW, () => {
+            throw new Error('gate down');
+          }),
+      ],
+      ['an issuedAt in the future', () => rt(new Date('2026-10-05T09:00:00.000Z'))],
+    ])('entries are refused on %s and never sent', async (_n, mk) => {
+      expect((await bridge.execute(wire(), mk())).kind).toBe('REFUSED');
+      expect(terminal.invocations).toHaveLength(0);
+      expect(await stateOf('c1')).toBe('REFUSED');
+    });
+
+    it('an entry that expires while the marker is waiting is not applied by the fake (boundary re-read); the committed marker stays conservative', async () => {
+      let t = new Date('2026-10-05T10:00:10.000Z');
+      const delayed: BridgeJournal = Object.create(journal) as BridgeJournal;
+      delayed.markSendMayHaveStarted = async (...a) => {
+        await sleep(40);
+        t = new Date('2026-10-05T11:00:00.000Z'); // expiry passes DURING the wait
+        return journal.markSendMayHaveStarted(...a);
+      };
+      const out = await new OfflineBridge(delayed, terminal, fence).execute(wire(), {
+        clock: () => t,
+        entryPermitted: () => true,
+      });
+      expect(terminal.effects).toHaveLength(0);
+      expect(out.kind).toBe('UNKNOWN'); // marker committed at the instant it was read; the boundary re-read refuses
+      expect(await stateOf('c1')).toBe('UNKNOWN');
+    });
+
+    it('permission revoked after the marker commits: the fake boundary refuses, no effect, state UNKNOWN and never resent', async () => {
+      let allowed = true;
+      const gate = () => allowed;
+      const spy: BridgeTransport = {
+        async invoke(c, f, b) {
+          allowed = false; // revoked while the call is in flight
+          return terminal.invoke(c, f, b);
+        },
+      };
+      const out = await new OfflineBridge(journal, spy, fence).execute(wire(), rt(NOW, gate));
+      expect(out.kind).toBe('UNKNOWN');
+      expect(terminal.effects).toHaveLength(0);
+      expect(await stateOf('c1')).toBe('UNKNOWN');
+      expect((await bridge.execute(wire(), CTX)).kind).toBe('UNKNOWN');
+      expect(terminal.invocations).toHaveLength(1);
+    });
+
+    it('reconcile-required set between the owner read and the marker blocks the ENTRY inside the atomic step but not a protective close', async () => {
+      const racing: BridgeJournal = Object.create(journal) as BridgeJournal;
+      const realOwner = journal.ownerState.bind(journal);
+      racing.ownerState = async (a) => {
+        const s = await realOwner(a);
+        await db.sql`update bridge_owner set reconcile_required = true`; // flips right after the read
+        return s;
+      };
+      const out = await new OfflineBridge(racing, terminal, fence).execute(wire(), CTX);
+      expect(out).toEqual({ kind: 'REFUSED', reason: 'entry blocked at the marker' });
+      expect(terminal.invocations).toHaveLength(0);
+      await db.sql`update bridge_owner set reconcile_required = false`;
+      await bridge.execute(close('p1'), CTX);
+      expect(terminal.effects).toEqual(['p1']);
+    });
+
+    it('a result that cannot be persisted is reported UNKNOWN on the first call and on replay, never RESOLVED', async () => {
+      const flaky: BridgeJournal = Object.create(journal) as BridgeJournal;
+      flaky.recordResult = () => Promise.reject(new Error('connection lost'));
+      const first = await new OfflineBridge(flaky, terminal, fence).execute(wire(), CTX);
+      expect(first.kind).toBe('UNKNOWN');
+      expect(await stateOf('c1')).toBe('SEND_MAY_HAVE_STARTED');
+      expect((await bridge.execute(wire(), CTX)).kind).toBe('UNKNOWN');
+      expect(terminal.invocations).toHaveLength(1);
+    });
+
+    it('a RESOLVED row with no stored result (corruption) replays as UNKNOWN, not a fabricated result', async () => {
+      await bridge.execute(wire(), CTX);
+      await db.sql`alter table bridge_command disable trigger bridge_command_guard`;
+      await db.sql`update bridge_command set result = null`;
+      await db.sql`alter table bridge_command enable trigger bridge_command_guard`;
+      const again = await bridge.execute(wire(), CTX);
+      expect(again).toMatchObject({
+        kind: 'UNKNOWN',
+        result: { note: 'corrupt: resolved without a result' },
+      });
+    });
+
+    it('a delayed OLD writer is refused at the fake boundary after a DB takeover, before any new write', async () => {
+      const oldTerminal = new FakeTerminal();
+      const delayed: BridgeTransport = {
+        async invoke(c, f, b) {
+          await sleep(80);
+          return oldTerminal.invoke(c, f, b);
+        },
+      };
+      const p = new OfflineBridge(journal, delayed, fence).execute(wire(), CTX);
+      await sleep(30);
+      await journal.takeover(ACCOUNT, 'bridge-B', { oldWriterCannotAct: true, note: 'evidence' });
+      const out = await p;
+      expect(oldTerminal.effects).toHaveLength(0);
+      expect(out.kind).toBe('UNKNOWN');
+    });
+
+    it('the same owner id and epoch number never authorises another account (fence is account-bound)', async () => {
+      const other = encodeAccountRef('Demo-Server', '2');
+      const fenceB = await journal.acquireOwner(other, 'bridge-A'); // same ownerId, same epoch '1'
+      expect(fenceB.epoch).toBe(fence.epoch);
+      expect(fenceB.ownerId).toBe(fence.ownerId);
+      await expect(journal.begin(fence, cmd(wire({ accountRef: other })))).rejects.toMatchObject({
+        code: 'LOST',
+      });
+      await expect(
+        new OfflineBridge(journal, terminal, fence).execute(wire({ accountRef: other }), CTX),
+      ).rejects.toMatchObject({ code: 'LOST' });
+      expect(terminal.invocations).toHaveLength(0);
+      // The fake refuses a mismatched fence too.
+      const reply = await terminal.invoke(cmd(wire({ accountRef: other })), fence, {
+        check: () => Promise.resolve({ ok: true }),
+      });
+      expect(reply).toEqual({ status: 'FENCED' });
+      expect(terminal.effects).toHaveLength(0);
     });
   });
 });

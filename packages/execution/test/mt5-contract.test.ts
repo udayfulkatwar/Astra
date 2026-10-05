@@ -19,6 +19,11 @@ const base = {
   issuedAt: '2026-10-05T10:00:00.000Z',
   expiresAt: '2026-10-05T10:00:30.000Z',
 };
+const cmd = (raw: unknown): BridgeCommand => {
+  const p = parseCommand(raw);
+  if (!p.ok) throw new Error(p.errors.join(';'));
+  return p.command;
+};
 const submit = (over: Record<string, unknown> = {}, payload: Record<string, unknown> = {}) => ({
   ...base,
   op: 'SUBMIT',
@@ -139,14 +144,74 @@ describe('P002 offline contract v1 (pure validation; no terminal, no network)', 
     ).toBeNull();
   });
 
-  it('a malformed fake-terminal reply is not an outcome', () => {
-    expect(validateTransportResult({ status: 'WAT' })).toBeNull();
-    expect(validateTransportResult({ status: 'DONE', ref: 5, remainingLots: null })).toBeNull();
-    expect(
-      validateTransportResult({ status: 'PARTIAL', doneLots: '1', remainingLots: '0' }),
-    ).toBeNull();
-    expect(validateTransportResult(null)).toBeNull();
-    expect(validateTransportResult({ status: 'NOT_FOUND' })).toEqual({ status: 'NOT_FOUND' });
+  it('replies are validated per operation, with exact keys, bounds and coherent quantities', () => {
+    const sub = cmd(submit());
+    const cls = cmd({ ...base, op: 'CLOSE', payload: { positionIdentifier: '9', lots: '0.10' } });
+    const cnl = cmd({ ...base, op: 'CANCEL', payload: { orderId: '9' } });
+    const v = validateTransportResult;
+    expect(v({ status: 'WAT' }, sub)).toBeNull();
+    expect(v(null, sub)).toBeNull();
+    expect(v({ status: 'DONE', ref: 5, remainingLots: null }, sub)).toBeNull();
+    expect(v({ status: 'DONE', ref: '5', remainingLots: null, x: 1 }, sub)).toBeNull();
+    expect(v({ status: 'DONE', ref: '5', remainingLots: '0' }, sub)).toBeNull();
+    expect(v({ status: 'DONE', ref: '5', remainingLots: null }, sub)).not.toBeNull();
+    expect(v({ status: 'NOT_FOUND' }, sub)).toBeNull();
+    expect(v({ status: 'NOT_FOUND' }, cnl)).toEqual({ status: 'NOT_FOUND' });
+    expect(v({ status: 'PARTIAL', doneLots: '0.05', remainingLots: '0.05' }, cnl)).toBeNull();
+    expect(v({ status: 'PARTIAL', doneLots: '1', remainingLots: '0' }, cls)).toBeNull();
+    expect(v({ status: 'PARTIAL', doneLots: '0', remainingLots: '0.10' }, cls)).toBeNull();
+    expect(v({ status: 'PARTIAL', doneLots: '0.04', remainingLots: '0.07' }, cls)).toBeNull();
+    expect(v({ status: 'PARTIAL', doneLots: '0.04', remainingLots: '0.06' }, cls)).not.toBeNull();
+    expect(v({ status: 'DONE', ref: null, remainingLots: null }, cls)).toBeNull();
+    expect(v({ status: 'DONE', ref: null, remainingLots: '0.20' }, cls)).toBeNull();
+    expect(v({ status: 'REJECTED', reason: 'x'.repeat(10_000) }, sub)).toBeNull();
+  });
+
+  it('parseCommand returns a detached, frozen snapshot: later caller mutation cannot change it', () => {
+    const raw = submit();
+    const r = parseCommand(raw);
+    if (!r.ok) throw new Error('fixture invalid');
+    (raw.payload as Record<string, string>).lots = '99';
+    raw.expiresAt = '2030-01-01T00:00:00.000Z';
+    expect(r.command.payload).toMatchObject({ lots: '0.10' });
+    expect(r.command.expiresAt).toBe('2026-10-05T10:00:30.000Z');
+    expect(Object.isFrozen(r.command)).toBe(true);
+    expect(Object.isFrozen(r.command.payload)).toBe(true);
+    expect(r.command).not.toBe(raw);
+  });
+
+  it('rejects impossible calendar dates, bad times, inherited keys and oversized raw input cheaply', () => {
+    const far = '2030-01-01T00:00:00.000Z';
+    for (const t of [
+      '2026-02-30',
+      '2025-02-29',
+      '2026-04-31',
+      '2026-13-01',
+      '2026-00-10',
+      '2026-01-00',
+    ])
+      expect(parseCommand(submit({ issuedAt: `${t}T10:00:00.000Z`, expiresAt: far })).ok).toBe(
+        false,
+      );
+    for (const t of [
+      '2026-01-01T24:00:00.000Z',
+      '2026-01-01T10:60:00.000Z',
+      '2026-01-01T10:00:60.000Z',
+    ])
+      expect(parseCommand(submit({ issuedAt: t, expiresAt: far })).ok).toBe(false);
+    expect(parseCommand(submit({ issuedAt: '2024-02-29T10:00:00.000Z', expiresAt: far })).ok).toBe(
+      true,
+    );
+    expect(parseCommand(submit({ issuedAt: '2000-02-29T10:00:00.000Z', expiresAt: far })).ok).toBe(
+      true,
+    );
+    expect(parseCommand(submit({ issuedAt: '1900-02-29T10:00:00.000Z', expiresAt: far })).ok).toBe(
+      false,
+    );
+    expect(parseCommand(Object.assign(Object.create({ v: 1 }) as object, submit())).ok).toBe(false);
+    expect(parseCommand(submit({ accountRef: 'mt5:' + 'x'.repeat(100_000) })).ok).toBe(false);
+    expect(isUlongString('9'.repeat(100_000))).toBe(false);
+    expect(decodeAccountRef('mt5:' + '['.repeat(100_000))).toBeNull();
   });
 
   it('a partial close is never CLOSED; an unproven remainder is not CLOSED either', () => {
@@ -157,6 +222,7 @@ describe('P002 offline contract v1 (pure validation; no terminal, no network)', 
       'PARTIAL',
     );
     expect(classifyClose({ status: 'DONE', ref: '1', remainingLots: null })).toBeNull();
+    expect(classifyClose({ status: 'NOT_FOUND' })).toBeNull(); // absence is not closure proof
     expect(classifyClose(null)).toBeNull();
     const c = parseCommand({
       ...base,
