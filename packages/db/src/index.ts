@@ -14,3 +14,4 @@ export * from './repositories/news';
 export * from './repositories/calendar';
 export * from './repositories/ai';
 export * from './repositories/reports';
+export * from './repositories/bridge-journal';
