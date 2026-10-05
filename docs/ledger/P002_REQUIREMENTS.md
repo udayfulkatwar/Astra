@@ -37,10 +37,13 @@ from this decision; templates stay `UNVERIFIED`/`TEMPLATE` and LIVE refuses them
 Protocol-specific implementation stays blocked until the CEO reviews the MT5 route proposal and the MT5 primary pages are read; until (2),
 profile verification stays blocked; until (3), no connection. No profile is VERIFIED.
 
-## 3. What can proceed now (platform-independent)
+## 3. What can proceed now
 
-Only this requirements/acceptance matrix and founder intake. Nothing here is a generic adapter
-scaffold; protocol code starts only after the platform is known.
+This section recorded the original platform-independent preparation (historical). With MT5 confirmed
+(2026-10-05), the MT5 design/conformance plan in `P002_MT5_ROUTE.md` is CEO-reviewed/accepted as design only
+(provisional R1; not implementation-tested). The next authorized increment is offline contract, durable
+journal and fake conformance work with no SDK/terminal connection; no real adapter before the fencing and
+protective-queue design.
 
 ## 4. Requirements → evidence matrix
 
@@ -69,11 +72,9 @@ implemented or tested for any real route today.
 - Historical P001 findings stay as written (a dated addendum is recorded in `DECISIONS.md`).
 - P002 requirements preparation is **reviewed/accepted**; P002 route implementation is still **blocked and not complete**.
 
-## 6. Minimum founder information to unblock platform-specific work
+## 6. Founder information (current)
 
-1. **The trading platform** shown on the FundingPips evaluation account (name as displayed), or "no
-   account purchased yet / not decided".
-2. **Exact program, size and evaluation step** as shown on the account.
-
-Only if displayed or relevant: data feed, reward option, optional DLL and add-ons. Not requested:
-credentials, purchases, support contact, API access or data subscriptions.
+The platform (MT5) is known. Nothing further is needed from the founder for the offline design work. The
+exact program/size/evaluation step (rule profile), the terminal host OS and the account's actual margin mode
+are **future activation/profile gates**, not questions now. Not requested: credentials, purchases, support
+contact, API access or data subscriptions.

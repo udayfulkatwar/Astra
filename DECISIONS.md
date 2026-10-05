@@ -68,7 +68,7 @@ tiers are preserved as dated.
 Founder confirmed FundingPips platform MetaTrader 5 (EVALUATION); Lucid's TradeSea is secondary context
 only and opens no second route. The exact FundingPips program stays unspecified and gates only rule-profile
 mapping. MT5 is not proof of a hosted API, firm entitlement, margin mode or reliable idempotency; `magic`
-and `comment` are never idempotency receipts. The proposed route (design only, awaiting CEO review) is in
+and `comment` are never idempotency receipts. The route (design/conformance plan only, CEO-reviewed/accepted for design scope, provisional R1, not a route PASS) is in
 `docs/ledger/P002_MT5_ROUTE.md`; only the CEO's nine primary reads (§2A) are P-tier; retcode classification, OS support, `comment` behaviour and firm acceptance remain unverified. Idempotency needs a durable intent plus an irreversible send marker before the terminal call; protective actions are not lost to entry gates. No
 implementation, install, connection or credentials before CEO review. PAPER-only R004/S002 limits stand.
 

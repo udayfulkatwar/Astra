@@ -1,6 +1,6 @@
 # P002 — FundingPips (MetaTrader 5) route feasibility, design and offline conformance plan
 
-Status: **design only; revised after CEO review of `cac2c73` — final review candidate (2026-10-05 UTC). Not a route PASS.** No code, install,
+Status: **design/conformance-plan REVIEWED/ACCEPTED by the CEO (2026-10-05 UTC; provisional R1; retcode/OS/comment/firm questions persist; not implementation-tested). NOT a route PASS.** No code, install,
 terminal/account/API connection, credential, firm contact, spend, data run or LIVE. Preserves the dated
 P001 audit and the accepted `P002_REQUIREMENTS.md` (§4 matrix) as the requirement baseline.
 
@@ -19,13 +19,13 @@ Repository inspected: `BrokerAdapter` / `OrderRequest` / `BrokerOrderState` / `C
 (`packages/execution/src/types.ts`), `MarketDataAdapter` / `RawQuote` (`packages/market-data/src/adapter.ts`),
 `instrument.providerSymbols`, P001 §4–§7 and `P002_REQUIREMENTS.md`.
 
-**MetaQuotes primary pages were NOT fetched.** Direct fetches of `www.mql5.com` returned
+**Historical note (Claude's own fetch attempt):** Claude did not fetch the MetaQuotes pages. Direct fetches of `www.mql5.com` returned
 `EGRESS_BLOCKED` in this environment (`docs.mql5.com` does not resolve); a blocked fetch is not proof the
 page is unavailable. One web search returned only result titles and a short generated summary of
 `https://www.mql5.com/en/docs/python_metatrader5/mt5ordersend_py` and
-`https://www.mql5.com/en/docs/python_metatrader5`. Therefore every MT5 fact below is labelled:
+`https://www.mql5.com/en/docs/python_metatrader5`. The **current supported evidence is §2A (CEO primary reads, tier P)**. Items outside §2A keep these labels:
 
-- **[S]** seen in that search summary (still tier L until a primary read): `order_send` sends a trading
+- **[S]** seen in Claude's search summary (still tier L until a primary read): `order_send` sends a trading
   request from the terminal to the trade server; the result mirrors `MqlTradeResult` (fields `retcode`,
   `deal`, `order`, `volume`, `price`, `request_id`) and carries a copy of the request; the request has a
   `magic` EA identifier and a free-text `comment`; success is checked via `retcode`.
@@ -70,11 +70,11 @@ whether `comment` is ever altered, margin-mode behaviour on the actual account, 
 
 ## 4. Route options and recommendation
 
-| Option                                                                                             | For                                                                                                                                                                                                 | Against / risk                                                                                                                                                                                      |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **R1 — Terminal bridge: Python `MetaTrader5` package in a small sidecar** on the founder's machine | Same language family as the existing Python kit; the terminal-module surface can be replaced by an in-memory fake, so conformance runs offline with no terminal; read-only state calls are explicit | Windows-only [K]; the sidecar is external software to the terminal (firm may require an EA, P001); no event stream (poll + history reconcile)                                                       |
-| **R2 — MQL5 EA bridge** inside the terminal                                                        | The conventional "own EA" artefact a firm can assess; `OnTradeTransaction` events and in-terminal journal (Files) are strong for unknown outcomes                                                   | A second language with no repository test harness; cannot be unit-tested offline without a custom MQL5 harness; WebRequest/socket permission configuration inside the terminal                      |
-| R3 — hosted/cloud MT5 REST API                                                                     | —                                                                                                                                                                                                   | **Not assumed to exist for a retail MT5 account; third-party bridges are not accepted as facts; VPS/VPN forbidden by the firm (P001).** Rejected unless a primary source and firm permission appear |
+| Option                                                                                             | For                                                                                                                                                                                                                                                      | Against / risk                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R1 — Terminal bridge: Python `MetaTrader5` package in a small sidecar** on the founder's machine | Same language family as the existing Python kit; the terminal-module surface can be replaced by an in-memory fake; read-only state calls are explicit                                                                                                    | OS compatibility for the founder's machine is **unverified** (docs' Windows example is not proof either way); the sidecar is external software to the terminal (firm may require an EA, P001); no event stream (poll + history reconcile) |
+| **R2 — MQL5 EA bridge** inside the terminal                                                        | The conventional "own EA" artefact a firm can assess; `OnTradeTransaction` events and an in-terminal journal can help but are **not proof**: events can overwrite or arrive out of order (P, §2A) and the journal must be made durable and is not proven | A second language; the MQL5 code itself needs its own harness (the protocol side can be faked offline); WebRequest/socket permission configuration inside the terminal                                                                    |
+| R3 — hosted/cloud MT5 REST API                                                                     | —                                                                                                                                                                                                                                                        | **Not assumed to exist for a retail MT5 account; third-party bridges are not accepted as facts; VPS/VPN forbidden by the firm (P001).** Rejected unless a primary source and firm permission appear                                       |
 
 **Recommendation (an engineering choice, not a constraint): R1 primary, R2 fallback, behind ONE ASTRA-side
 protocol (§6).** Reasons: (1) the Python package keeps all MT5 code in testable Python and exposes
@@ -109,18 +109,22 @@ bridge (token from an env var name in config; no secrets in the repository or ch
 password never leave the founder's machine.
 
 1. **Hello:** bridge sends `{protocolVersion, bridgeVersion, route: R1|R2, bridgeInstanceId (fresh), codeHash}`.
-2. **Terminal facts:** terminal build, connected-to-server flag, account login, server, currency, margin
-   mode, trade-allowed flags, server-time offset sample and symbol list. ASTRA **refuses** the session unless
-   every field is present, margin mode is HEDGING, trading is allowed, and login+server equal the configured
-   `accountRef`.
-3. **Ownership:** ASTRA grants one session lease per account (advisory-lock style, as R004 does for PAPER —
-   a **new design for a real route**; R004 fences are PAPER-only and do not apply). A second bridge or a
-   restarted bridge with a new `bridgeInstanceId` is a new lease and starts with full reconciliation.
-4. **Reconcile before trade:** bridge returns positions, open orders and journal-vs-history findings;
-   ASTRA compares with its ledger; any mismatch or `UNKNOWN` entry ⇒ account quarantined, entries blocked.
-5. **Heartbeat/time:** monotonic sequence numbers and heartbeat; a gap, duplicate, reordering or stale
-   frame ⇒ the session is unhealthy and writes are refused. Commands carry an ASTRA command id and
-   expiry; the bridge never executes an expired command.
+2. **Identity and capability facts:** terminal build, connected flag, account login, server, currency, margin
+   mode, symbol list, and per-clock-domain fields `{domain, source, ageMs}` (Python tick epochs are UTC with no
+   offset applied, P; `TimeCurrent` and `TimeTradeServer` are reported as their own domains, never merged).
+   **Authenticated account/owner identity is established separately from entry permission:** ASTRA refuses the
+   session unless login+server equal the configured `accountRef`. `trade_allowed`, margin mode, symbol
+   trade-mode and quote freshness are **entry-permission facts**: failing them denies ENTRIES only and never
+   closes the read-only or protective channel.
+3. **Ownership:** one session lease per account (a **new design for a real route**; R004 fences are PAPER-only).
+   **A restart or new `bridgeInstanceId` does not obtain a new automatic lease:** the account stays blocked
+   until the old writer provably cannot act and reconciliation completes; no owner handoff by expiry.
+4. **Reconcile before trade:** positions, open orders and journal-vs-history findings; ASTRA compares with its
+   ledger; any mismatch or `UNKNOWN` entry ⇒ account quarantined, entries blocked.
+5. **Heartbeat:** monotonic sequence numbers; a gap, duplicate, reordering or stale frame ⇒ unhealthy session,
+   entry writes refused. Commands carry an id and expiry. An expired or gapped **entry** command fails closed
+   (never executed); a **protective** intent remains durably pending and is revalidated under account/ownership
+   safety (never discarded).
 6. **Commands/results:** `submit`, `cancel`, `close`, `get_order`, `list_open`, `snapshot`, `quotes`;
    each reply states `OK | REJECTED(reason, retcode) | UNKNOWN`. Unrecognised or malformed → `UNKNOWN`/refusal.
 
@@ -133,7 +137,7 @@ password never leave the founder's machine.
 5. Ambiguous/timed-out `order_send` ⇒ `UNKNOWN`; the durable marker, quarantine and reservations persist; release only on authoritative evidence; contradictory evidence ⇒ durable quarantine.
 6. `magic`/`comment` are never unique receipts; adoption needs more than a found hint; "not found" in bounded history never proves "never executed".
 7. **Stale-writer fencing:** the lease/owner fence must be checked **at the terminal write boundary**; lease expiry alone cannot stop a stale process; no automatic owner handoff unless the old writer demonstrably cannot act. Terminal-boundary fencing is **unresolved implementation proof**.
-8. Netting/exchange margin mode, unknown symbol mapping, symbol trade-mode not full, or a server/login mismatch ⇒ refusal.
+8. Netting/exchange margin mode, unknown symbol mapping, or symbol trade-mode not full ⇒ refuse **ENTRIES / the unsupported route** (not a blanket block of protective actions); the broker's actual capability for a protective action is still checked at the time.
 9. Terminal disconnect or stale quotes block new entries; open positions are reconciled on reconnect.
 10. EA `OnTradeTransaction` events (R2) are never durable proof (P): arrival order and overwrites are possible; reconciliation reads state.
 11. No real-route claim may cite PAPER/R004/S002/CI evidence; each needs its own tests.
@@ -144,24 +148,27 @@ A deterministic in-memory fake terminal/trade server (scriptable retcodes, laten
 fills, history windows, comment truncation) drives the bridge, and the bridge drives the ASTRA adapter
 through the §6 protocol. Required cases:
 
-1. Handshake: each missing/odd fact (netting mode, wrong login/server, trading disabled, no server time) → refused.
+1. Handshake: each missing/odd fact — wrong login/server or missing clock-domain fields → session refused; netting mode, trading disabled, stale quote → ENTRIES refused while the read-only/protective channel stays available; Python-tick vs `TimeCurrent`/`TimeTradeServer` domains stay distinct (no DST/broker offset applied to a Python tick epoch).
 2. Happy submit with SL/TP; fill → `FILLED`; deal/position/order ids mapped; partial fill → `PARTIALLY_FILLED` with exact quantities.
 3. Timeout before result; timeout after fill; connection lost mid-call; duplicate `request_id`: all → `UNKNOWN`, then reconciliation resolves each, never a double order.
 4. Comment truncated/changed or `magic` collision (another EA's order with the same hint): correlation never adopts a foreign order; an unprovable case stays `UNKNOWN`.
 5. Requote/price-changed/off-quotes/market-closed/invalid-stops/no-money retcodes → typed `REJECTED` vs `UNKNOWN` per the verified table.
 6. Close: normal, already closed (`NOT_FOUND` proof), partial close, close racing a server-side SL/TP hit, retry with the same `clientCloseId`.
 7. Restart: bridge restart mid-submit (journal intent without result) and ASTRA restart (lease lost) → quarantine/reconcile before any write; second bridge instance refused.
-8. Quotes: provider-timestamp source, server-time offset (including a DST shift in the broker's zone), stale tick, crossed/zero bid-ask, symbol alias mapping, delayed feed not labelled `LIVE`.
+8. Quotes: provider-timestamp source and clock-domain/source/age fields, stale tick, crossed/zero bid-ask, symbol alias mapping, delayed feed not labelled `LIVE`; no broker-timezone/DST offset is applied to a Python tick epoch (a DST shift in the broker's zone changes nothing).
 9. Account read: equity vs balance, floating P&L, margin; stale or inconsistent snapshot → non-OK.
 10. Heartbeat gaps, sequence reordering, malformed frames, expired commands, token failure.
 11. A fake-vs-real divergence guard: the fake's retcode table and field semantics are generated from the verified primary read and carry its source/date, so an unverified retcode cannot be encoded as a fact.
 12. Idempotency: same id + different payload rejected; crash after `SEND_MAY_HAVE_STARTED` and before result → retry never resends, reconciles read-only; durable lock under two concurrent callers.
 13. Foreign/manual orders and positions present: `listOpenOrders`/snapshot include them; unaccountable ones quarantine; a foreign order with a colliding `magic`/`comment` is never adopted.
-14. Position identity: ticket changes (service operation / netting-style reversal) while `POSITION_IDENTIFIER` stays; close proves identity; partial close reported with confirmed quantity, never `CLOSED`; `NOT_FOUND` only with closing evidence; unknown close outcome surfaces as a typed unknown error.
+14. Position identity: ticket changes while `POSITION_IDENTIFIER` stays; close proves identity; partial close reported with confirmed quantity, never `CLOSED`; `NOT_FOUND` only with closing evidence; unknown close outcome → typed unknown error. A netting-style reversal fixture is **unsupported**: it must refuse entries and never imply netting support.
 15. Accepted-not-filled: accepted result without a fill stays non-FILLED until order/deal reads confirm; accepted entry whose SL/TP are absent on the position → protection failure persisted and entries blocked.
 16. Stale writer: a fenced old bridge attempts a write after a new lease; the write is refused at the terminal boundary (fake enforces), including after lease expiry.
 17. Wire: tickets above 2^53 round-trip exactly as decimal strings; `accountRef` with separator-like characters cannot alias another account; lots conversion with volume step (not-representable → refuse); non-atomic snapshot with a mid-read change → non-OK.
 18. Gating: entry blocked by stale quote / trade-not-allowed / expired entry command while a protective close/cancel is still permitted per the S002 matrix; clock-domain test (Python tick UTC vs `TimeCurrent`/`TimeTradeServer`) never applies a broker offset to a Python tick epoch.
+19. Durable dedup: close and cancel with the same id + same payload replay the persisted result and never re-invoke; same id + different payload is rejected.
+20. Journal failure before the `SEND_MAY_HAVE_STARTED` marker is durable ⇒ the terminal is **not** invoked; crash after the marker ⇒ no automatic resend (read-only reconcile, quarantine retained).
+21. Restart: a restarted bridge (new instance id) gets no automatic lease and no handoff by expiry; entry commands that expired during the gap are not executed, while a pending protective intent persists and is revalidated.
 
 Offline fake conformance proves the **adapter/bridge logic against a model**, not MT5's real behaviour; a
 read-only dry run against a real terminal needs separate CEO authorization.
@@ -178,8 +185,15 @@ read-only dry run against a real terminal needs separate CEO authorization.
 | Exact FundingPips program/size/step/terms                                                                                | rule-profile mapping only (not this design)                     | UNSPECIFIED     |
 | Durable protective-action queue; real-route ownership/fencing design                                                     | any claim of lossless protection / single owner on a real route | **GAP**         |
 
+## 9A. Next authorized engineering increment (not started)
+
+Offline contract / durable journal / fake-terminal conformance implementation with **no SDK, terminal or
+connection**, after engineering review; a new detailed design for stale-writer fencing and the durable
+protective queue is required before any real adapter. The exact program is needed only for the later
+rule profile.
+
 ## 10. Not claimed
 
-No route PASS, no adapter, no verified MT5 fact, no firm entitlement, no hosted API, no unique idempotency
+No route PASS, no adapter, no real-account proof; only the specific §2A statements are verified (CEO primary reads), all other MT5 behaviour is unverified; no firm entitlement, no hosted API, no unique idempotency
 receipt from `magic`/`comment`, no live readiness. R004/S002 remain PAPER-only; the durable queue and
 real-route ownership gaps stand. TradeSea (Lucid) is secondary context and is not designed here.

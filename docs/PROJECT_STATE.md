@@ -275,7 +275,7 @@ completed-day conflicts; unclean paper sessions block accounts and recovery does
 mutations; PAPER only — a real broker adapter must supply position↔order linkage (blocks LIVE);
 no distributed takeover. **Live trading is DISABLED; no strategy has a verified edge.**
 
-## Stage 2 — firm/platform selection (IN_PROGRESS; P001 audit under CEO review)
+## Stage 2 — firm/platform selection (IN_PROGRESS; P001 PASS; P002 MT5 design accepted for design scope)
 
 `docs/ledger/P001_PLATFORM_AUDIT.md` separates CEO primary reads (P, 2026-10-04 UTC / 2026-10-05 IST),
 unverified Claude leads (L) and third-party pages (never facts). Current P facts: FundingPips 2 Step
@@ -293,8 +293,7 @@ step, feed and options are unconfirmed (the earlier 10K 2-Step Flex is a histori
 account). P002 preparation (Markdown only; CEO-reviewed/accepted for requirements scope only, not a route PASS): `docs/ledger/P002_REQUIREMENTS.md`.
 **Founder decision 2026-10-05 (later):** FundingPips platform MetaTrader 5, phase EVALUATION; Lucid platform
 TradeSea is secondary context only. Exact FundingPips program remains unspecified. MT5 route feasibility,
-design and offline conformance plan (design only, candidate for CEO review, MetaQuotes primary pages not
-yet read by Claude; nine CEO primary reads recorded as P in §2A, revised after CEO review): `docs/ledger/P002_MT5_ROUTE.md`. Durable protective queue and real-route ownership are gaps.
+design and offline conformance plan (design only; CEO-reviewed/accepted for design scope, provisional R1, not implementation-tested; CEO primary reads recorded as P in §2A; retcode/OS/comment/firm questions persist): `docs/ledger/P002_MT5_ROUTE.md`. Next authorized: offline contract/journal/fake conformance with no SDK or connection. Durable protective queue and real-route ownership are gaps.
 Earlier gates: the platform unblocks protocol-specific design and fake-server contract selection; the exact
 program/size/step/terms block rule-profile mapping; written firm/API entitlement blocks any real
 connection. Reward/DLL/add-ons are recorded as unknown/if-applicable, not assumed. No profile is
