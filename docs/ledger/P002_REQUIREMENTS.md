@@ -8,14 +8,14 @@ audit (`docs/ledger/P001_PLATFORM_AUDIT.md`, evidence tiers P/L/T unchanged) and
 
 ## 1. Founder decision (2026-10-05) and what remains unknown
 
-| Item                                                 | State                                                                                         |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Firm                                                 | **FundingPips — confirmed by the founder**                                                    |
-| Phase                                                | **EVALUATION — confirmed by the founder**                                                     |
-| Trading platform                                     | **UNKNOWN. Must not be assumed** (no MT5, cTrader, Match-Trader or other protocol is implied) |
-| Program, account size, evaluation step, terms        | UNCONFIRMED. The earlier "10K 2-Step Flex" in P001 is a historical intention, not an account  |
-| Feed, reward option, DLL, add-ons, purchase date     | UNKNOWN / if applicable — recorded only if displayed; never assumed absent                    |
-| Written firm confirmation that the route is accepted | NOT OBTAINED (P001: external own-software/API acceptance unresolved)                          |
+| Item                                                 | State                                                                                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Firm                                                 | **FundingPips — confirmed by the founder**                                                                                                              |
+| Phase                                                | **EVALUATION — confirmed by the founder**                                                                                                               |
+| Trading platform                                     | **MetaTrader 5 (MT5) — founder-confirmed 2026-10-05.** Not proof of a hosted API, firm entitlement, margin mode or idempotency; see `P002_MT5_ROUTE.md` |
+| Program, account size, evaluation step, terms        | UNSPECIFIED (blocks rule-profile mapping only). The earlier "10K 2-Step Flex" in P001 is a historical intention, not an account                         |
+| Feed, reward option, DLL, add-ons, purchase date     | UNKNOWN / if applicable — recorded only if displayed; never assumed absent                                                                              |
+| Written firm confirmation that the route is accepted | NOT OBTAINED (P001: external own-software/API acceptance unresolved)                                                                                    |
 
 "FundingPips + evaluation" does **not** specify a verified rule profile: targets, loss limits, news,
 holding and automation rules differ per program/step/terms. No `PropFirmRuleProfile` becomes VERIFIED
@@ -23,7 +23,7 @@ from this decision; templates stay `UNVERIFIED`/`TEMPLATE` and LIVE refuses them
 
 ## 2. Dependency gates (distinct)
 
-1. **Platform name** unblocks protocol-specific DESIGN and fake-server contract selection: API protocol
+1. **Platform name (now MT5, 2026-10-05)** unblocked protocol-specific DESIGN (done as a proposal in `P002_MT5_ROUTE.md`, awaiting CEO review) and fake-server contract selection: API protocol
    and auth model, the `accountRef` format, order/fill/position model (netting vs hedging, partial
    fills, protective-order attachment), reconnect/session semantics, server-time and quote sources,
    and whether `clientOrderId` is returned on orders, fills and closes.
@@ -34,7 +34,7 @@ from this decision; templates stay `UNVERIFIED`/`TEMPLATE` and LIVE refuses them
 3. **Written firm/API entitlement** for the selected route blocks any real connection or activation
    (P001 §9), not design work.
 
-Until (1) is supplied, protocol-specific contract/adapter/fake-server work stays BLOCKED; until (2),
+Protocol-specific implementation stays blocked until the CEO reviews the MT5 route proposal and the MT5 primary pages are read; until (2),
 profile verification stays blocked; until (3), no connection. No profile is VERIFIED.
 
 ## 3. What can proceed now (platform-independent)

@@ -291,7 +291,11 @@ PAPER-only. The minimum founder unknown is the exact current account (or none) w
 phase EVALUATION. The platform is NOT specified and must not be assumed; program, size, evaluation
 step, feed and options are unconfirmed (the earlier 10K 2-Step Flex is a historical intention, not an
 account). P002 preparation (Markdown only; CEO-reviewed/accepted for requirements scope only, not a route PASS): `docs/ledger/P002_REQUIREMENTS.md`.
-Gates: the platform unblocks protocol-specific design and fake-server contract selection; the exact
+**Founder decision 2026-10-05 (later):** FundingPips platform MetaTrader 5, phase EVALUATION; Lucid platform
+TradeSea is secondary context only. Exact FundingPips program remains unspecified. MT5 route feasibility,
+design and offline conformance plan (design only, candidate for CEO review, MetaQuotes primary pages not
+yet read): `docs/ledger/P002_MT5_ROUTE.md`. Durable protective queue and real-route ownership are gaps.
+Earlier gates: the platform unblocks protocol-specific design and fake-server contract selection; the exact
 program/size/step/terms block rule-profile mapping; written firm/API entitlement blocks any real
 connection. Reward/DLL/add-ons are recorded as unknown/if-applicable, not assumed. No profile is
 VERIFIED.

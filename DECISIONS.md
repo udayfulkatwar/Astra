@@ -63,6 +63,15 @@ PASS; the exact program/step/terms gate rule-profile mapping; written firm/API e
 connection). This addendum supersedes nothing: the P001 audit facts and their evidence
 tiers are preserved as dated.
 
+## P002 (Stage 2) — MT5 route decision addendum, 2026-10-05
+
+Founder confirmed FundingPips platform MetaTrader 5 (EVALUATION); Lucid's TradeSea is secondary context
+only and opens no second route. The exact FundingPips program stays unspecified and gates only rule-profile
+mapping. MT5 is not proof of a hosted API, firm entitlement, margin mode or reliable idempotency; `magic`
+and `comment` are never idempotency receipts. The proposed route (design only, awaiting CEO review) is in
+`docs/ledger/P002_MT5_ROUTE.md`; MetaQuotes facts there are unverified until a primary read. No
+implementation, install, connection or credentials before CEO review. PAPER-only R004/S002 limits stand.
+
 ## Stage 1 integration
 
 Accepted tasks are integrated by fast-forward from the last accepted head; the integrated candidate
