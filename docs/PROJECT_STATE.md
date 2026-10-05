@@ -290,9 +290,10 @@ PAPER-only. The minimum founder unknown is the exact current account (or none) w
 **Founder decision 2026-10-05 (addendum; P001 facts above unchanged):** first account firm FundingPips,
 phase EVALUATION. The platform is NOT specified and must not be assumed; program, size, evaluation
 step, feed and options are unconfirmed (the earlier 10K 2-Step Flex is a historical intention, not an
-account). P002 preparation (Markdown only, candidate for CEO review): `docs/ledger/P002_REQUIREMENTS.md`.
-Platform-specific API contract/adapter/fake-server conformance stays BLOCKED until the platform is
-known; phase rules cannot be applied until the exact program/step/terms are known. No profile is
+account). P002 preparation (Markdown only; CEO-reviewed/accepted for requirements scope only, not a route PASS): `docs/ledger/P002_REQUIREMENTS.md`.
+Gates: the platform unblocks protocol-specific design and fake-server contract selection; the exact
+program/size/step/terms block rule-profile mapping; written firm/API entitlement blocks any real
+connection. Reward/DLL/add-ons are recorded as unknown/if-applicable, not assumed. No profile is
 VERIFIED.
 
 ## Remaining (by phase)

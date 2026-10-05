@@ -58,7 +58,9 @@ specified and must never be assumed or inferred (no MT5/cTrader/Match-Trader/pro
 route); program, size, step, feed and options are unconfirmed, and "FundingPips + evaluation" does not
 yield a verified rule profile. P002 proceeds only with platform-independent requirements/intake
 (`docs/ledger/P002_REQUIREMENTS.md`); platform-specific contract, adapter and conformance work is BLOCKED
-until the platform is known. This addendum supersedes nothing: the P001 audit facts and their evidence
+until the platform is known (preparation CEO-reviewed/accepted for requirements scope only, not a route
+PASS; the exact program/step/terms gate rule-profile mapping; written firm/API entitlement gates any
+connection). This addendum supersedes nothing: the P001 audit facts and their evidence
 tiers are preserved as dated.
 
 ## Stage 1 integration
