@@ -4,13 +4,14 @@ Accepted (independent review + exact-head CI, PostgreSQL 16.x, 0 skips) vs rejec
 below are chronological per-task records; their "remaining risks" paragraphs are snapshots at that
 task, and the standing limitations are in `CEO_STATE.md` / `docs/PROJECT_STATE.md`.
 
-| Task               | Accepted code (docs head)                               | CI run / job               | Files / tests | Rejected before acceptance                                |
-| ------------------ | ------------------------------------------------------- | -------------------------- | ------------- | --------------------------------------------------------- |
-| M001               | `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28`              | 37194795717 / 111414315319 | 89 / 820      | S001-R3 `c1ba5318` (CI 813 PASS, safety FAIL)             |
-| F003               | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (`aa75c01e`) | 37230464693 / 111518851649 | 92 / 857      | `f0b2c283`, `9fc9b048` (CI typecheck)                     |
-| R004               | `8c57e6be5b7f9757bb381be26985a405804ab2c5` (`05fc2ef0`) | 37236216419 / 111535726577 | 97 / 897      | `484c9a5c` (CI PASS 37232550276, safety FAIL), `230478e8` |
-| S002               | `cee9b7a13f23ce374c189067953468a5fed45e76` (`728ac6d7`) | 37239168847 / 111544207158 | 99 / 938      | `0dd69ca2` / `11ffee72`                                   |
-| Stage 1 integrated | `dcb4f692882137d4b8081c45b393cfe24952b223` (`b9c3b890`) | 37240369181 / 111547727471 | 100 / 945     | —                                                         |
+| Task                                 | Accepted code (docs head)                                       | CI run / job               | Files / tests | Rejected before acceptance                                |
+| ------------------------------------ | --------------------------------------------------------------- | -------------------------- | ------------- | --------------------------------------------------------- |
+| M001                                 | `3cd84145ee3c73b9b80e79ff7ac2c76e7358ca28`                      | 37194795717 / 111414315319 | 89 / 820      | S001-R3 `c1ba5318` (CI 813 PASS, safety FAIL)             |
+| F003                                 | `2e75b104d57b3ac7adfcac9d7c1053f506502534` (`aa75c01e`)         | 37230464693 / 111518851649 | 92 / 857      | `f0b2c283`, `9fc9b048` (CI typecheck)                     |
+| R004                                 | `8c57e6be5b7f9757bb381be26985a405804ab2c5` (`05fc2ef0`)         | 37236216419 / 111535726577 | 97 / 897      | `484c9a5c` (CI PASS 37232550276, safety FAIL), `230478e8` |
+| S002                                 | `cee9b7a13f23ce374c189067953468a5fed45e76` (`728ac6d7`)         | 37239168847 / 111544207158 | 99 / 938      | `0dd69ca2` / `11ffee72`                                   |
+| Stage 1 integrated                   | `dcb4f692882137d4b8081c45b393cfe24952b223` (`b9c3b890`)         | 37240369181 / 111547727471 | 100 / 945     | —                                                         |
+| P002 offline (contract/journal/fake) | `d84459056f315e59a803348094014bb64b6aaa07` (offline scope only) | 37264810187 / 111619242401 | 103 / 1108    | `19bbf93a`, `be2cb5b3` (CEO safety reviews)               |
 
 The Stage 1 integrated candidate's section and its CEO acceptance record follow below.
 

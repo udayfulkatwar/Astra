@@ -41,9 +41,8 @@ profile verification stays blocked; until (3), no connection. No profile is VERI
 
 This section recorded the original platform-independent preparation (historical). With MT5 confirmed
 (2026-10-05), the MT5 design/conformance plan in `P002_MT5_ROUTE.md` is CEO-reviewed/accepted as design only
-(provisional R1; not implementation-tested). The next authorized increment is offline contract, durable
-journal and fake conformance work with no SDK/terminal connection; no real adapter before the fencing and
-protective-queue design.
+(provisional R1; not implementation-tested). The offline contract, durable journal and fake conformance are ACCEPTED at `d8445905` (offline scope only;
+`P002_OFFLINE_CONTRACT.md`). Next: the real-route fencing and protective-queue design; no real adapter before it.
 
 ## 4. Requirements → evidence matrix
 

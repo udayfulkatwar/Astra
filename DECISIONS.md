@@ -72,6 +72,15 @@ and `comment` are never idempotency receipts. The route (design/conformance plan
 `docs/ledger/P002_MT5_ROUTE.md`; only the CEO's nine primary reads (§2A) are P-tier; retcode classification, OS support, `comment` behaviour and firm acceptance remain unverified. Idempotency needs a durable intent plus an irreversible send marker before the terminal call; protective actions are not lost to entry gates. No
 implementation, install, connection or credentials before CEO review. PAPER-only R004/S002 limits stand.
 
+## P002 offline increment — acceptance, 2026-10-05
+
+The offline bridge contract v1, durable PostgreSQL journal (migration 0016) and controlled fake conformance are
+accepted at `d8445905` for OFFLINE scope only. Standing limits: controlled fake interleavings are not
+atomic DB-to-effect exclusion; takeover `oldWriterCannotAct` is caller-supplied model evidence; UNKNOWN has no
+read-only reconciliation; protective drain covers persisted INTENT only; no ADR-0027 integration; no real
+route. Migration 0016 is immutable once published (schema fixes go in 0017). The next task is a detailed
+real-route fencing and protective-queue design; no connection, SDK, LIVE or program guess.
+
 ## Stage 1 integration
 
 Accepted tasks are integrated by fast-forward from the last accepted head; the integrated candidate
